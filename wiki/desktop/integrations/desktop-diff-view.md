@@ -31,6 +31,7 @@ Render file-edit results and `git diff` shell output as readable inline diffs in
 - ANSI control sequences in shell diffs are removed before browser rendering.
 - Large structured replacements use a bounded fallback instead of quadratic line matching.
 - Diff panes scroll vertically and horizontally without widening the transcript.
+- The Source Control diff editor renders its diff (up to 512 KB) in fixed 256-line chunks: the first chunks render immediately and the rest are appended over animation frames, cancelled when the diff is replaced or the pane unmounts. Offscreen chunks use `content-visibility: auto` with an estimated intrinsic size, so their layout and paint are skipped while the text stays in the DOM for selection and copy. Rows are position-keyed rather than keyed by line text.
 - Inline transcript diffs remain inline. Source Control `git diff` actions open/select the Git Diff tab in the unified top workbench strip, which preserves its LLM review output while the user switches to conversation or Preview tabs.
 - File links opened from Git Diff activate the Preview workbench tab without closing Git Diff, allowing users to move between source and review without stacked modal dialogs or a second nested tab strip.
 - When an LLM review has actionable findings, Git Diff exposes both `Copy prompt` and `Fix in new session`. Copy places the exact resolution prompt that the new-session action would submit onto the clipboard without creating a session; after a successful clipboard write, the button briefly changes to `Copied` with a check icon as visible confirmation. Copy is disabled while review refresh, resolution startup, Source Control busy state or an explicitly stale review could make that visible review unsafe to use.
@@ -53,6 +54,7 @@ Render file-edit results and `git diff` shell output as readable inline diffs in
 - `desktop/src/components/ToolResult.svelte`
 - `desktop/src/components/TranscriptPane.svelte`
 - `desktop/src/components/GitDiffPane.svelte`
+- `desktop/src/lib/git-diff-chunks.ts` (tested by `git-diff-chunks.test.ts`)
 - `desktop/src/components/WorkbenchTabs.svelte`
 - `desktop/src/app/git-assist.ts`
 - `desktop/src/app/desktop-workbench-prop-builders.ts`

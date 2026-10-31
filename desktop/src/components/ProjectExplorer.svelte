@@ -107,7 +107,7 @@
   let observedOperationWorkspace: string | undefined;
   const dragController = createProjectExplorerDragController({
     entries: (entry) => {
-      if (!treeState.selectedPaths.includes(entry.path)) treeController.selectEntry(entry.path);
+      if (!treeController.isSelected(entry.path)) treeController.selectEntry(entry.path);
       return treeController.selectedEntries(entry);
     },
     move: (entries, destination) => {
@@ -357,7 +357,9 @@
       return;
     }
     searchLoading = true;
+    let started = false;
     const timer = window.setTimeout(() => {
+      started = true;
       void invoke<ProjectSearchMatch[]>("search_project_files", {
         workspace: requestWorkspace,
         query,
@@ -384,7 +386,16 @@
         ) searchLoading = false;
       });
     }, 180);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      // Stop the native walk too: a cleared query or closed explorer must not
+      // keep scanning the project after its result can no longer be shown.
+      if (started) {
+        void invoke("cancel_search_project_files").catch((error) => {
+          diagnostics.report(error, "project-explorer:search-cancel-failed");
+        });
+      }
+    };
   });
 
   function fileIconKind(path: string): "text" | "code" | "image" | "file" {
@@ -511,7 +522,7 @@
   }
 
   function openEntryContextMenu(event: MouseEvent, entry: ProjectTreeEntry): void {
-    if (!treeState.selectedPaths.includes(entry.path)) treeController.selectEntry(entry.path);
+    if (!treeController.isSelected(entry.path)) treeController.selectEntry(entry.path);
     treeState.focusedPath = entry.path;
     menuController.openContextMenu(event, entry);
     if (!nativeMenus) void refreshEntryClipboard(entry);
@@ -908,14 +919,14 @@
         {@const emphasis = projectEntryEmphasis(entry)}
         {@const hiddenEntry = entry.path !== "" && entry.name.startsWith(".")}
         {@const expanded = entry.kind === "directory" && treeController.isDirectoryExpanded(entry.path)}
-        {@const directoryLoading = entry.kind === "directory" && treeState.loadingDirectories.includes(entry.path)}
+        {@const directoryLoading = entry.kind === "directory" && treeController.isDirectoryLoading(entry.path)}
         {#if nameState.edit?.mode === "rename" && nameState.edit.entry.path === entry.path}
           {@render inlineNameInput(row.depth)}
         {:else}
         <div
           class={[
             "group flex h-7 w-full min-w-max items-center pr-1 hover:bg-panel-hover",
-            treeState.selectedPaths.includes(entry.path) ? "bg-panel-selected" : "",
+            treeController.isSelected(entry.path) ? "bg-panel-selected" : "",
             (dragController.dragging && dragController.destination === entry.path) || nativeDropDestination === entry.path ? "ring-1 ring-inset ring-ring bg-panel-hover" : "",
           ]}
           style:padding-left={`${4 + row.depth * 14}px`}
@@ -926,7 +937,7 @@
           <button
             class={[
               "flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-sm text-left text-xs text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
-              hiddenEntry && !emphasis && !treeState.selectedPaths.includes(entry.path)
+              hiddenEntry && !emphasis && !treeController.isSelected(entry.path)
                 ? "opacity-55 transition-opacity hover:opacity-100 focus-visible:opacity-100"
                 : "",
             ]}
@@ -936,7 +947,7 @@
             aria-label={gitDecoration ? `${entry.name} · ${gitDecoration.label}` : entry.name}
             aria-level={row.depth + 1}
             aria-expanded={entry.kind === "directory" ? expanded : undefined}
-            aria-selected={treeState.selectedPaths.includes(entry.path)}
+            aria-selected={treeController.isSelected(entry.path)}
             aria-keyshortcuts={entry.path ? "Shift+Enter F2 Delete" : "Shift+Enter"}
             tabindex={!nameState.edit && tabbablePath === entry.path ? 0 : -1}
             data-project-tree-path={entry.path}

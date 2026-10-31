@@ -11,7 +11,7 @@ use std::{
     path::{Component, Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
         Arc, Condvar, Mutex, RwLock,
     },
     thread,
@@ -22,6 +22,8 @@ use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_window_state::StateFlags;
 
 mod acp_host;
+mod attachment_approvals;
+use attachment_approvals::AttachmentPathState;
 mod acp_queue;
 use acp_host::{
     remove_process_slot_locked, reserve_process_slot, stop_process, stop_process_slot,
@@ -39,10 +41,15 @@ mod desktop_tray;
 mod desktop_tray_attention;
 mod desktop_tray_icon;
 mod dictation_shortcut;
+mod exit_teardown;
 mod git_ci;
+mod git_diff;
+use git_diff::{git_diff_from, truncate_git_diff};
+mod git_history_search;
 mod git_identity;
 mod git_ignore;
 mod git_operations;
+mod git_process;
 mod git_remote_link;
 mod log_clear;
 mod log_reader;
@@ -54,6 +61,7 @@ mod native_process;
 mod native_project_search;
 mod native_repository_semantic_config;
 mod openrouter_usage;
+mod package_terminal_output;
 mod plan_progress;
 mod preview_file;
 mod preview_file_action;
@@ -66,6 +74,7 @@ mod project_entry_drag_destination;
 #[cfg(target_os = "macos")]
 mod project_entry_drag_source;
 mod project_file_history;
+mod project_file_search;
 mod project_icon;
 mod project_storage;
 mod project_tasks_sqlite;
@@ -96,9 +105,6 @@ const MAX_ATTACHMENT_COUNT: usize = 10;
 const MAX_ATTACHMENT_BYTES: u64 = 25 * 1024 * 1024;
 const MAX_ATTACHMENT_CACHE_BYTES: u64 = 250 * 1024 * 1024;
 const MAX_PROJECT_FILE_PREVIEW_BYTES: u64 = 2 * 1024 * 1024;
-const MAX_PROJECT_SEARCH_FILE_BYTES: u64 = 2 * 1024 * 1024;
-const MAX_PROJECT_SEARCH_FILES: usize = 20_000;
-const MAX_PROJECT_SEARCH_RESULTS: usize = 500;
 const MAX_PROJECT_MARKDOWN_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_WORKSPACE_CONFIG_BYTES: u64 = 64 * 1024;
 const MAX_TASK_DOCUMENT_BYTES: u64 = 1024 * 1024;
@@ -399,7 +405,7 @@ struct PackageTerminalSession {
     exit_code: Option<u32>,
     signal: Option<String>,
     stop_requested: bool,
-    output: Vec<u8>,
+    output: package_terminal_output::OutputHistory,
     running: Option<PackageTerminalRunning>,
 }
 
@@ -609,17 +615,6 @@ struct ProjectTreeEntry {
     kind: ProjectTreeEntryKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     wiki_checked: Option<bool>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProjectSearchMatch {
-    path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    line: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    column: Option<usize>,
-    preview: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -997,165 +992,6 @@ enum ProjectTaskPriority {
     Urgent,
 }
 
-struct AttachmentPathState {
-    approved: Mutex<HashSet<PathBuf>>,
-    cache_lock: Mutex<()>,
-    registry_lock: Mutex<()>,
-    registry_loaded: AtomicBool,
-    registry_path: PathBuf,
-}
-
-impl AttachmentPathState {
-    fn new(app: &AppHandle) -> Self {
-        let cache_dir = app
-            .path()
-            .app_cache_dir()
-            .unwrap_or_else(|_| env::temp_dir());
-        Self {
-            approved: Mutex::new(HashSet::new()),
-            cache_lock: Mutex::new(()),
-            registry_lock: Mutex::new(()),
-            registry_loaded: AtomicBool::new(false),
-            registry_path: cache_dir.join("approved-attachments.json"),
-        }
-    }
-
-    fn ensure_registry_loaded(&self, app: &AppHandle) -> Result<(), String> {
-        if self.registry_loaded.load(Ordering::Acquire) {
-            return Ok(());
-        }
-        let _registry_guard = self
-            .registry_lock
-            .lock()
-            .map_err(|_| "attachment registry state is poisoned".to_owned())?;
-        if self.registry_loaded.load(Ordering::Relaxed) {
-            return Ok(());
-        }
-
-        let mut restored = HashSet::new();
-        if let Ok(raw) = fs::read_to_string(&self.registry_path) {
-            if let Ok(paths) = serde_json::from_str::<Vec<String>>(&raw) {
-                for path in paths {
-                    if let Ok(canonical) = fs::canonicalize(path) {
-                        let _ = app.asset_protocol_scope().allow_file(&canonical);
-                        restored.insert(canonical);
-                    }
-                }
-            }
-        }
-        self.approved
-            .lock()
-            .map_err(|_| "attachment path state is poisoned".to_owned())?
-            .extend(restored);
-        self.registry_loaded.store(true, Ordering::Release);
-        Ok(())
-    }
-
-    fn approve_selected_batch(
-        &self,
-        app: &AppHandle,
-        paths: &[String],
-    ) -> Result<Vec<PathBuf>, String> {
-        self.ensure_registry_loaded(app)?;
-        let canonical = paths
-            .iter()
-            .map(|path| {
-                fs::canonicalize(path).map_err(|error| format!("failed to resolve {path}: {error}"))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        {
-            let approved = self
-                .approved
-                .lock()
-                .map_err(|_| "attachment path state is poisoned".to_owned())?;
-            for (source, path) in paths.iter().zip(&canonical) {
-                if !approved.contains(path) && !app.asset_protocol_scope().is_allowed(path) {
-                    return Err(format!("{source} was not selected by the user"));
-                }
-            }
-        }
-        self.approve_paths(app, canonical.iter().cloned())?;
-        Ok(canonical)
-    }
-
-    fn approve_cached(&self, app: &AppHandle, path: &Path) -> Result<PathBuf, String> {
-        let canonical = fs::canonicalize(path)
-            .map_err(|error| format!("failed to resolve {}: {error}", path.display()))?;
-        self.approve(app, canonical.clone())?;
-        Ok(canonical)
-    }
-
-    fn approved_path(&self, app: &AppHandle, path: &Path) -> Result<PathBuf, String> {
-        self.ensure_registry_loaded(app)?;
-        let canonical = fs::canonicalize(path)
-            .map_err(|error| format!("failed to resolve {}: {error}", path.display()))?;
-        let approved = self
-            .approved
-            .lock()
-            .map_err(|_| "attachment path state is poisoned".to_owned())?;
-        if approved.contains(&canonical) {
-            Ok(canonical)
-        } else {
-            Err(format!("{} is not an approved attachment", path.display()))
-        }
-    }
-
-    fn approve(&self, app: &AppHandle, path: PathBuf) -> Result<(), String> {
-        self.approve_paths(app, std::iter::once(path))
-    }
-
-    fn approve_paths(
-        &self,
-        app: &AppHandle,
-        paths: impl IntoIterator<Item = PathBuf>,
-    ) -> Result<(), String> {
-        self.ensure_registry_loaded(app)?;
-        let paths = paths.into_iter().collect::<HashSet<_>>();
-        for path in &paths {
-            app.asset_protocol_scope()
-                .allow_file(path)
-                .map_err(|error| format!("failed to allow attachment preview: {error}"))?;
-        }
-        let _registry_guard = self
-            .registry_lock
-            .lock()
-            .map_err(|_| "attachment registry state is poisoned".to_owned())?;
-        let (new_paths, snapshot) = {
-            let approved = self
-                .approved
-                .lock()
-                .map_err(|_| "attachment path state is poisoned".to_owned())?;
-            let new_paths = paths
-                .into_iter()
-                .filter(|path| !approved.contains(path))
-                .collect::<Vec<_>>();
-            if new_paths.is_empty() {
-                return Ok(());
-            }
-            let snapshot = approved
-                .iter()
-                .chain(new_paths.iter())
-                .map(|value| value.to_string_lossy().into_owned())
-                .collect::<Vec<_>>();
-            (new_paths, snapshot)
-        };
-        if let Some(parent) = self.registry_path.parent() {
-            fs::create_dir_all(parent).map_err(|error| {
-                format!("failed to create the attachment registry directory: {error}")
-            })?;
-        }
-        let serialized = serde_json::to_vec(&snapshot)
-            .map_err(|error| format!("failed to encode the attachment registry: {error}"))?;
-        fs::write(&self.registry_path, serialized)
-            .map_err(|error| format!("failed to save the attachment registry: {error}"))?;
-        self.approved
-            .lock()
-            .map_err(|_| "attachment path state is poisoned".to_owned())?
-            .extend(new_paths);
-        Ok(())
-    }
-}
-
 #[tauri::command]
 async fn inspect_attachments(
     app: AppHandle,
@@ -1491,14 +1327,6 @@ async fn list_project_directory(
         Ok(entries)
     })
     .await
-}
-
-#[tauri::command]
-async fn search_project_files(
-    workspace: String,
-    query: String,
-) -> Result<Vec<ProjectSearchMatch>, String> {
-    run_blocking(move || search_project_files_from(Path::new(&workspace), &query)).await
 }
 
 #[tauri::command]
@@ -2612,152 +2440,6 @@ fn list_project_directory_from(
     Ok(entries)
 }
 
-fn search_project_files_from(
-    workspace: &Path,
-    query: &str,
-) -> Result<Vec<ProjectSearchMatch>, String> {
-    let query = query.trim();
-    if query.is_empty() {
-        return Ok(Vec::new());
-    }
-    let root = canonical_workspace(workspace)?;
-    let folded_query = ascii_fold(query);
-    let mut results = Vec::new();
-    let mut files_scanned = 0usize;
-    search_project_directory_from(
-        &root,
-        &root,
-        &folded_query,
-        &mut files_scanned,
-        &mut results,
-    )?;
-    Ok(results)
-}
-
-fn search_project_directory_from(
-    root: &Path,
-    directory: &Path,
-    folded_query: &str,
-    files_scanned: &mut usize,
-    results: &mut Vec<ProjectSearchMatch>,
-) -> Result<(), String> {
-    if results.len() >= MAX_PROJECT_SEARCH_RESULTS || *files_scanned >= MAX_PROJECT_SEARCH_FILES {
-        return Ok(());
-    }
-    let mut entries = fs::read_dir(directory)
-        .map_err(|error| format!("failed to read {}: {error}", directory.display()))?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("failed to inspect {}: {error}", directory.display()))?;
-    entries.sort_by_key(|entry| entry.file_name());
-
-    for entry in entries {
-        if results.len() >= MAX_PROJECT_SEARCH_RESULTS || *files_scanned >= MAX_PROJECT_SEARCH_FILES
-        {
-            break;
-        }
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name == ".git" || name == ".DS_Store" {
-            continue;
-        }
-        if directory == root.join(".pi") && name.eq_ignore_ascii_case("file-history") {
-            continue;
-        }
-        let file_type = entry
-            .file_type()
-            .map_err(|error| format!("failed to inspect {}: {error}", entry.path().display()))?;
-        if file_type.is_symlink() {
-            continue;
-        }
-        if file_type.is_dir() {
-            if matches!(
-                name.as_str(),
-                "node_modules" | "target" | "dist" | "build" | "coverage" | ".next" | ".svelte-kit"
-            ) {
-                continue;
-            }
-            search_project_directory_from(
-                root,
-                &entry.path(),
-                folded_query,
-                files_scanned,
-                results,
-            )?;
-            continue;
-        }
-        if !file_type.is_file() {
-            continue;
-        }
-        *files_scanned += 1;
-        let relative = entry
-            .path()
-            .strip_prefix(root)
-            .map_err(|_| "project search path resolves outside the workspace".to_owned())?
-            .to_string_lossy()
-            .replace('\\', "/");
-        if ascii_fold(&relative).contains(folded_query) {
-            results.push(ProjectSearchMatch {
-                path: relative.clone(),
-                line: None,
-                column: None,
-                preview: "File path match".to_owned(),
-            });
-            if results.len() >= MAX_PROJECT_SEARCH_RESULTS {
-                break;
-            }
-        }
-
-        let metadata = entry
-            .metadata()
-            .map_err(|error| format!("failed to inspect {}: {error}", entry.path().display()))?;
-        if metadata.len() > MAX_PROJECT_SEARCH_FILE_BYTES {
-            continue;
-        }
-        let bytes = match fs::read(entry.path()) {
-            Ok(bytes) => bytes,
-            Err(_) => continue,
-        };
-        let content = match String::from_utf8(bytes) {
-            Ok(content) => content,
-            Err(_) => continue,
-        };
-        for (line_index, line) in content.lines().enumerate() {
-            let folded_line = ascii_fold(line);
-            let mut offset = 0usize;
-            while offset <= folded_line.len() {
-                let Some(found) = folded_line[offset..].find(folded_query) else {
-                    break;
-                };
-                let byte_index = offset + found;
-                let column = line[..byte_index].chars().count() + 1;
-                results.push(ProjectSearchMatch {
-                    path: relative.clone(),
-                    line: Some(line_index + 1),
-                    column: Some(column),
-                    preview: line.trim().chars().take(240).collect(),
-                });
-                if results.len() >= MAX_PROJECT_SEARCH_RESULTS {
-                    return Ok(());
-                }
-                offset = byte_index + folded_query.len().max(1);
-            }
-        }
-    }
-    Ok(())
-}
-
-fn ascii_fold(value: &str) -> String {
-    value
-        .chars()
-        .map(|character| {
-            if character.is_ascii_uppercase() {
-                character.to_ascii_lowercase()
-            } else {
-                character
-            }
-        })
-        .collect()
-}
-
 fn validate_project_entry_name(name: &str) -> Result<(), String> {
     if name.trim().is_empty()
         || name == "."
@@ -3818,133 +3500,6 @@ fn validate_git_relative_path(path: &str) -> Result<&str, String> {
     Ok(trimmed)
 }
 
-fn git_diff_from(
-    workspace: &Path,
-    path: Option<&str>,
-    scope: GitDiffScope,
-) -> Result<GitDiff, String> {
-    let root = git_repository_root(workspace)?;
-    let path = path.map(validate_git_relative_path).transpose()?;
-    let snapshot = git_status_from(&root)?;
-    let mut content = String::new();
-
-    match scope {
-        GitDiffScope::Staged => {
-            content.push_str(&git_tracked_diff(&root, path, true)?);
-        }
-        GitDiffScope::Unstaged => {
-            content.push_str(&git_tracked_diff(&root, path, false)?);
-            append_untracked_diffs(&root, &snapshot, path, &mut content)?;
-        }
-        GitDiffScope::All => {
-            let staged = git_tracked_diff(&root, path, true)?;
-            if !staged.trim().is_empty() {
-                content.push_str("# Staged changes\n\n");
-                content.push_str(&staged);
-            }
-            let unstaged = git_tracked_diff(&root, path, false)?;
-            let before_unstaged = content.len();
-            if !unstaged.trim().is_empty() {
-                if !content.is_empty() {
-                    content.push_str("\n\n");
-                }
-                content.push_str("# Working tree changes\n\n");
-                content.push_str(&unstaged);
-            }
-            let before_untracked = content.len();
-            append_untracked_diffs(&root, &snapshot, path, &mut content)?;
-            if before_untracked == content.len()
-                && before_unstaged == content.len()
-                && content.is_empty()
-            {
-                content.clear();
-            }
-        }
-    }
-
-    let (content, truncated) = truncate_git_diff(content);
-    Ok(GitDiff {
-        path: path.map(str::to_owned),
-        scope,
-        content,
-        truncated,
-    })
-}
-
-fn git_tracked_diff(root: &Path, path: Option<&str>, staged: bool) -> Result<String, String> {
-    let mut args = vec!["diff"];
-    if staged {
-        args.push("--cached");
-    }
-    args.extend(["--no-ext-diff", "--no-color", "--minimal"]);
-    if let Some(path) = path {
-        args.extend(["--", path]);
-    }
-    let output = git_output(root, &args)?;
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-fn append_untracked_diffs(
-    root: &Path,
-    snapshot: &GitSnapshot,
-    requested_path: Option<&str>,
-    content: &mut String,
-) -> Result<(), String> {
-    let untracked = snapshot
-        .changes
-        .iter()
-        .filter(|change| change.untracked)
-        .filter(|change| requested_path.is_none_or(|path| change.path == path))
-        .take(100)
-        .collect::<Vec<_>>();
-    for change in untracked {
-        let output = git_output_raw(
-            root,
-            &[
-                "diff",
-                "--no-index",
-                "--no-ext-diff",
-                "--no-color",
-                "--",
-                "/dev/null",
-                &change.path,
-            ],
-        )?;
-        let accepted = output.status.success() || output.status.code() == Some(1);
-        if !accepted {
-            return Err(git_command_error("git diff --no-index", &output));
-        }
-        // Git runs with the workspace as cwd and receives a workspace-relative
-        // path, so its diff headers are already relative. Never post-process the
-        // whole diff: doing so can corrupt hunk contents that happen to contain
-        // the absolute workspace path.
-        let diff = String::from_utf8_lossy(&output.stdout).into_owned();
-        if !diff.trim().is_empty() {
-            if !content.is_empty() {
-                content.push_str("\n\n");
-            }
-            content.push_str(&diff);
-        }
-        if content.len() > MAX_GIT_DIFF_BYTES {
-            break;
-        }
-    }
-    Ok(())
-}
-
-fn truncate_git_diff(mut content: String) -> (String, bool) {
-    if content.len() <= MAX_GIT_DIFF_BYTES {
-        return (content, false);
-    }
-    let mut boundary = MAX_GIT_DIFF_BYTES;
-    while !content.is_char_boundary(boundary) {
-        boundary -= 1;
-    }
-    content.truncate(boundary);
-    content.push_str("\n\n[Diff truncated by Pix Desktop]\n");
-    (content, true)
-}
-
 fn git_stage_from(workspace: &Path, path: Option<&str>) -> Result<(), String> {
     let root = git_repository_root(workspace)?;
     let path = path.map(validate_git_relative_path).transpose()?;
@@ -4011,7 +3566,7 @@ fn git_push_from(workspace: &Path) -> Result<(), String> {
         ],
     )?;
     if upstream.status.success() {
-        return git_output(&root, &["push"]).map(|_| ());
+        return git_process::git_network_output(&root, &["push"], "push").map(|_| ());
     }
     let remote = if snapshot.remotes.iter().any(|remote| remote == "origin") {
         "origin".to_owned()
@@ -4022,7 +3577,8 @@ fn git_push_from(workspace: &Path) -> Result<(), String> {
     } else {
         return Err("This branch has no upstream; configure one before pushing".to_owned());
     };
-    git_output(&root, &["push", "-u", &remote, &snapshot.branch]).map(|_| ())
+    git_process::git_network_output(&root, &["push", "-u", &remote, &snapshot.branch], "push")
+        .map(|_| ())
 }
 
 fn git_switch_branch_from(workspace: &Path, branch: &str, create: bool) -> Result<(), String> {
@@ -5277,11 +4833,50 @@ fn sidebar_registry_untracked_artifact_stamp(
     Ok(format!("{fingerprint:016x}"))
 }
 
+/// Cheap change stamp for the tracked task bundle, polled every few seconds.
+/// It reads only file metadata: the SQLite/WAL stamps cover every logical
+/// edit and the attachment blob stamps cover the bytes the bundle hash reads.
+/// A checkpoint may cause one extra rehash, never a missed edit. The second
+/// value estimates the bytes a full bundle hash would read for the budget.
 fn sidebar_registry_task_bundle_fingerprint(root: &Path) -> Result<(u64, u64), String> {
-    let snapshot = project_tasks_sqlite::snapshot(&root.join(".pi"))?;
+    let project = root.join(".pi");
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    snapshot.hash(&mut hasher);
-    Ok((hasher.finish(), snapshot.len() as u64))
+    let mut bytes = 0u64;
+    for suffix in ["tasks.sqlite", "tasks.sqlite-wal"] {
+        let stamp = sidebar_path_stamp(&project.join(suffix))?;
+        bytes = bytes.saturating_add(stamp.as_ref().map_or(0, |stamp| stamp.len));
+        stamp.hash(&mut hasher);
+    }
+    let attachments = project.join("task-attachments");
+    match fs::read_dir(&attachments) {
+        Ok(entries) => {
+            let mut blobs = Vec::new();
+            for entry in entries {
+                let entry = entry.map_err(|error| {
+                    format!("failed to read {}: {error}", attachments.display())
+                })?;
+                let metadata = entry.metadata().map_err(|error| {
+                    format!("failed to inspect {}: {error}", entry.path().display())
+                })?;
+                blobs.push((
+                    entry.file_name().to_string_lossy().into_owned(),
+                    metadata.len(),
+                    sidebar_modified_ns(&metadata),
+                ));
+                if blobs.len() > MAX_SIDEBAR_REGISTRY_ENTRIES {
+                    return Err("task attachments are too many to inspect cheaply".to_owned());
+                }
+            }
+            blobs.sort_unstable();
+            for blob in &blobs {
+                bytes = bytes.saturating_add(blob.1);
+            }
+            blobs.hash(&mut hasher);
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("failed to read {}: {error}", attachments.display())),
+    }
+    Ok((hasher.finish(), bytes))
 }
 
 fn sidebar_registry_hash_task_bundle(root: &Path) -> Result<String, String> {
@@ -5661,80 +5256,23 @@ fn sidebar_git_remote_ls_remote_output(
 }
 
 fn sidebar_git_bounded_output(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
-    let mut command = git_command(root, args);
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    native_process::isolate(&mut command);
-
-    let mut child = native_process::spawn(&mut command)
-        .map_err(|error| format!("failed to start Git remote update probe: {error}"))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "Git remote update probe stdout pipe is unavailable".to_owned())?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| "Git remote update probe stderr pipe is unavailable".to_owned())?;
-    let stdout_thread = thread::spawn(move || {
-        read_bounded_process_stream(stdout, MAX_SIDEBAR_GIT_REMOTE_OUTPUT_BYTES)
-    });
-    let stderr_thread = thread::spawn(move || {
-        read_bounded_process_stream(stderr, MAX_SIDEBAR_GIT_REMOTE_OUTPUT_BYTES)
-    });
-    let deadline = Instant::now() + SIDEBAR_GIT_REMOTE_TIMEOUT;
-    let status = loop {
-        match native_process::exited_before_reap(&child) {
-            Ok(true) => {
-                // Remote transports can spawn ssh/credential helpers that inherit
-                // stdout/stderr. Kill descendants before reaping the leader so a
-                // helper cannot retain a pipe after `git` itself exits.
-                let _ = native_process::force_stop(&mut child);
-                break child
-                    .wait()
-                    .map_err(|error| format!("failed to reap Git remote update probe: {error}"))?;
-            }
-            Ok(false) => {}
-            Err(error) => {
-                let _ = native_process::force_stop(&mut child);
-                let _ = child.wait();
-                let _ = stdout_thread.join();
-                let _ = stderr_thread.join();
-                return Err(format!(
-                    "failed while observing Git remote update probe: {error}"
-                ));
-            }
-        }
-        #[cfg(not(unix))]
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|error| format!("failed to observe Git remote update probe: {error}"))?
-        {
-            let _ = native_process::force_stop(&mut child);
-            break status;
-        }
-        if Instant::now() >= deadline {
-            let _ = native_process::force_stop(&mut child);
-            let _ = child.wait();
-            let _ = stdout_thread.join();
-            let _ = stderr_thread.join();
-            return Err("Git remote update probe timed out".to_owned());
-        }
-        thread::sleep(POLL_INTERVAL);
-    };
-    let (stdout, stdout_truncated) = stdout_thread
-        .join()
-        .map_err(|_| "Git remote update probe stdout reader panicked".to_owned())?;
-    let (stderr, stderr_truncated) = stderr_thread
-        .join()
-        .map_err(|_| "Git remote update probe stderr reader panicked".to_owned())?;
-    if stdout_truncated || stderr_truncated {
+    // Remote transports can spawn ssh/credential helpers that inherit
+    // stdout/stderr; the supervisor kills the whole group before reaping.
+    let output = git_process::bounded_output(
+        &mut git_command(root, args),
+        SIDEBAR_GIT_REMOTE_TIMEOUT,
+        MAX_SIDEBAR_GIT_REMOTE_OUTPUT_BYTES,
+        MAX_SIDEBAR_GIT_REMOTE_OUTPUT_BYTES,
+        None,
+    )
+    .map_err(|error| match error {
+        git_process::SupervisedError::TimedOut => "Git remote update probe timed out".to_owned(),
+        error => format!("Git remote update probe failed: {error}"),
+    })?;
+    if output.truncated {
         return Err("Git remote update probe output exceeded its safety limit".to_owned());
     }
-    Ok(std::process::Output {
-        status,
-        stdout,
-        stderr,
-    })
+    Ok(output.output)
 }
 
 fn sidebar_git_status_output(root: &Path) -> Result<std::process::Output, String> {
@@ -6330,7 +5868,7 @@ fn package_terminal_snapshot(
         status: session.status,
         exit_code: session.exit_code,
         signal: session.signal.clone(),
-        output_base64: BASE64.encode(&session.output),
+        output_base64: BASE64.encode(session.output.to_vec()),
         started_at_ms: session.started_at_ms,
     }
 }
@@ -6435,7 +5973,7 @@ fn spawn_package_terminal(
     #[cfg(not(unix))]
     let process_group_leader: Option<i32> = None;
     let killer = Arc::new(Mutex::new(child.0.as_ref().unwrap().clone_killer()));
-    let mut reader = pair
+    let reader = pair
         .master
         .try_clone_reader()
         .map_err(|error| format!("failed to read package terminal: {error}"))?;
@@ -6494,7 +6032,9 @@ fn spawn_package_terminal(
                     exit_code: None,
                     signal: None,
                     stop_requested: false,
-                    output: Vec::new(),
+                    output: package_terminal_output::OutputHistory::new(
+                        MAX_PACKAGE_TERMINAL_OUTPUT_BYTES,
+                    ),
                     running: Some(PackageTerminalRunning {
                         master: master.clone(),
                         writer: writer.clone(),
@@ -6516,17 +6056,8 @@ fn spawn_package_terminal(
 
     let output_app = app.clone();
     let output_id = id.clone();
-    thread::spawn(move || {
-        let mut buffer = [0_u8; 8192];
-        loop {
-            match reader.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(read) => {
-                    append_package_terminal_output(&output_app, &output_id, &buffer[..read])
-                }
-                Err(_) => break,
-            }
-        }
+    let drained = package_terminal_output::spawn_output_pump(reader, move |batch| {
+        append_package_terminal_output(&output_app, &output_id, batch)
     });
 
     let supervisor_app = app.clone();
@@ -6535,7 +6066,9 @@ fn spawn_package_terminal(
         .0
         .take()
         .expect("terminal child owned until supervisor starts");
-    thread::spawn(move || supervise_package_terminal(supervisor_app, supervisor_id, child, exited));
+    thread::spawn(move || {
+        supervise_package_terminal(supervisor_app, supervisor_id, child, exited, drained)
+    });
 
     let sessions = state
         .sessions
@@ -6830,22 +6363,7 @@ fn append_package_terminal_output(app: &AppHandle, terminal_id: &str, data: &[u8
         let Some(session) = sessions.get_mut(terminal_id) else {
             return;
         };
-        if data.len() >= MAX_PACKAGE_TERMINAL_OUTPUT_BYTES {
-            session.output.clear();
-            session
-                .output
-                .extend_from_slice(&data[data.len() - MAX_PACKAGE_TERMINAL_OUTPUT_BYTES..]);
-        } else {
-            let overflow = session
-                .output
-                .len()
-                .saturating_add(data.len())
-                .saturating_sub(MAX_PACKAGE_TERMINAL_OUTPUT_BYTES);
-            if overflow > 0 {
-                session.output.drain(..overflow.min(session.output.len()));
-            }
-            session.output.extend_from_slice(data);
-        }
+        session.output.push(data);
         session.window_label.clone()
     };
     let _ = app.emit_to(
@@ -6863,8 +6381,21 @@ fn supervise_package_terminal(
     terminal_id: String,
     mut child: Box<dyn portable_pty::Child + Send + Sync>,
     exited: ExitSignal,
+    drained: package_terminal_output::DrainSignal,
 ) {
     let result = child.wait();
+    // Deliver the PTY's final output (e.g. a crash trace) before exit, so it is
+    // neither emitted after exit nor lost to an immediate forget. A background
+    // descendant can keep the PTY open, hence the bound.
+    if !drained.wait(package_terminal_output::OUTPUT_DRAIN_TIMEOUT) {
+        logging::record(
+            "debug",
+            module_path!(),
+            "package-terminal:output-drain-timeout",
+            serde_json::json!({ "terminalId": terminal_id }),
+            None,
+        );
+    }
     let (window_label, status, exit_code, signal) = {
         let state = app.state::<PackageTerminalState>();
         let Ok(mut sessions) = state.sessions.lock() else {
@@ -6920,16 +6451,8 @@ fn signal_exit(exited: &ExitSignal) {
     }
 }
 
-fn append_terminal_error_line(output: &mut Vec<u8>, message: &str) {
-    let line = format!("\r\n[pix] {message}\r\n");
-    let overflow = output
-        .len()
-        .saturating_add(line.len())
-        .saturating_sub(MAX_PACKAGE_TERMINAL_OUTPUT_BYTES);
-    if overflow > 0 {
-        output.drain(..overflow.min(output.len()));
-    }
-    output.extend_from_slice(line.as_bytes());
+fn append_terminal_error_line(output: &mut package_terminal_output::OutputHistory, message: &str) {
+    output.push(format!("\r\n[pix] {message}\r\n").as_bytes());
 }
 
 fn write_package_terminal(
@@ -7242,39 +6765,12 @@ fn stop_package_terminals_for_workspace(
     Ok(())
 }
 
-fn stop_package_terminals_for_window(app: &AppHandle, window_label: &str) {
-    let ids = {
-        let state = app.state::<PackageTerminalState>();
-        let Ok(sessions) = state.sessions.lock() else {
-            return;
-        };
-        captured_window_ids(&sessions, window_label, |session| &session.window_label)
-    };
-    stop_captured_package_terminals(app, window_label, &ids);
-}
-
 fn stop_captured_package_terminals(app: &AppHandle, window_label: &str, ids: &[String]) {
     for id in ids {
         let _ = stop_package_terminal(app, window_label, &id, true);
     }
     if let Ok(mut sessions) = app.state::<PackageTerminalState>().sessions.lock() {
         remove_captured_ids(&mut sessions, ids);
-    }
-}
-
-fn stop_all_package_terminals(app: &AppHandle) {
-    let window_labels = {
-        let state = app.state::<PackageTerminalState>();
-        let Ok(sessions) = state.sessions.lock() else {
-            return;
-        };
-        sessions
-            .values()
-            .map(|session| session.window_label.clone())
-            .collect::<HashSet<_>>()
-    };
-    for window_label in window_labels {
-        stop_package_terminals_for_window(app, &window_label);
     }
 }
 
@@ -9094,7 +8590,9 @@ pub fn run() {
         .manage(WorkspaceConfigState::default())
         .manage(SidebarIndicatorState::default())
         .manage(native_project_search::SearchState::default())
+        .manage(project_file_search::ProjectFileSearchState::default())
         .manage(git_ci::GitCiProcessState::default())
+        .manage(git_history_search::GitHistorySearchState::default())
         .manage(window_restore::WindowRestoreState::default())
         .manage(desktop_tray_attention::State::default())
         .setup(move |app| {
@@ -9211,7 +8709,8 @@ pub fn run() {
             project_file_exists,
             project_directory_link::project_directory_exists,
             list_project_directory,
-            search_project_files,
+            project_file_search::search_project_files,
+            project_file_search::cancel_search_project_files,
             create_project_entry,
             rename_project_entry,
             copy_project_entry,
@@ -9243,7 +8742,8 @@ pub fn run() {
             git_operations::git_pull,
             git_operations::git_update,
             git_operations::git_history,
-            git_operations::git_search_history,
+            git_history_search::git_search_history,
+            git_history_search::git_search_history_cancel,
             git_operations::git_commit_diff,
             git_identity::git_identity,
             git_identity::git_save_identity,
@@ -9305,25 +8805,20 @@ pub fn run() {
         .build(context)
         .expect("failed to build Pix Desktop");
     app.run(move |handle, event| {
-        if matches!(
-            &event,
-            tauri::RunEvent::WindowEvent {
-                event: tauri::WindowEvent::Focused(true),
-                ..
-            }
-        ) {
-            let handle = handle.clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(error) = dictation_shortcut::refresh(&handle).await {
-                    logging::error(module_path!(), format!("dictation shortcut: {error}"));
-                }
-            });
+        if let tauri::RunEvent::WindowEvent {
+            label,
+            event: tauri::WindowEvent::Focused(focused),
+            ..
+        } = &event
+        {
+            dictation_shortcut::window_focus_changed(handle, label, *focused);
         }
         if let tauri::RunEvent::WindowEvent {
             label,
             event: tauri::WindowEvent::CloseRequested { api, .. },
             ..
-        } = &event {
+        } = &event
+        {
             if close_guard::prevent(handle, Some(label), None) {
                 api.prevent_close();
             }
@@ -9354,6 +8849,12 @@ pub fn run() {
             handle
                 .state::<git_ci::GitCiProcessState>()
                 .cancel_window(label);
+            handle
+                .state::<project_file_search::ProjectFileSearchState>()
+                .destroyed(label);
+            handle
+                .state::<native_project_search::SearchState>()
+                .cancel_window(label);
             // Record destruction on the event thread, before any queued
             // spawn_blocking task can resume and publish a child.
             let (slot, terminal_ids) = capture_destroyed_window(
@@ -9366,7 +8867,12 @@ pub fn run() {
             thread::spawn(move || {
                 if let Some(slot) = slot {
                     if let Err(error) = stop_process_slot(&slot, None) {
-                        logging::error(module_path!(), format!("failed to stop pix-acp for closed window {window_label}: {error}"));
+                        logging::error(
+                            module_path!(),
+                            format!(
+                                "failed to stop pix-acp for closed window {window_label}: {error}"
+                            ),
+                        );
                     }
                 }
                 stop_captured_package_terminals(&handle, &window_label, &terminal_ids);
@@ -9385,25 +8891,25 @@ pub fn run() {
                 api.prevent_exit();
                 let windows = window_restore::freeze(handle);
                 handle.state::<git_ci::GitCiProcessState>().cancel_all();
+                handle
+                    .state::<native_project_search::SearchState>()
+                    .cancel_all();
                 let handle = handle.clone();
                 thread::spawn(move || {
                     if let Err(error) = window_restore::save(&handle, windows) {
-                        logging::error(module_path!(), format!("failed to save open windows: {error}"));
+                        logging::error(
+                            module_path!(),
+                            format!("failed to save open windows: {error}"),
+                        );
                     }
-                    let state = handle.state::<AcpProcessState>();
-                    let window_labels = state
-                        .slots
-                        .lock()
-                        .map(|slots| slots.keys().cloned().collect::<Vec<_>>())
-                        .unwrap_or_default();
-                    for window_label in window_labels {
-                        if let Err(error) = stop_process(&state, &window_label, None) {
-                            logging::error(module_path!(), format!("failed to stop pix-acp for window {window_label} during exit: {error}"));
-                        }
-                        stop_package_terminals_for_window(&handle, &window_label);
-                    }
-                    stop_all_package_terminals(&handle);
-                    logging::record("info", "lifecycle", "desktop:stopping", serde_json::json!({}), None);
+                    exit_teardown::stop_all_native_processes(&handle);
+                    logging::record(
+                        "info",
+                        "lifecycle",
+                        "desktop:stopping",
+                        serde_json::json!({}),
+                        None,
+                    );
                     logging::shutdown();
                     handle.exit(code.unwrap_or(0));
                 });
@@ -9415,6 +8921,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::project_file_search::search_project_files_from;
 
     #[cfg(target_os = "macos")]
     #[test]
@@ -9446,6 +8953,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn forced_stop_terminates_backend_descendant() {
+        use std::io::{BufRead, BufReader};
         let mut command = Command::new("/bin/sh");
         command
             .arg("-c")
@@ -10727,6 +10235,36 @@ mod tests {
 
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
         fs::remove_dir_all(home).expect("remove temporary home");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sidebar_task_bundle_fingerprint_uses_metadata_without_reading_attachments() {
+        use std::os::unix::fs::PermissionsExt;
+        let workspace = temporary_workspace("sidebar-task-bundle-fingerprint");
+        initialize_project_pi_from(&workspace).expect("initialize SQLite");
+        write_project_tasks_to(&workspace, &sample_task_document()).expect("write task");
+        let attachments = workspace.join(".pi/task-attachments");
+        let blob = attachments.join(format!("{:x}", Sha256::digest(b"image-v1")));
+        fs::write(&blob, b"image-v1").expect("write task attachment");
+        let (before, bytes) =
+            sidebar_registry_task_bundle_fingerprint(&workspace).expect("fingerprint bundle");
+        assert!(bytes >= 8);
+
+        // An unreadable blob proves the poll only stats attachments.
+        fs::set_permissions(&blob, fs::Permissions::from_mode(0o000)).expect("lock blob");
+        let unreadable = sidebar_registry_task_bundle_fingerprint(&workspace);
+        fs::set_permissions(&blob, fs::Permissions::from_mode(0o600)).expect("unlock blob");
+        assert_eq!(
+            unreadable.expect("fingerprint without reading blob").0,
+            before
+        );
+
+        fs::write(attachments.join("second"), b"another").expect("add attachment");
+        let (after, _) =
+            sidebar_registry_task_bundle_fingerprint(&workspace).expect("fingerprint bundle");
+        assert_ne!(after, before);
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 
     #[test]

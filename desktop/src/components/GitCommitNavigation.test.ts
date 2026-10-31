@@ -26,7 +26,7 @@ describe("search result -> Source Control -> historical Git Diff", () => {
     expect(logPanel).toContain("View diff for commit");
     expect(diffPane).toContain('diff.commit ? "Commit"');
     expect(diffPane).toContain("{#if !diff.commit}");
-    expect(diffPane).toContain('diff.content.split("\\n")');
+    expect(diffPane).toContain("chunkDiffLines(diff.content)");
     expect(workbench).toContain("!gitDiffPreview.commit");
   });
 });

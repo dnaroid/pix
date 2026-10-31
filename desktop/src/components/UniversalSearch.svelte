@@ -17,8 +17,8 @@
   import { SETTINGS_SEARCH_CATALOG } from "../lib/settings-search-catalog";
   import type { AcpClient } from "../lib/acp-client";
   import { queryNativeRepository, prepareNativeRerank, queryNativeRerank } from "../lib/native-repository-search";
+  import { searchGitHistory } from "../lib/git-history-search";
   import { parseTaskDocument } from "../lib/project-tasks";
-  import type { GitHistoryEntry } from "../lib/git-workflow";
   import type { SearchDialogMemory } from "../lib/search-dialog-memory";
   import { SearchIntentController } from "../lib/search-intent-controller";
   import { linkRagCitations, ragErrorMessage, ragRequest, retrieveRagHits } from "../lib/search-rag";
@@ -123,7 +123,7 @@
         plans: async workspace => (await invoke<{ plans: string[] }>("list_project_documents", { workspace })).plans,
         ...(requestClient ? { taskSemantic: (cwd: string, query: string, signal: AbortSignal) =>
           requestClient.searchSemanticTasks({ cwd, query, limit: 30 }, signal) } : {}),
-        commits: (workspace, query) => invoke<GitHistoryEntry[]>("git_search_history", { workspace, query }),
+        commits: (workspace, query, signal) => searchGitHistory(invoke, workspace, query, signal),
         ...(requestClient ? { commitHybrid: (cwd: string, query: string, signal: AbortSignal) => requestClient.searchCommits({ cwd, query, limit: 20 }, signal) } : {}),
       };
     const execute = (requestQuery: string, requestTypes: readonly SearchKind[], signal: AbortSignal, onUpdate: (result: UnifiedSearchResult) => void) =>

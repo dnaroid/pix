@@ -116,7 +116,12 @@ Keep Desktop connection teardown authoritative and yield between bounded portion
 - `desktop/src/app/session-tab-closure.test.ts` covers local background
   close/delete ownership and stale workspace completion;
   `desktop/src/app/workspace-session-startup.test.ts` covers same-owner
-  coalescing and workspace owner replacement.
+  coalescing, workspace owner replacement, and that a tab selected, draft
+  opened, or composer text typed while the startup listing is pending wins
+  over the restored selection (startup then leaves the selection alone).
+- `desktop/src/app/session-catalog.test.ts` covers a catalog refresh requested
+  while the startup listing is pending: it joins that listing instead of
+  superseding it, so startup always receives its response.
 - `desktop/src/lib/acp-client.test.ts` and `acp/test/agent.test.ts` cover attachment metadata, startup ownership, and cached activity replay on live-runtime reattachment.
 - `npm --prefix desktop test`
 - `npm --prefix desktop run check`

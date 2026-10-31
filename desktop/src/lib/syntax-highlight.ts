@@ -14,8 +14,37 @@ export interface HighlightedCode {
 // creating that many DOM nodes synchronously for large previews/tool results.
 const MAX_HIGHLIGHT_CHARS = 32 * 1024;
 
+// Streaming Markdown re-renders every settled fence on each frame. A small
+// LRU bounded by output size keeps that lookup-only instead of re-lexing.
+const HIGHLIGHT_CACHE_MAX_ENTRIES = 128;
+const HIGHLIGHT_CACHE_MAX_CHARS = 4 * 1024 * 1024;
+const highlightCache = new Map<string, HighlightedCode>();
+let highlightCacheChars = 0;
+
 /** Keep source and line navigation intact even when token highlighting is too expensive. */
 export function highlightCode(code: string, languageHint?: string): HighlightedCode {
+  const key = `${languageHint ?? ""}\0${code}`;
+  const cached = highlightCache.get(key);
+  if (cached) {
+    highlightCache.delete(key);
+    highlightCache.set(key, cached);
+    return cached;
+  }
+  const highlighted = highlightUncached(code, languageHint);
+  const size = key.length + highlighted.html.length;
+  if (size <= HIGHLIGHT_CACHE_MAX_CHARS / 8) {
+    highlightCache.set(key, highlighted);
+    highlightCacheChars += size;
+    for (const [oldestKey, oldest] of highlightCache) {
+      if (highlightCache.size <= HIGHLIGHT_CACHE_MAX_ENTRIES && highlightCacheChars <= HIGHLIGHT_CACHE_MAX_CHARS) break;
+      highlightCache.delete(oldestKey);
+      highlightCacheChars -= oldestKey.length + oldest.html.length;
+    }
+  }
+  return highlighted;
+}
+
+function highlightUncached(code: string, languageHint?: string): HighlightedCode {
   let language: CodeLanguage = "plaintext";
   if (code.length <= MAX_HIGHLIGHT_CHARS && languageHint) {
     if (/^(gd|gdscript)$/i.test(languageHint)) language = "gdscript";

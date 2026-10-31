@@ -144,6 +144,23 @@ describe("GLB retained viewer visibility", () => {
   });
 });
 
+describe("GLB WebGL context loss", () => {
+  it("reports a live context loss once, cancels pending draws and ignores loss caused by dispose", async () => {
+    const fixture = visibleSceneFixture();
+    const onContextLost = vi.fn();
+    const viewer = await createGlbScene(fixture.host as unknown as HTMLElement, new ArrayBuffer(0), new AbortController().signal, { onContextLost });
+    const lost = fixture.renderer.domElement.addEventListener.mock.calls.find(([type]) => type === "webglcontextlost")![1];
+    expect(fixture.frames.size).toBe(1);
+    lost({ preventDefault: vi.fn() });
+    expect(onContextLost).toHaveBeenCalledOnce();
+    expect(fixture.frames.size).toBe(0);
+    viewer?.dispose();
+    expect(fixture.renderer.domElement.removeEventListener).toHaveBeenCalledWith("webglcontextlost", lost);
+    lost({ preventDefault: vi.fn() });
+    expect(onContextLost).toHaveBeenCalledOnce();
+  });
+});
+
 describe("GLB scene late parse cleanup", () => {
   it("rejects a missing default scene before allocating WebGL", async () => {
     mocks.parse.mockResolvedValue({ scenes: [] });
@@ -195,7 +212,7 @@ describe("GLB scene late parse cleanup", () => {
     for (const release of [geometryDispose, canvas.remove, renderer.dispose, renderer.forceContextLoss, controls.dispose, disconnect]) {
       expect(release).toHaveBeenCalledOnce();
     }
-    expect(canvas.removeEventListener).toHaveBeenCalledTimes(3);
+    expect(canvas.removeEventListener).toHaveBeenCalledTimes(4);
     expect(controls.removeEventListener).toHaveBeenCalledTimes(3);
     expect(canvas.ownerDocument.removeEventListener).toHaveBeenCalledTimes(2);
   });

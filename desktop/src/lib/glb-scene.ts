@@ -31,10 +31,20 @@ function disposeModel(gltf: GLTF): void {
   }
 }
 
+export interface GlbSceneOptions {
+  /**
+   * WebKit evicts the oldest WebGL context when too many are active. The owner
+   * must release this scene and present a recoverable state; the scene only
+   * reports the loss and never draws into a lost context again.
+   */
+  readonly onContextLost?: () => void;
+}
+
 export async function createGlbScene(
   host: HTMLElement,
   bytes: ArrayBuffer,
   signal: AbortSignal,
+  options: GlbSceneOptions = {},
 ) {
   if (signal.aborted) return undefined;
   const manager = new THREE.LoadingManager();
@@ -202,6 +212,16 @@ export async function createGlbScene(
     }
     canvas.addEventListener("keydown", keydown);
     cleanups.push(() => canvas.removeEventListener("keydown", keydown));
+    // Our own forceContextLoss() during dispose also fires this event; only a
+    // loss of a live scene is reported to the owner.
+    function contextLost() {
+      if (disposed) return;
+      if (pendingFrame !== undefined) cancelAnimationFrame(pendingFrame);
+      pendingFrame = undefined;
+      options.onContextLost?.();
+    }
+    canvas.addEventListener("webglcontextlost", contextLost);
+    cleanups.push(() => canvas.removeEventListener("webglcontextlost", contextLost));
     const observer = new ResizeObserver(resize);
     cleanups.push(() => observer.disconnect());
     observer.observe(host);

@@ -7,18 +7,23 @@ const K1 = 1.2;
 const B = 0.75;
 const TITLE_WEIGHT = 3;
 
+// Term arrays are reused across re-ranks of the same hits (see search-relevance);
+// their counts depend only on the array, so count each array once.
+const termCounts = new WeakMap<readonly string[], Map<string, number>>();
+function count(words: readonly string[]): Map<string, number> {
+  const cached = termCounts.get(words);
+  if (cached) return cached;
+  const counts = new Map<string, number>();
+  for (const word of words) counts.set(word, (counts.get(word) ?? 0) + 1);
+  termCounts.set(words, counts);
+  return counts;
+}
+
 /** Field-weighted BM25 over the retrieved, deduplicated candidate corpus. */
 export function scoreBm25(documents: readonly SearchTerms[], query: readonly string[]): number[] {
   if (!documents.length) return [];
   const terms = [...new Set(query)];
-  const frequencies = documents.map(document => {
-    const count = (words: readonly string[]): Map<string, number> => {
-      const counts = new Map<string, number>();
-      for (const word of words) counts.set(word, (counts.get(word) ?? 0) + 1);
-      return counts;
-    };
-    return { title: count(document.title), metadata: count(document.metadata) };
-  });
+  const frequencies = documents.map(document => ({ title: count(document.title), metadata: count(document.metadata) }));
   const average = (field: keyof SearchTerms): number =>
     documents.reduce((sum, document) => sum + document[field].length, 0) / documents.length || 1;
   const averages = { title: average("title"), metadata: average("metadata") };

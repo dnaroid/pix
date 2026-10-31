@@ -26,6 +26,41 @@ function normalized(text: string, partialQuery = false): string[] {
   return tokens(text, partialQuery).map(stem);
 }
 
+interface HitTerms {
+  /** Settings metadata comes from the authored field, so it is part of the key. */
+  readonly field: SearchSetting | undefined;
+  readonly title: readonly string[];
+  readonly metadata: readonly string[];
+  readonly exactTitle: string;
+}
+
+// Universal Search re-ranks every accumulated hit each time a source reports.
+// Tokenizing/stemming full code content is the expensive part and depends only
+// on the hit, so it is computed once per hit object (and query mode).
+const submittedTerms = new WeakMap<SearchHit, HitTerms>();
+const partialTerms = new WeakMap<SearchHit, HitTerms>();
+
+function hitTerms(hit: SearchHit, field: SearchSetting | undefined, partialQuery: boolean): HitTerms {
+  const cache = partialQuery ? partialTerms : submittedTerms;
+  const cached = cache.get(hit);
+  if (cached && cached.field === field) return cached;
+  let metadata = hit.snippet;
+  if (hit.kind === "settings") {
+    if (field) metadata = `${field.description} ${field.synonyms.join(" ")}`;
+  } else if (hit.kind === "tasks") metadata += ` ${hit.taskId}`;
+  else if (hit.kind === "commits") metadata += ` ${hit.hash} ${hit.commit.author} ${hit.commit.changedPaths?.join(" ") ?? ""}`;
+  else if (hit.kind === "code" || hit.kind === "knowledge") metadata = hit.content ?? metadata;
+  const titleTokens = tokens(hit.title, partialQuery);
+  const terms: HitTerms = {
+    field,
+    title: titleTokens.map(stem),
+    metadata: normalized(metadata, partialQuery),
+    exactTitle: titleTokens.join(" "),
+  };
+  cache.set(hit, terms);
+  return terms;
+}
+
 function coverage(words: readonly string[], text: readonly string[]): number {
   const found = new Set(text);
   return words.filter(word => found.has(word)).length / words.length;
@@ -56,7 +91,7 @@ export function rankSearchHits(
   const fields = new Map(settings.map(field => [field.id, field]));
   // Inline previews complete the currently typed prefix using the same BM25
   // field weighting and normalization; submitted global queries stay exact.
-  const matchTerms = (terms: string[]) => partialQuery
+  const matchTerms = (terms: readonly string[]) => partialQuery
     ? terms.map(term => words.find(word => term.startsWith(word)) ?? term)
     : terms;
   const sourceRanks = new Map<string, number>();
@@ -67,16 +102,11 @@ export function rankSearchHits(
   }
   const documents = candidates.flatMap(hit => {
     const key = `${hit.kind}:${hit.id}`;
-    let metadata = hit.snippet;
-    if (hit.kind === "settings") {
-      const field = fields.get(hit.fieldId);
-      if (field) metadata = `${field.description} ${field.synonyms.join(" ")}`;
-    } else if (hit.kind === "tasks") metadata += ` ${hit.taskId}`;
-    else if (hit.kind === "commits") metadata += ` ${hit.hash} ${hit.commit.author} ${hit.commit.changedPaths?.join(" ") ?? ""}`;
-    else if (hit.kind === "code" || hit.kind === "knowledge") metadata = hit.content ?? metadata;
-    const title = matchTerms(normalized(hit.title, partialQuery));
-    const metadataWords = matchTerms(normalized(metadata, partialQuery));
-    if (hit.kind === "commits" && rawWords.length === 1 && /^[a-f0-9]{7,64}$/u.test(rawWords[0]!) && hit.hash.startsWith(rawWords[0]!)) metadataWords.push(words[0]!);
+    const terms = hitTerms(hit, hit.kind === "settings" ? fields.get(hit.fieldId) : undefined, partialQuery);
+    const title = matchTerms(terms.title);
+    let metadataWords = matchTerms(terms.metadata);
+    // Copy before adding the query-specific hash term: cached terms are shared.
+    if (hit.kind === "commits" && rawWords.length === 1 && /^[a-f0-9]{7,64}$/u.test(rawWords[0]!) && hit.hash.startsWith(rawWords[0]!)) metadataWords = [...metadataWords, words[0]!];
     const totalCoverage = coverage(words, [...title, ...metadataWords]);
     // Native search exposes paths/ranges independently of full source content.
     const opaque = hit.kind === "code" || hit.kind === "knowledge" || (hit.kind === "settings" && semanticSettings)
@@ -84,7 +114,7 @@ export function rankSearchHits(
       || (hit.kind === "tasks" && hit.semantic === true)
       || (hit.kind === "commits" && (("semantic" in hit && hit.semantic === true)
         || ("contentMatch" in hit && hit.contentMatch === true)));
-    const exact = tokens(hit.title, partialQuery).join(" ") === rawWords.join(" ");
+    const exact = terms.exactTitle === rawWords.join(" ");
     return [{ hit, title, metadata: metadataWords, eligible: totalCoverage >= 0.5 || opaque, exact, rank: sourceRanks.get(key) ?? 0 }];
   });
   const scores = scoreBm25(documents, words);

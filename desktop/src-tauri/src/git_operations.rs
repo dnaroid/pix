@@ -5,22 +5,19 @@ use super::{
     git_command, git_has_head, git_output, git_output_raw, git_repository_root, git_status_from,
     run_blocking, truncate_git_diff, validate_git_relative_path, MAX_GIT_DIFF_BYTES,
 };
+use crate::git_process::git_network_output;
 use serde::Serialize;
 use serde_json::json;
-use std::{
-    io::{BufRead, BufReader, Read},
-    path::Path,
-    process::{Command, Stdio},
-};
+use std::{io::Read, path::Path, process::Stdio};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GitHistoryEntry {
-    hash: String,
-    short_hash: String,
-    subject: String,
-    author: String,
-    date: String,
+    pub(crate) hash: String,
+    pub(crate) short_hash: String,
+    pub(crate) subject: String,
+    pub(crate) author: String,
+    pub(crate) date: String,
 }
 
 /// Bounded read-only patch and verified metadata for one HEAD-reachable commit.
@@ -66,14 +63,6 @@ pub(crate) async fn git_update(workspace: String) -> Result<GitUpdateResult, Str
 #[tauri::command]
 pub(crate) async fn git_history(workspace: String) -> Result<Vec<GitHistoryEntry>, String> {
     run_blocking(move || history_from(Path::new(&workspace))).await
-}
-
-#[tauri::command]
-pub(crate) async fn git_search_history(
-    workspace: String,
-    query: String,
-) -> Result<Vec<GitHistoryEntry>, String> {
-    run_blocking(move || search_history_from(Path::new(&workspace), &query)).await
 }
 
 #[tauri::command]
@@ -215,7 +204,7 @@ fn fetch_from(workspace: &Path) -> Result<(), String> {
     if git_status_from(&root)?.remotes.is_empty() {
         return Err("No Git remote is configured".to_owned());
     }
-    git_output(&root, &["fetch", "--all"]).map(|_| ())
+    git_network_output(&root, &["fetch", "--all"], "fetch").map(|_| ())
 }
 
 fn require_clean(root: &Path) -> Result<(), String> {
@@ -234,7 +223,7 @@ fn pull_from(workspace: &Path) -> Result<(), String> {
     require_clean(&root)?;
     // Override user autostash/rebase defaults. Divergence is reported, never
     // resolved by an implicit merge, rebase, reset or force push.
-    git_output(
+    git_network_output(
         &root,
         &[
             "-c",
@@ -243,6 +232,7 @@ fn pull_from(workspace: &Path) -> Result<(), String> {
             "--ff-only",
             "--no-rebase",
         ],
+        "pull",
     )
     .map(|_| ())
 }
@@ -261,7 +251,7 @@ fn update_from(workspace: &Path) -> Result<GitUpdateResult, String> {
     if snapshot.changes.iter().any(|change| change.conflicted) {
         return Err("Resolve conflicts before updating".to_owned());
     }
-    git_output(&root, &["fetch"])?;
+    git_network_output(&root, &["fetch"], "fetch")?;
     let snapshot = git_status_from(&root)?;
     if snapshot.behind == 0 {
         return Ok(GitUpdateResult {
@@ -373,129 +363,6 @@ fn history_from(workspace: &Path) -> Result<Vec<GitHistoryEntry>, String> {
             })
         })
         .collect())
-}
-
-fn search_history_from(workspace: &Path, query: &str) -> Result<Vec<GitHistoryEntry>, String> {
-    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
-    if words.is_empty() {
-        return Ok(Vec::new());
-    }
-    let root = git_repository_root(workspace)?;
-    if !git_has_head(&root)? {
-        return Ok(Vec::new());
-    }
-
-    // Stream all commits reachable from HEAD. Keep only the best twenty rows;
-    // unlike `git_history`, this deliberately has no history-depth limit.
-    let mut child = Command::new("git")
-        .arg("-C")
-        .arg(&root)
-        .args([
-            "-c",
-            "color.ui=false",
-            "-c",
-            "core.quotepath=false",
-            "-c",
-            "core.pager=cat",
-        ])
-        .args([
-            "log",
-            "--no-show-signature",
-            "--format=%H%x00%h%x00%s%x00%an%x00%aI%x00",
-        ])
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GCM_INTERACTIVE", "Never")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|error| format!("failed to run git log for history search: {error}"))?;
-    let stdout = match child.stdout.take() {
-        Some(stdout) => stdout,
-        None => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err("failed to capture Git history search output".to_owned());
-        }
-    };
-    let mut reader = BufReader::new(stdout);
-    let mut field = Vec::new();
-    let mut best: Vec<(usize, usize, GitHistoryEntry)> = Vec::with_capacity(20);
-    let mut newest_order = 0usize;
-    let read_result = (|| -> std::io::Result<()> {
-        loop {
-            let mut fields: Vec<String> = Vec::with_capacity(5);
-            for _ in 0..5 {
-                field.clear();
-                if reader.read_until(0, &mut field)? == 0 {
-                    return if fields.is_empty()
-                        || (fields.len() == 1 && fields[0].trim().is_empty())
-                    {
-                        Ok(())
-                    } else {
-                        Err(std::io::Error::new(
-                            std::io::ErrorKind::UnexpectedEof,
-                            "incomplete Git history record",
-                        ))
-                    };
-                }
-                if field.last() == Some(&0) {
-                    field.pop();
-                }
-                fields.push(String::from_utf8_lossy(&field).into_owned());
-            }
-            fields[0] = fields[0].trim_start_matches(['\n', '\r']).to_owned();
-            if fields[0].is_empty() {
-                break;
-            }
-            let entry = GitHistoryEntry {
-                hash: fields[0].clone(),
-                short_hash: fields[1].clone(),
-                subject: fields[2].clone(),
-                author: fields[3].clone(),
-                date: fields[4].clone(),
-            };
-            let subject = entry.subject.to_lowercase();
-            let metadata = format!("{} {}", entry.hash, entry.author).to_lowercase();
-            let score: usize = words
-                .iter()
-                .map(|word| {
-                    if subject.contains(word) {
-                        2
-                    } else if metadata.contains(word) {
-                        1
-                    } else {
-                        0
-                    }
-                })
-                .sum();
-            if score > 0 {
-                best.push((score, newest_order, entry));
-                best.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
-                best.truncate(20);
-            }
-            newest_order = newest_order.saturating_add(1);
-        }
-        Ok(())
-    })();
-    if let Err(error) = read_result {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(format!("failed to read Git history search output: {error}"));
-    }
-    let status = match child.wait() {
-        Ok(status) => status,
-        Err(error) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(format!("failed to wait for Git history search: {error}"));
-        }
-    };
-    if !status.success() {
-        return Err("Git history search failed".to_owned());
-    }
-    Ok(best.into_iter().map(|(_, _, entry)| entry).collect())
 }
 
 fn stash_list_from(workspace: &Path) -> Result<Vec<GitStashEntry>, String> {
@@ -634,7 +501,6 @@ mod tests {
     fn git_secondary_history_handles_unborn_and_limits_results() {
         let repo = Repository::new();
         assert!(history_from(&repo.0).unwrap().is_empty());
-        assert!(search_history_from(&repo.0, "change").unwrap().is_empty());
         for index in 0..32 {
             repo.commit(&format!("change {index}"));
         }
@@ -642,44 +508,6 @@ mod tests {
         assert_eq!(history.len(), 30);
         assert_eq!(history[0].subject, "change 31");
         assert_eq!(history[0].author, "Pix Test");
-    }
-
-    #[test]
-    fn git_history_search_scans_all_head_ancestors_and_matches_metadata() {
-        let repo = Repository::new();
-        repo.commit("oldest needle commit");
-        let oldest_hash = git_stdout_line(&repo.0, &["rev-parse", "HEAD"]).unwrap();
-        for index in 1..36 {
-            repo.commit(&format!("ordinary change {index}"));
-        }
-
-        let by_subject = search_history_from(&repo.0, "needle").unwrap();
-        assert_eq!(by_subject.len(), 1);
-        assert_eq!(by_subject[0].hash, oldest_hash);
-        assert_eq!(by_subject[0].subject, "oldest needle commit");
-        let by_author = search_history_from(&repo.0, "pix test").unwrap();
-        assert_eq!(by_author.len(), 20);
-        assert_eq!(
-            by_author[0].hash,
-            git_stdout_line(&repo.0, &["rev-parse", "HEAD"]).unwrap()
-        );
-        assert_eq!(
-            search_history_from(&repo.0, &oldest_hash[..8]).unwrap()[0].hash,
-            oldest_hash
-        );
-        assert!(search_history_from(&repo.0, "  ").unwrap().is_empty());
-    }
-
-    #[test]
-    fn git_history_search_rejects_non_repositories() {
-        let directory = std::env::temp_dir().join(format!(
-            "pix-not-git-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(&directory).unwrap();
-        assert!(search_history_from(&directory, "needle").is_err());
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

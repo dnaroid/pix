@@ -21,6 +21,23 @@ function replySelection(text: string, actions: ChoiceActions): ChoiceActions | u
   };
 }
 
+type ChoiceBlock = { actions: ChoiceActions; blockIndex: number };
+
+// Assistant messages are immutable snapshots: parse each one once instead of
+// re-splitting the whole transcript on every streamed frame.
+const choiceBlocksByMessage = new WeakMap<object, readonly ChoiceBlock[]>();
+
+function choiceBlocks(item: object, text: string): readonly ChoiceBlock[] {
+  let blocks = choiceBlocksByMessage.get(item);
+  if (!blocks) {
+    blocks = splitHtmlSandboxSegments(text, { actions: true })
+      .filter((segment) => segment.type === "actions")
+      .map((segment, blockIndex) => ({ actions: segment.actions, blockIndex }));
+    choiceBlocksByMessage.set(item, blocks);
+  }
+  return blocks;
+}
+
 /** Derive receipts and their hidden source blocks from persisted text. */
 export function choiceActionsPresentation(items: readonly TranscriptDisplayItem[]): {
   replies: ReadonlyMap<string, ChoiceActions>;
@@ -32,9 +49,8 @@ export function choiceActionsPresentation(items: readonly TranscriptDisplayItem[
   for (const item of items) {
     if (item.type !== "message") continue;
     if (item.role === "assistant") {
-      candidates = splitHtmlSandboxSegments(item.text, { actions: true })
-        .filter((segment) => segment.type === "actions")
-        .map((segment, blockIndex) => ({ actions: segment.actions, messageId: item.id, blockIndex }));
+      candidates = choiceBlocks(item, item.text)
+        .map(({ actions, blockIndex }) => ({ actions, messageId: item.id, blockIndex }));
     } else if (item.role === "user") {
       const matches = candidates.flatMap((candidate) => {
         const reply = replySelection(item.text, candidate.actions);

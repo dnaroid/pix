@@ -109,4 +109,83 @@ describe("workspace session startup", () => {
     secondListing.resolve({ sessions: [] });
     await Promise.all([first, second]);
   });
+
+  function selectionFixture() {
+    const listing = deferred<{ sessions: { sessionId: string; cwd: string }[] }>();
+    const client = {};
+    let promptText = "";
+    const state = {
+      sessionId: null as string | null,
+      resetConversation: vi.fn(),
+      setSessionId: vi.fn((id: string | null) => { state.sessionId = id; }),
+      setConfigOptions: vi.fn(),
+      setRuntimeReady: vi.fn(),
+      setTranscript: vi.fn(),
+    };
+    const draft = { open: false, active: false, activate: vi.fn(), close: vi.fn() };
+    const hydrate = vi.fn(async () => {});
+    const tabs = {
+      sessionTabsForProject: () => ["a"],
+      activeForProject: () => "a",
+      forgetActive: vi.fn(),
+      show: vi.fn(),
+      rememberActive: vi.fn(),
+      restoredIds: ["a", "b"],
+    };
+    const startup = createWorkspaceSessionStartup({
+      client: () => client,
+      workspace: () => "/project",
+      catalog: { listNow: () => listing.promise },
+      tabs,
+      draft,
+      runtime: { getConfigOptions: () => [], isReady: () => false, ensure: vi.fn(async () => {}), schedulePrewarm: vi.fn() },
+      history: { begin: () => 1, hydrate, cancel: vi.fn() },
+      state,
+      setErrorMessage: vi.fn(),
+      reportError: vi.fn(),
+      promptText: () => promptText,
+      promptAttachments: () => [],
+    } as any);
+    const sessions = [{ sessionId: "a", cwd: "/project" }, { sessionId: "b", cwd: "/project" }];
+    return {
+      startup, state, draft, hydrate, tabs,
+      resolve: () => listing.resolve({ sessions }),
+      type: (text: string) => { promptText = text; },
+    };
+  }
+
+  it("restores the remembered session when the selection is untouched", async () => {
+    const f = selectionFixture();
+    const opening = f.startup.open();
+    f.resolve();
+    await opening;
+    expect(f.state.setSessionId).toHaveBeenCalledWith("a");
+    expect(f.hydrate).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a tab selected by the user while the workspace listing is pending", async () => {
+    const f = selectionFixture();
+    const opening = f.startup.open();
+    f.state.sessionId = "b";
+    f.resolve();
+    await opening;
+    expect(f.state.sessionId).toBe("b");
+    expect(f.state.resetConversation).not.toHaveBeenCalled();
+    expect(f.state.setSessionId).not.toHaveBeenCalled();
+    expect(f.hydrate).not.toHaveBeenCalled();
+    expect(f.tabs.rememberActive).not.toHaveBeenCalled();
+  });
+
+  it("does not reset or close a draft the user opened or typed into while opening", async () => {
+    const f = selectionFixture();
+    f.draft.open = true;
+    f.draft.active = true;
+    const opening = f.startup.open();
+    f.type("unsent text");
+    f.resolve();
+    await opening;
+    expect(f.draft.activate).not.toHaveBeenCalled();
+    expect(f.draft.close).not.toHaveBeenCalled();
+    expect(f.state.setSessionId).not.toHaveBeenCalled();
+  });
 });

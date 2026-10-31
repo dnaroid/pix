@@ -13,11 +13,64 @@ type MermaidTheme = {
   primary: string;
 };
 
-export async function renderMermaidDiagram(
+type CachedDiagram = { readonly promise: Promise<string | undefined>; settled: boolean; svg?: string };
+
+// Streaming Markdown replaces its DOM every frame; diagrams already rendered
+// for the same source and theme are reused instead of re-rendered.
+const MAX_CACHED_DIAGRAMS = 32;
+const diagramCache = new Map<string, CachedDiagram>();
+
+/** Theme identity for {@link cachedMermaidDiagram}; read once per render pass. */
+export function mermaidThemeKey(themeRoot: HTMLElement): string {
+  return JSON.stringify(mermaidTheme(themeRoot));
+}
+
+/** A settled render for this source and theme, or `null` when none is cached yet. */
+export function cachedMermaidDiagram(source: string, themeKey: string): string | undefined | null {
+  const cached = diagramCache.get(`${themeKey}\0${source}`);
+  return cached?.settled ? cached.svg : null;
+}
+
+export function renderMermaidDiagram(
   source: string,
   themeRoot: HTMLElement,
 ): Promise<string | undefined> {
-  configureMermaid(themeRoot);
+  const themeKey = mermaidThemeKey(themeRoot);
+  const key = `${themeKey}\0${source}`;
+  const cached = diagramCache.get(key);
+  if (cached) {
+    diagramCache.delete(key);
+    diagramCache.set(key, cached);
+    return cached.promise;
+  }
+  const entry: CachedDiagram = {
+    settled: false,
+    promise: renderUncached(source, themeRoot, themeKey).then(
+      (svg) => {
+        entry.settled = true;
+        entry.svg = svg;
+        return svg;
+      },
+      (error: unknown) => {
+        if (diagramCache.get(key) === entry) diagramCache.delete(key);
+        throw error;
+      },
+    ),
+  };
+  diagramCache.set(key, entry);
+  for (const oldest of diagramCache.keys()) {
+    if (diagramCache.size <= MAX_CACHED_DIAGRAMS) break;
+    diagramCache.delete(oldest);
+  }
+  return entry.promise;
+}
+
+async function renderUncached(
+  source: string,
+  themeRoot: HTMLElement,
+  themeKey: string,
+): Promise<string | undefined> {
+  configureMermaid(themeRoot, themeKey);
 
   const parsed = await mermaid.parse(source, { suppressErrors: true });
   if (!parsed) return undefined;
@@ -27,10 +80,9 @@ export async function renderMermaidDiagram(
   return svg;
 }
 
-function configureMermaid(themeRoot: HTMLElement): void {
-  const theme = mermaidTheme(themeRoot);
-  const themeKey = JSON.stringify(theme);
+function configureMermaid(themeRoot: HTMLElement, themeKey: string): void {
   if (themeKey === activeThemeKey) return;
+  const theme = mermaidTheme(themeRoot);
 
   mermaid.initialize({
     startOnLoad: false,

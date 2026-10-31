@@ -49,3 +49,26 @@ function mergeTool(history: ToolItem, current: ToolItem): ToolItem {
     deferredResult: hasResult ? false : newer.deferredResult ?? older.deferredResult,
   };
 }
+
+/**
+ * Replace a cache that was filled only by live updates (never hydrated).
+ * Live stream message IDs differ from replay IDs, so merging would duplicate
+ * any turn that is already persisted. History supersedes the items cached
+ * before the history request started; items added or changed afterwards and
+ * unpersisted live notices stay on top.
+ */
+export function supersedeLiveTranscript(
+  history: TranscriptState,
+  current: TranscriptState,
+  cachedAtRequest: readonly TranscriptItem[],
+): TranscriptState {
+  const persisted = new Set(cachedAtRequest);
+  const kept = current.items.filter((item) => !persisted.has(item) || unpersistedNotice(item));
+  return mergeTranscriptHistory(history, { items: kept });
+}
+
+function unpersistedNotice(item: TranscriptItem): boolean {
+  return item.type === "message"
+    && item.role === "system"
+    && !item.messageId?.startsWith("pix-system:error:");
+}

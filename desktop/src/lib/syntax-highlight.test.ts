@@ -46,6 +46,18 @@ describe("syntax highlighting", () => {
     expect(result.html.endsWith('<span class="sh__line"></span>')).toBe(true);
   });
 
+  it("reuses highlighted output for repeated fences without mixing languages", () => {
+    const first = highlightCode("const value = 1;", "ts");
+    expect(highlightCode("const value = 1;", "ts")).toBe(first);
+    const plain = highlightCode("const value = 1;", "text");
+    expect(plain).not.toBe(first);
+    expect(plain.language).toBe("plaintext");
+    for (let index = 0; index < 300; index += 1) highlightCode(`let item${index} = ${index};`, "js");
+    const evicted = highlightCode("const value = 1;", "ts");
+    expect(evicted).not.toBe(first);
+    expect(evicted).toEqual(first);
+  });
+
   it("preserves empty lines and CRLF in plaintext fallback", () => {
     expect(highlightCode("\r\ntext\r\n\n").html).toBe([
       '<span class="sh__line">\r</span>',

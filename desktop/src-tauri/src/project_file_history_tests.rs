@@ -464,9 +464,11 @@ fn history_is_hidden_ignored_and_survives_manual_and_ttl_cleanup() {
     assert_eq!(w.read(".pi/file-history/.gitignore"), "*\n");
     let entries = crate::list_project_directory_from(&w.0, Some(Path::new(".pi"))).unwrap();
     assert!(!entries.iter().any(|e| e.name == "file-history"));
-    assert!(crate::search_project_files_from(&w.0, "retained-user-data")
-        .unwrap()
-        .is_empty());
+    assert!(
+        crate::project_file_search::search_project_files_from(&w.0, "retained-user-data")
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -494,4 +496,57 @@ fn cross_workspace_copy_and_simultaneous_replay_never_touch_the_source_or_overwr
     forget(vec![copy.token.clone()]);
     assert!(replay(&target.0, &copy.token, false).is_err());
     assert!(target.exists(&format!("{STORAGE}/{}/data-0", copy.token)));
+}
+
+#[test]
+fn failed_copy_removes_its_stage_and_the_unused_history_folder() {
+    let w = Workspace::new();
+    fs::create_dir_all(w.0.join("folder/nested")).unwrap();
+    fs::create_dir(w.0.join("dest")).unwrap();
+    w.write("folder/nested/file", "data");
+    let error = execute_with(
+        &w.0,
+        Request::Copy {
+            paths: vec!["folder".into()],
+            destination: "dest".into(),
+            source_workspace: None,
+        },
+        |_| fs::create_dir(w.0.join("dest/folder")).unwrap(),
+    );
+    assert!(error.is_err());
+    assert_eq!(w.read("folder/nested/file"), "data");
+    assert!(fs::read_dir(w.0.join("dest/folder"))
+        .unwrap()
+        .next()
+        .is_none());
+    let leftovers: Vec<_> = fs::read_dir(w.0.join(STORAGE))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| !name.starts_with('.'))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+}
+
+#[test]
+fn a_busy_workspace_does_not_block_file_history_in_another_workspace() {
+    let busy = Workspace::new();
+    let other = Workspace::new();
+    let held = WORKSPACES.acquire([busy.0.clone()]);
+    let (busy, other) = (&busy, &other);
+    std::thread::scope(|scope| {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        scope.spawn(move || sender.send(other.create("file").token).unwrap());
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("another workspace must not wait for the busy one");
+        let (sender, receiver) = std::sync::mpsc::channel();
+        scope.spawn(move || sender.send(busy.create("blocked").token).unwrap());
+        assert!(receiver
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .is_err());
+        drop(held);
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+    });
 }

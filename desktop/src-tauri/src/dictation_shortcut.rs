@@ -49,6 +49,63 @@ impl WindowOwners {
     }
 }
 
+/// Pix windows that currently have keyboard focus. The HID tap sees every key
+/// press system-wide on the main run loop, so it is installed only while a Pix
+/// window is focused; a main-thread stall then cannot delay typing in other apps.
+#[cfg(any(target_os = "macos", test))]
+#[derive(Default)]
+struct FocusedWindows {
+    /// No focus event has been observed yet (e.g. right after launch).
+    known: bool,
+    labels: std::collections::HashSet<String>,
+}
+
+#[cfg(any(target_os = "macos", test))]
+impl FocusedWindows {
+    fn set(&mut self, label: &str, focused: bool) {
+        self.known = true;
+        if focused {
+            self.labels.insert(label.to_owned());
+        } else {
+            self.labels.remove(label);
+        }
+    }
+    fn remove(&mut self, label: &str) {
+        self.labels.remove(label);
+    }
+    /// Until the first focus event, trust the caller's native foreground check.
+    fn active(&self, foreground: bool) -> bool {
+        if self.known {
+            !self.labels.is_empty()
+        } else {
+            foreground
+        }
+    }
+}
+
+/// Window focus re-runs the shortcut refresh; report a persistent failure (such
+/// as missing Accessibility permission) once, not on every activation.
+#[cfg(any(target_os = "macos", test))]
+#[derive(Default)]
+struct ErrorLatch(Option<String>);
+
+#[cfg(any(target_os = "macos", test))]
+impl ErrorLatch {
+    fn should_log(&mut self, result: &Result<(), String>) -> bool {
+        match result {
+            Ok(()) => {
+                self.0 = None;
+                false
+            }
+            Err(error) if self.0.as_deref() == Some(error.as_str()) => false,
+            Err(error) => {
+                self.0 = Some(error.clone());
+                true
+            }
+        }
+    }
+}
+
 #[cfg(any(target_os = "macos", test))]
 impl KeyFilter {
     fn route(&mut self, keycode: i64, down: bool, eligible: bool, repeat: bool) -> KeyAction {
@@ -97,7 +154,8 @@ pub(crate) async fn desktop_set_dictation_shortcut(
     Ok(())
 }
 
-/// Recheck after Settings saves and window activation, never inside the event tap.
+/// Recheck after Settings saves, composer ownership and window activation
+/// (see `window_focus_changed`), never inside the event tap.
 pub(crate) async fn refresh(app: &AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
@@ -148,6 +206,32 @@ async fn on_main(
     receive.await.map_err(|error| error.to_string())?
 }
 
+/// Called on the main thread for every Pix window focus change. Losing the last
+/// focused window removes the HID tap immediately; regaining focus reinstalls it
+/// through `refresh` only when a composer owns the shortcut.
+pub(crate) fn window_focus_changed(app: &AppHandle, label: &str, focused: bool) {
+    #[cfg(target_os = "macos")]
+    {
+        use std::sync::{LazyLock, Mutex, PoisonError};
+        static FOCUS_ERRORS: LazyLock<Mutex<ErrorLatch>> = LazyLock::new(Default::default);
+        if macos::focus_changed(label, focused) && focused {
+            let handle = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let result = refresh(&handle).await;
+                let log = FOCUS_ERRORS
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .should_log(&result);
+                if let (true, Err(error)) = (log, result) {
+                    crate::logging::error(module_path!(), format!("dictation shortcut: {error}"));
+                }
+            });
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, label, focused);
+}
+
 pub(crate) fn destroyed(label: &str) {
     #[cfg(target_os = "macos")]
     macos::remove_window(label);
@@ -188,6 +272,7 @@ mod macos {
     #[derive(Default)]
     struct Host {
         windows: WindowOwners,
+        focus: FocusedWindows,
         configured: bool,
         prompted: bool,
         keys: KeyFilter,
@@ -224,10 +309,26 @@ mod macos {
         drop(removed);
         Ok(())
     }
+    /// Returns whether any composer owns the shortcut (a refresh is useful).
+    pub(super) fn focus_changed(label: &str, focused: bool) -> bool {
+        let (owned, removed) = HOST.with_borrow_mut(|host| {
+            host.focus.set(label, focused);
+            let removed = if host.focus.active(true) {
+                None
+            } else {
+                host.keys = KeyFilter::default();
+                host.tap.take()
+            };
+            (!host.windows.is_empty(), removed)
+        });
+        drop(removed);
+        owned
+    }
     pub(super) fn remove_window(label: &str) {
         let removed = HOST.with_borrow_mut(|host| {
             host.windows.remove(label);
-            if host.windows.is_empty() {
+            host.focus.remove(label);
+            if host.windows.is_empty() || !host.focus.active(true) {
                 host.keys = KeyFilter::default();
                 host.tap.take()
             } else {
@@ -256,9 +357,11 @@ mod macos {
     }
 
     pub(super) fn configure(app: &AppHandle, configured: bool) -> Result<(), String> {
+        // Native check outside HOST; only consulted before the first focus event.
+        let foreground = key_window(app).is_some();
         let (removed, prompt) = HOST.with_borrow_mut(|host| {
             host.configured = configured;
-            if !configured || host.windows.is_empty() {
+            if !configured || host.windows.is_empty() || !host.focus.active(foreground) {
                 host.keys = KeyFilter::default();
                 return (host.tap.take(), None);
             }
@@ -291,7 +394,11 @@ mod macos {
         let tap = Rc::new(Tap { event, source });
         let installed = HOST.with_borrow_mut(|host| {
             // Permission UI could have changed eligibility or installed a newer tap.
-            if !host.configured || host.windows.is_empty() || host.tap.is_some() {
+            if !host.configured
+                || host.windows.is_empty()
+                || !host.focus.active(foreground)
+                || host.tap.is_some()
+            {
                 return false;
             }
             host.tap = Some(tap.clone());
@@ -410,6 +517,37 @@ mod tests {
         assert!(owners.contains("main"));
         owners.set("main".into(), "new".into(), false);
         assert!(owners.is_empty());
+    }
+
+    #[test]
+    fn tap_is_active_only_while_a_pix_window_has_focus() {
+        let mut focus = FocusedWindows::default();
+        // Before any focus event, defer to the native foreground check.
+        assert!(focus.active(true));
+        assert!(!focus.active(false));
+        focus.set("main", true);
+        assert!(focus.active(false));
+        // Switching between Pix windows in either event order stays active.
+        focus.set("other", true);
+        focus.set("main", false);
+        assert!(focus.active(false));
+        // Another app became active: no Pix window is focused.
+        focus.set("other", false);
+        assert!(!focus.active(true));
+        focus.set("main", true);
+        focus.remove("main");
+        assert!(!focus.active(true));
+    }
+
+    #[test]
+    fn repeated_focus_refresh_errors_are_logged_once_until_resolved() {
+        let mut latch = ErrorLatch::default();
+        let missing = Err("allow Accessibility".to_owned());
+        assert!(latch.should_log(&missing));
+        assert!(!latch.should_log(&missing));
+        assert!(latch.should_log(&Err("other".to_owned())));
+        assert!(!latch.should_log(&Ok(())));
+        assert!(latch.should_log(&missing));
     }
 
     #[test]
