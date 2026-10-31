@@ -1,5 +1,5 @@
 import { tick } from "svelte";
-import { findTextMatches, type TextSearchMatch } from "../lib/file-search";
+import { findSpanIndex, findTextMatches, lineIndexAt, type TextSearchMatch } from "../lib/file-search";
 
 type PreviewFileSearchOptions = {
   active: () => boolean;
@@ -23,11 +23,13 @@ type HighlightRegistry = {
   delete: (name: string) => boolean;
 };
 
+/** Typing waits this long before searching; Enter/next/prev run immediately. */
+export const PREVIEW_SEARCH_DEBOUNCE_MS = 100;
 const SEARCH_HIGHLIGHT = "pix-preview-search";
 const ACTIVE_SEARCH_HIGHLIGHT = "pix-preview-search-active";
 
 function cssHighlightRegistry(): HighlightRegistry | undefined {
-  return (CSS as unknown as { highlights?: HighlightRegistry }).highlights;
+  return (globalThis as unknown as { CSS?: { highlights?: HighlightRegistry } }).CSS?.highlights;
 }
 
 function highlightConstructor(): (new (...ranges: Range[]) => unknown) | undefined {
@@ -37,28 +39,35 @@ function highlightConstructor(): (new (...ranges: Range[]) => unknown) | undefin
 function collectTextNodes(root: HTMLElement): { text: string; spans: TextNodeSpan[] } {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const spans: TextNodeSpan[] = [];
-  let text = "";
+  const parts: string[] = [];
+  let length = 0;
   let node = walker.nextNode();
   while (node) {
     if (node instanceof Text) {
-      const start = text.length;
-      text += node.data;
-      spans.push({ node, start, end: text.length });
+      const start = length;
+      length += node.data.length;
+      parts.push(node.data);
+      spans.push({ node, start, end: length });
     }
     node = walker.nextNode();
   }
-  return { text, spans };
+  return { text: parts.join(""), spans };
 }
 
 function rangeForMatch(spans: readonly TextNodeSpan[], match: TextSearchMatch): Range | undefined {
-  const startSpan = spans.find((span) => match.start >= span.start && match.start < span.end);
-  const endSpan = spans.find((span) => match.end > span.start && match.end <= span.end);
+  const startSpan = spans[findSpanIndex(spans, match.start, "start")];
+  const endSpan = spans[findSpanIndex(spans, match.end, "end")];
   if (!startSpan || !endSpan) return undefined;
   const range = document.createRange();
   range.setStart(startSpan.node, match.start - startSpan.start);
   range.setEnd(endSpan.node, match.end - endSpan.start);
   return range;
 }
+
+/** Matches for one query over one text snapshot; reused by Enter/next/prev. */
+type SearchResult =
+  | { kind: "editor"; query: string; text: string; matches: TextSearchMatch[] }
+  | { kind: "dom"; query: string; root: HTMLElement; version: number; ranges: Range[] };
 
 export function createPreviewFileSearchController(options: PreviewFileSearchOptions) {
   const state = $state({
@@ -69,10 +78,52 @@ export function createPreviewFileSearchController(options: PreviewFileSearchOpti
   });
   let observedPreviewId: number | undefined;
   let refreshGeneration = 0;
+  let queryTimer: ReturnType<typeof setTimeout> | undefined;
+  let result: SearchResult | undefined;
   let fallbackSelectionRange: Range | undefined;
   let editorSearchSelection:
     | { element: HTMLTextAreaElement; start: number; end: number }
     | undefined;
+  // Rendered text is collected once per DOM version; a mutation observer marks
+  // it stale, so next/prev and repeated queries skip the tree walk.
+  let textIndex: { root: HTMLElement; version: number; text: string; spans: TextNodeSpan[] } | undefined;
+  let observedRoot: HTMLElement | undefined;
+  let domVersion = 0;
+  let mutationObserver: MutationObserver | undefined;
+
+  function observeRoot(root: HTMLElement): void {
+    if (root === observedRoot) return;
+    mutationObserver?.disconnect();
+    mutationObserver = undefined;
+    observedRoot = root;
+    domVersion += 1;
+    textIndex = undefined;
+    if (typeof MutationObserver === "undefined") return;
+    mutationObserver = new MutationObserver(() => {
+      domVersion += 1;
+      textIndex = undefined;
+    });
+    mutationObserver.observe(root, { childList: true, characterData: true, subtree: true });
+  }
+
+  function stopObserving(): void {
+    mutationObserver?.disconnect();
+    mutationObserver = undefined;
+    observedRoot = undefined;
+    textIndex = undefined;
+    result = undefined;
+  }
+
+  function domText(root: HTMLElement): { text: string; spans: TextNodeSpan[]; version: number } {
+    observeRoot(root);
+    // Records not yet delivered still mean the cached text is stale. Without a
+    // MutationObserver the DOM cannot be trusted between refreshes.
+    if (!mutationObserver || mutationObserver.takeRecords().length > 0) domVersion += 1;
+    if (textIndex?.root !== root || textIndex.version !== domVersion) {
+      textIndex = { root, version: domVersion, ...collectTextNodes(root) };
+    }
+    return textIndex;
+  }
 
   function sameRange(left: Range, right: Range): boolean {
     return left.startContainer === right.startContainer
@@ -81,10 +132,14 @@ export function createPreviewFileSearchController(options: PreviewFileSearchOpti
       && left.endOffset === right.endOffset;
   }
 
-  function clearSearchDecorations(): void {
+  function clearDomHighlights(): void {
     const registry = cssHighlightRegistry();
     registry?.delete(SEARCH_HIGHLIGHT);
     registry?.delete(ACTIVE_SEARCH_HIGHLIGHT);
+  }
+
+  function clearSearchDecorations(): void {
+    clearDomHighlights();
 
     if (fallbackSelectionRange) {
       const selection = window.getSelection();
@@ -111,27 +166,21 @@ export function createPreviewFileSearchController(options: PreviewFileSearchOpti
     element?.scrollIntoView({ block: "center", inline: "nearest" });
   }
 
-  function revealEditorMatch(matches: readonly TextSearchMatch[]): void {
+  function revealEditorMatch(text: string, matches: readonly TextSearchMatch[]): void {
     const editor = options.editorElement();
     const match = matches[state.activeIndex];
     if (!editor || !match) return;
     editor.setSelectionRange(match.start, match.end);
     editorSearchSelection = { element: editor, start: match.start, end: match.end };
-    const lineIndex = options.fileText().slice(0, match.start).split("\n").length - 1;
-    editor.scrollTop = Math.max(0, lineIndex * 24 - editor.clientHeight / 2);
+    editor.scrollTop = Math.max(0, lineIndexAt(text, match.start) * 24 - editor.clientHeight / 2);
   }
 
-  function renderDomMatches(root: HTMLElement): void {
-    const { text, spans } = collectTextNodes(root);
-    const matches = findTextMatches(text, state.query);
-    const ranges = matches.flatMap((match) => {
-      const range = rangeForMatch(spans, match);
-      return range ? [range] : [];
-    });
-    state.matchCount = ranges.length;
-    state.activeIndex = ranges.length === 0
-      ? 0
-      : Math.min(state.activeIndex, ranges.length - 1);
+  function clampActive(count: number): void {
+    state.matchCount = count;
+    state.activeIndex = count === 0 ? 0 : Math.min(state.activeIndex, count - 1);
+  }
+
+  function decorateDomMatches(ranges: readonly Range[], reveal: boolean): void {
     clearSearchDecorations();
     const activeRange = ranges[state.activeIndex];
     if (!activeRange) return;
@@ -141,16 +190,39 @@ export function createPreviewFileSearchController(options: PreviewFileSearchOpti
     if (registry && HighlightConstructor) {
       registry.set(SEARCH_HIGHLIGHT, new HighlightConstructor(...ranges));
       registry.set(ACTIVE_SEARCH_HIGHLIGHT, new HighlightConstructor(activeRange));
-    } else {
+    } else if (reveal) {
+      // The selection fallback is intrusive; apply it only on query/navigation.
       const selection = window.getSelection();
       selection?.removeAllRanges();
       selection?.addRange(activeRange);
       fallbackSelectionRange = activeRange;
     }
-    revealRange(activeRange);
+    if (reveal) revealRange(activeRange);
   }
 
-  function refresh(): void {
+  function renderDomMatches(root: HTMLElement, reveal: boolean): void {
+    const index = domText(root);
+    let ranges: Range[];
+    if (result?.kind === "dom" && result.root === root && result.version === index.version
+      && result.query === state.query) {
+      ranges = result.ranges;
+    } else {
+      ranges = findTextMatches(index.text, state.query).flatMap((match) => {
+        const range = rangeForMatch(index.spans, match);
+        return range ? [range] : [];
+      });
+      result = { kind: "dom", query: state.query, root, version: index.version, ranges };
+    }
+    clampActive(ranges.length);
+    decorateDomMatches(ranges, reveal);
+  }
+
+  /**
+   * `reveal` moves the editor selection or scrolls to the active match. Only
+   * query changes and explicit navigation reveal; content changes (typing in
+   * the Preview editor, re-rendered Markdown) only recount and re-highlight.
+   */
+  function refresh(reveal: boolean): void {
     if (!state.open || !options.enabled()) {
       state.matchCount = 0;
       clearSearchDecorations();
@@ -163,13 +235,22 @@ export function createPreviewFileSearchController(options: PreviewFileSearchOpti
       return;
     }
     if (options.editing()) {
+      const text = options.fileText();
+      let matches: TextSearchMatch[];
+      if (result?.kind === "editor" && result.text === text && result.query === state.query) {
+        matches = result.matches;
+      } else {
+        matches = findTextMatches(text, state.query);
+        result = { kind: "editor", query: state.query, text, matches };
+      }
+      clampActive(matches.length);
+      if (!reveal) {
+        // Keep the user's caret: a draft edit must not jump to the match.
+        clearDomHighlights();
+        return;
+      }
       clearSearchDecorations();
-      const matches = findTextMatches(options.fileText(), state.query);
-      state.matchCount = matches.length;
-      state.activeIndex = matches.length === 0
-        ? 0
-        : Math.min(state.activeIndex, matches.length - 1);
-      revealEditorMatch(matches);
+      revealEditorMatch(text, matches);
       return;
     }
     const root = options.contentElement();
@@ -178,13 +259,18 @@ export function createPreviewFileSearchController(options: PreviewFileSearchOpti
       clearSearchDecorations();
       return;
     }
-    renderDomMatches(root);
+    renderDomMatches(root, reveal);
   }
 
-  function scheduleRefresh(): void {
+  function cancelQueryTimer(): void {
+    if (queryTimer !== undefined) clearTimeout(queryTimer);
+    queryTimer = undefined;
+  }
+
+  function scheduleRefresh(reveal: boolean): void {
     const generation = ++refreshGeneration;
     void tick().then(() => {
-      if (generation === refreshGeneration) refresh();
+      if (generation === refreshGeneration) refresh(reveal);
     });
   }
 
@@ -194,34 +280,49 @@ export function createPreviewFileSearchController(options: PreviewFileSearchOpti
     void tick().then(() => {
       options.inputElement()?.focus();
       options.inputElement()?.select();
-      scheduleRefresh();
+      scheduleRefresh(true);
     });
   }
 
   function close(): void {
     refreshGeneration += 1;
+    cancelQueryTimer();
     state.open = false;
     state.matchCount = 0;
     state.activeIndex = 0;
     clearSearchDecorations();
+    stopObserving();
   }
 
   function setQuery(query: string): void {
     state.query = query;
     state.activeIndex = 0;
+    cancelQueryTimer();
     if (!query.trim()) {
       refreshGeneration += 1;
       state.matchCount = 0;
       clearSearchDecorations();
       return;
     }
-    scheduleRefresh();
+    // The debounced query search supersedes any pending content refresh.
+    const generation = ++refreshGeneration;
+    queryTimer = setTimeout(() => {
+      queryTimer = undefined;
+      if (generation === refreshGeneration) refresh(true);
+    }, PREVIEW_SEARCH_DEBOUNCE_MS);
   }
 
   function move(delta: number): void {
+    if (queryTimer !== undefined) {
+      // Enter before the debounce elapsed: search now and reveal the first match.
+      cancelQueryTimer();
+      refreshGeneration += 1;
+      refresh(true);
+      return;
+    }
     if (state.matchCount <= 0) return;
     state.activeIndex = (state.activeIndex + delta + state.matchCount) % state.matchCount;
-    scheduleRefresh();
+    scheduleRefresh(true);
   }
 
   function handleInputKeydown(event: KeyboardEvent): void {
@@ -266,12 +367,15 @@ export function createPreviewFileSearchController(options: PreviewFileSearchOpti
     options.fileText();
     options.editing();
     options.contentElement();
-    if (state.open) scheduleRefresh();
+    // Content changed: recount only. A pending debounced query still reveals.
+    if (state.open && queryTimer === undefined) scheduleRefresh(false);
   });
 
   function dispose(): void {
     refreshGeneration += 1;
+    cancelQueryTimer();
     clearSearchDecorations();
+    stopObserving();
   }
 
   return {

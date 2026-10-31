@@ -12,3 +12,10 @@ describe("markdown file-link validation", () => {
     expect(markdownContentActionSource).toContain("decorateFileLink(candidate, target, cached)");
   });
 });
+
+describe("markdown model previews", () => {
+  it("scopes transcript WebGL viewers to the viewport so offscreen previews release their contexts", () => {
+    expect(markdownContentActionSource).toContain("mountViewportGlbViewer(frame, convertFileSrc(attachment.path))");
+    expect(markdownContentActionSource).not.toContain("mountGlbViewer(");
+  });
+});

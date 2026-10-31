@@ -223,6 +223,14 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   and visibility observers, pending draws, GPU resources, decoded image bitmaps
   and WebGL contexts; late parse
   completion is discarded and disposed.
+- WebKit caps active WebGL contexts and silently evicts the oldest, so a
+  transcript model holds a renderer only while within 320 px of the viewport.
+  About 1.5 seconds after it leaves, the viewer is released (its frame keeps its
+  size); re-entry reloads the model with a freshly fitted camera. Preview's
+  single viewer is not viewport-scoped. If the browser still drops a live
+  context (`webglcontextlost`), the viewer releases the scene, logs a warning to
+  the diagnostic logger and shows a paused state with a **Reload 3D preview**
+  button.
 - GLB preview caps streamed input at 64 MiB and requires embedded resources.
   Asset files are fetched only with bounded single Range requests, checking
   Content-Range totals before allocating the model buffer; oversized native

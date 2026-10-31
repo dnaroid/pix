@@ -235,4 +235,56 @@ describe("read-only index monitor", () => {
     expect(onChange.mock.lastCall?.[0]).toMatchObject({ stores, consent, activity: active, consentError: "", activityError: "" });
     monitor.dispose();
   });
+  it("keeps source-selection reads out of the active poll until invalidated, refreshed or expired", async () => {
+    vi.useFakeTimers();
+    const onChange = vi.fn();
+    const enabled = { code: true, knowledge: false, settings: false, sessions: false, tasks: false, commits: false };
+    const readSelection = vi.fn(async () => ({ enabled }));
+    const readStores = vi.fn(async () => stores);
+    const monitor = monitorSearchIndexes({ readStores, readConsent: async () => consent, readSelection,
+      isIndexing: () => true, selectionTtlMs: 60_000, onChange });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readSelection).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1500 * 10);
+    expect(readStores).toHaveBeenCalledTimes(11);
+    expect(readSelection).toHaveBeenCalledOnce();
+    expect(onChange.mock.lastCall?.[0]).toMatchObject({ selection: { enabled }, selectionError: "" });
+    monitor.invalidateSelection();
+    await monitor.refresh(true);
+    expect(readSelection).toHaveBeenCalledTimes(2);
+    await monitor.refresh(false);
+    expect(readSelection).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(readSelection).toHaveBeenCalledTimes(4);
+    monitor.dispose();
+  });
+  it("retries a failed or invalid selection read on the next poll and ignores a read invalidated in flight", async () => {
+    vi.useFakeTimers();
+    const onChange = vi.fn();
+    const enabled = { code: true, knowledge: false, settings: false, sessions: false, tasks: false, commits: false };
+    const pending = deferred<{ enabled: typeof enabled; error?: string }>();
+    const readSelection = vi.fn()
+      .mockRejectedValueOnce(new Error("spawn failed"))
+      .mockResolvedValueOnce({ enabled, error: "invalid policy" })
+      .mockReturnValueOnce(pending.promise)
+      .mockResolvedValue({ enabled });
+    const monitor = monitorSearchIndexes({ readStores: async () => stores, readConsent: async () => consent, readSelection,
+      isIndexing: () => true, onChange });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onChange.mock.lastCall?.[0].selectionError).toContain("could not be read");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(readSelection).toHaveBeenCalledTimes(2);
+    expect(onChange.mock.lastCall?.[0].selectionError).toBe("invalid policy");
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(readSelection).toHaveBeenCalledTimes(3);
+    // A change event lands while the third read is in flight: its result must not be cached as current.
+    monitor.invalidateSelection();
+    pending.resolve({ enabled });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(readSelection).toHaveBeenCalledTimes(4);
+    await vi.advanceTimersByTimeAsync(1500 * 4);
+    expect(readSelection).toHaveBeenCalledTimes(4);
+    monitor.dispose();
+  });
 });

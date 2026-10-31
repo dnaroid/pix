@@ -50,6 +50,7 @@ export function createSearchIndexController(options: Omit<Parameters<typeof moni
       try {
         const selection = await options.setSource(source, enabled, selectionOwner.signal);
         publish({ snapshot: { ...state.snapshot, selection, selectionError: selection.error ?? "" } });
+        monitor.invalidateSelection();
         await monitor.refresh(true);
       } catch (error) {
         if (!disposed) publish({ snapshot: { ...state.snapshot, selectionError: error instanceof Error ? error.message : "Could not save source selection" } });
@@ -64,6 +65,7 @@ export function createSearchIndexController(options: Omit<Parameters<typeof moni
     configChanged: () => {
       if (disposed) return;
       indexing.reset();
+      monitor.invalidateSelection();
       void monitor.refresh(true);
     },
     dispose: () => {

@@ -46,6 +46,23 @@ describe("workspace-owned search index controller", () => {
     expect(state.snapshot.selection?.enabled.tasks).toBe(false); expect(state.snapshot.selectionError).toBe("save failed");
     controller.dispose();
   });
+  it("re-reads source selection after config changes and saves, not on every poll", async () => {
+    vi.useFakeTimers();
+    const enabled = { settings: true, code: true, knowledge: false, tasks: false, sessions: false, commits: false };
+    const readSelection = vi.fn(async () => ({ enabled: { ...enabled } }));
+    const setSource = vi.fn(async () => ({ enabled: { ...enabled, tasks: true } }));
+    const controller = createSearchIndexController({ readStores: async () => ({ stores: [] }),
+      readConsent: async () => ({ configured: true, keyAvailable: true, provider: "ollama", model: "m", vectorSize: 3 }),
+      readSelection, setSource, run: vi.fn(), onChange: vi.fn() });
+    await vi.advanceTimersByTimeAsync(30_000 * 1.5);
+    expect(readSelection).toHaveBeenCalledOnce();
+    controller.configChanged();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readSelection).toHaveBeenCalledTimes(2);
+    await controller.setSource("tasks", true);
+    expect(readSelection).toHaveBeenCalledTimes(3);
+    controller.dispose();
+  });
   it("does not build a separate activity log while indexing, and keeps manual outcomes", async () => {
     vi.useFakeTimers();
     const pending = deferred<IndexResult>();
