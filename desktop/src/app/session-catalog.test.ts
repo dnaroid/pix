@@ -104,6 +104,24 @@ describe("native session catalog updates", () => {
     expect(f.reportError).not.toHaveBeenCalled();
   });
 
+  it("joins a refresh requested while the startup list is pending instead of discarding startup", async () => {
+    const initial = deferred<ListSessionsResponse>();
+    const f = fixture(vi.fn()
+      .mockImplementationOnce(() => initial.promise)
+      .mockResolvedValueOnce(result("later")));
+    const listing = f.catalog.listNow();
+    const refreshing = f.catalog.refresh();
+    expect(f.client.listSessions).toHaveBeenCalledTimes(1);
+    initial.resolve(result("saved"));
+    expect((await listing)?.sessions.map(s => s.sessionId)).toEqual(["saved"]);
+    await refreshing;
+    expect(f.catalog.sessions.map(s => s.sessionId)).toEqual(["saved"]);
+    expect(f.mergeRestored).toHaveBeenCalledTimes(1);
+    await f.catalog.refresh();
+    expect(f.client.listSessions).toHaveBeenCalledTimes(2);
+    expect(f.catalog.sessions.map(s => s.sessionId)).toEqual(["later"]);
+  });
+
   it("reruns a refresh when a discovery update arrives during an older request", async () => {
     const stale = deferred<ListSessionsResponse>();
     const f = fixture(vi.fn()

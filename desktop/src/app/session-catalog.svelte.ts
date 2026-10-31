@@ -15,6 +15,7 @@ type SessionCatalogOptions = {
 export function createSessionCatalog(options: SessionCatalogOptions) {
   let sessions = $state<SessionInfo[]>([]);
   let refreshRequest: { client: AcpClient; workspace: string; promise: Promise<void> } | null = null;
+  let listRequest: { client: AcpClient; workspace: string; promise: Promise<ListSessionsResponse | null> } | null = null;
   let initialListings = 0;
   let pendingNativeRefresh: { client: AcpClient; workspace: string } | null = null;
   let generation = 0;
@@ -64,10 +65,22 @@ export function createSessionCatalog(options: SessionCatalogOptions) {
     }
   }
 
-  async function listNow(): Promise<ListSessionsResponse | null> {
+  function listNow(): Promise<ListSessionsResponse | null> {
     const requestClient = options.client();
     const requestWorkspace = options.workspace();
-    if (!requestClient || !requestWorkspace) return null;
+    if (!requestClient || !requestWorkspace) return Promise.resolve(null);
+    const request: NonNullable<typeof listRequest> = {
+      client: requestClient,
+      workspace: requestWorkspace,
+      promise: Promise.resolve(null),
+    };
+    request.promise = listNowRequest(request);
+    listRequest = request;
+    return request.promise;
+  }
+
+  async function listNowRequest(request: NonNullable<typeof listRequest>): Promise<ListSessionsResponse | null> {
+    const { client: requestClient, workspace: requestWorkspace } = request;
     const requestGeneration = ++generation;
     initialListings += 1;
     try {
@@ -80,6 +93,8 @@ export function createSessionCatalog(options: SessionCatalogOptions) {
       return null;
     } finally {
       initialListings -= 1;
+      // Clear before flushing so a deferred native refresh issues a new request.
+      if (listRequest === request) listRequest = null;
       flushNativeRefresh();
     }
   }
@@ -99,6 +114,13 @@ export function createSessionCatalog(options: SessionCatalogOptions) {
     const requestClient = options.client();
     const requestWorkspace = options.workspace();
     if (!requestClient || !requestWorkspace) return;
+    // Startup consumes the initial list response. A refresh started meanwhile
+    // (selector open, native discovery) must join it instead of superseding it,
+    // otherwise startup sees a stale null and never restores a session.
+    const initial = listRequest;
+    if (initial && initial.client === requestClient && initial.workspace === requestWorkspace) {
+      return initial.promise.then(() => undefined);
+    }
     const existing = refreshRequest;
     if (existing && existing.client === requestClient && existing.workspace === requestWorkspace) return existing.promise;
     const requestGeneration = ++generation;
@@ -137,6 +159,7 @@ export function createSessionCatalog(options: SessionCatalogOptions) {
   function invalidate(): void {
     generation += 1;
     refreshRequest = null;
+    listRequest = null;
     pendingNativeRefresh = null;
   }
 

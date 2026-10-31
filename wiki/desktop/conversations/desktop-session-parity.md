@@ -74,6 +74,7 @@ Show the same project sessions in Pix Desktop that Pix TUI discovers while keepi
 - Per-session activity indicators may decorate titlebar tabs, but runtime activity never changes restored membership, ordering, close semantics, or saved-session discovery.
 - Missing or malformed TUI tab snapshots do not break session listing. A stale TUI snapshot cannot resurrect a tab during Desktop restart, including when the Desktop snapshot is missing or explicitly empty; both cases restore the draft instead of old real tabs.
 - Overlapping Desktop refreshes cannot apply results from an older workspace or ACP connection.
+- A refresh requested while the startup listing for the same connection and workspace is pending (session selector, native discovery) joins that listing instead of superseding it, so startup never loses its response and always restores a session or opens the draft.
 - If native discovery fails, mapped ACP sessions remain available.
 
 ## Related files

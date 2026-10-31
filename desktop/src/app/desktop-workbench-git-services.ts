@@ -87,6 +87,8 @@ export function createDesktopWorkbenchGitServices(options: DesktopWorkbenchGitSe
         true,
         false,
       );
+      // The resolution session was just created; it has no persisted history.
+      options.sessions.history.markFullyLoaded(sessionId);
       const transcriptMessageId = options.nextLocalMessageId();
       const next = appendLocalUserMessage(options.state.transcript, prompt, transcriptMessageId, []);
       options.state.setActiveTranscriptForSession(sessionId, next);

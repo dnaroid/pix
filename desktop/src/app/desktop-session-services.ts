@@ -22,6 +22,7 @@ type DesktopSessionServicesOptions = {
     workspace: string,
   ) => void | Promise<void>;
   onActivityChanged?: (sessionId: string) => void;
+  promptRunning?: (sessionId: string) => boolean;
   reportError: (error: unknown) => void;
 };
 
@@ -67,6 +68,7 @@ export function createDesktopSessionServices(options: DesktopSessionServicesOpti
     scheduleScrollToLatest: options.scheduleScrollToLatest,
     recoverUnavailableSession: options.recoverUnavailableSession,
     reportError: options.reportError,
+    promptRunning: options.promptRunning,
   });
   const autocomplete = createAutocompleteStore({
     client: options.client,

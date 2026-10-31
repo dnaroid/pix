@@ -88,6 +88,8 @@ export function createDesktopProjectActionServices(options: DesktopProjectAction
         runtimeReady ? (options.sessions.runtime.getConfigOptions(sessionId) ?? []) : [],
         runtimeReady,
       );
+      // The action session was just created; it has no persisted history.
+      options.sessions.history.markFullyLoaded(sessionId);
     },
     prepareTranscriptAttachment: options.prepareTranscriptAttachment,
     imagePromptSupported: options.imagePromptSupported,
