@@ -69,7 +69,7 @@
   ] satisfies { action: WikiEditorAction; title: string; icon: typeof Bold }[];
 
   function fail(error: unknown) {
-    diagnostic.report(error, "wiki:editor-failed");
+    diagnostic.warn("wiki:editor-failed", error);
     failure = error instanceof Error ? error.message : "The visual editor could not open this document.";
     loading = false;
   }
@@ -98,7 +98,7 @@
       onChange: (markdown) => { if (!disposed) onChange(markdown); },
       onSave: () => { if (!disposed) onSave(); },
       onSelectionChange: (next) => { if (!disposed) selection = next; },
-      onError: (error) => { if (!disposed) diagnostic.report(error, "wiki:editor-error"); },
+      onError: (error) => { if (!disposed) diagnostic.warn("wiki:editor-error", error); },
       onResolveImage: (source) => disposed ? Promise.resolve(undefined)
         : onResolveImage ? onResolveImage(source) : Promise.resolve(source),
       onOpenLink: (href) => { if (!disposed) return onOpenLink?.(href); },
@@ -109,14 +109,14 @@
       if (value !== initial) created.setValue(value);
       created.setDisabled();
       loading = false;
-    }).catch((error) => { if (!disposed) fail(error); else diagnostic.report(error, "wiki:editor-dispose"); });
+    }).catch((error) => { if (!disposed) fail(error); else diagnostic.warn("wiki:editor-dispose", error); });
     // The path is the editor owner; delayed creation from the old tab cannot win.
     void path;
     void project;
     return () => {
       disposed = true;
       mount.remove();
-      if (owner) void owner.destroy().catch((error) => diagnostic.report(error, "wiki:editor-dispose"));
+      if (owner) void owner.destroy().catch((error) => diagnostic.warn("wiki:editor-dispose", error));
     };
   });
 
@@ -138,7 +138,7 @@
   function action(command: WikiEditorAction) {
     if (inactive) return;
     try { runtime?.action(command); }
-    catch (error) { diagnostic.report(error, "wiki:editor-command"); }
+    catch (error) { diagnostic.warn("wiki:editor-command", error); }
   }
   function active(command: WikiEditorAction): boolean {
     return command === "bold" ? selection.bold : command === "italic" ? selection.italic
@@ -165,7 +165,7 @@
       else runtime?.insertLink(source, label);
       insertion = null;
     } catch (error) {
-      diagnostic.report(error, "wiki:editor-insert");
+      diagnostic.warn("wiki:editor-insert", error);
       formError = "Could not insert this reference.";
     }
   }

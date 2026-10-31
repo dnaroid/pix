@@ -113,6 +113,21 @@ describe("frontend diagnostic logging", () => {
       diagnostic: expect.stringMatching(/^tray:publish: Error: ipc down/),
     }));
   });
+  it("routes events the native allow-list would reject through the warning event", async () => {
+    const send = vi.fn().mockResolvedValue(undefined);
+    const logger = createDiagnosticLogger(() => ({ workspace: "/project" }), send);
+    logger.report(new Error("busy"), "wiki:editor-failed");
+    logger.report(new Error("boom"));
+    await Promise.resolve();
+    expect(send).toHaveBeenNthCalledWith(1, "log_desktop_diagnostic", expect.objectContaining({
+      event: DESKTOP_WARNING_EVENT,
+      diagnostic: expect.stringMatching(/^wiki:editor-failed: Error: busy/),
+    }));
+    expect(send).toHaveBeenNthCalledWith(2, "log_desktop_diagnostic", expect.objectContaining({
+      event: "frontend:error",
+      diagnostic: expect.stringMatching(/^Error: boom/),
+    }));
+  });
   it("reports only the first failure of each streak and never throws", () => {
     const report = vi.fn(() => { throw new Error("logger broke"); });
     const streak = createFailureStreakReporter(report);

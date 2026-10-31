@@ -23,7 +23,7 @@ vi.mock("./project-documents.svelte", () => ({ createProjectDocumentsStore: (opt
 } }));
 vi.mock("../lib/diagnostic-logging", () => ({ createDiagnosticLogger: (context: () => { workspace: string }) => {
   mocks.diagnosticContext = context;
-  return { report: mocks.diagnostic };
+  return { report: mocks.diagnostic, warn: mocks.diagnostic };
 } }));
 vi.mock("./project-tasks.svelte", () => ({ createProjectTasksStore: () => ({}) }));
 vi.mock("./project-workspace.svelte", () => ({ createProjectWorkspaceStore: () => ({}) }));
@@ -138,7 +138,7 @@ describe("background Wiki check workbench integration", () => {
     expect(item.ready()).toBe(true);
     const failure = new Error("Background discovery failed");
     item.backgroundError(failure);
-    expect(mocks.diagnostic).toHaveBeenCalledExactlyOnceWith(failure, "wiki:background-check");
+    expect(mocks.diagnostic).toHaveBeenCalledExactlyOnceWith("wiki:background-check", failure);
     expect(mocks.diagnosticContext?.()).toEqual({ workspace: "/project" });
     expect(item.reportError).not.toHaveBeenCalled();
     expect(mocks.error).not.toHaveBeenCalled();

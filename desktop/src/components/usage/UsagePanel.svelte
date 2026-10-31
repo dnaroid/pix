@@ -37,7 +37,7 @@
   const diagnostics = createDiagnosticLogger(() => ({ workspace }));
   const sections = createUsagePanelSections((cause, target) => {
     if (target === workspace) error = cause instanceof Error ? cause.message : String(cause);
-    createDiagnosticLogger(() => ({ workspace: target })).report(cause, "frontend:usage-panel-state");
+    createDiagnosticLogger(() => ({ workspace: target })).warn("frontend:usage-panel-state", cause);
   });
   setContext(USAGE_SECTIONS_CONTEXT, sections);
   $effect(() => {
@@ -55,10 +55,10 @@
   const quotas = createProviderUsageStore({
     client: () => client,
     workspace: () => workspace,
-    reportError: (cause) => diagnostics.report(cause, "frontend:provider-usage"),
+    reportError: (cause) => diagnostics.warn("frontend:provider-usage", cause),
   });
   const openRouter = createOpenRouterUsageStore({
-    reportError: (cause) => diagnostics.report(cause, "frontend:openrouter-usage"),
+    reportError: (cause) => diagnostics.warn("frontend:openrouter-usage", cause),
   });
   const providerOpen = $derived(sections.ready && sections.isOpen("provider-limits"));
   const historyOpen = $derived(sections.ready && USAGE_SECTION_IDS.some((id) => id !== "provider-limits" && sections.isOpen(id)));

@@ -15,6 +15,12 @@ export type DesktopDiagnosticEvent =
  */
 export const DESKTOP_WARNING_EVENT = "frontend:warning";
 
+/** Events the native `log_desktop_diagnostic` allow-list accepts (logging.rs). */
+const NATIVE_DIAGNOSTIC_EVENTS: ReadonlySet<string> = new Set([
+  "frontend:error", "frontend:uncaught", "frontend:unhandled-rejection",
+  "media:playback-unavailable", DESKTOP_WARNING_EVENT,
+]);
+
 /**
  * Report once per failure streak: the first failure after a success (or the
  * first ever) is logged, repeats are suppressed until the next success. Keeps
@@ -52,6 +58,12 @@ export function createDiagnosticLogger(context: () => DiagnosticContext, send = 
     try {
       scope = context(); // Snapshot before asynchronous work, not at completion.
       diagnostic = error instanceof Error ? `${error.name}: ${error.message}\n${error.stack ?? ""}` : String(error);
+      // The native side rejects unknown events; keep a subsystem name as a
+      // warning label instead of silently dropping the record.
+      if (!NATIVE_DIAGNOSTIC_EVENTS.has(event)) {
+        label = label ? `${event}: ${label}` : event;
+        event = DESKTOP_WARNING_EVENT;
+      }
       if (label) diagnostic = `${label}: ${diagnostic}`;
     } catch { return; }
     enqueue("log_desktop_diagnostic", {

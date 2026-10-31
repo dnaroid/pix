@@ -32,7 +32,7 @@
   } = $props();
   const controller = createProjectWikiController({
     prepare: () => onBeforeMutation?.() ?? Promise.resolve(() => {}),
-    report: (error, target) => createDiagnosticLogger(() => ({ workspace: target })).report(error, "wiki:load-failed"),
+    report: (error, target) => createDiagnosticLogger(() => ({ workspace: target })).warn("wiki:load-failed", error),
   });
   const wikiState = controller.state;
   const conflictsNavigation = getContext<WikiConflictsNavigation | undefined>(WIKI_CONFLICTS_NAVIGATION_CONTEXT);

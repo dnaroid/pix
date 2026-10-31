@@ -5,7 +5,7 @@ import tabsSource from "../components/WorkbenchTabs.svelte?raw";
 
 const { startDragging, report } = vi.hoisted(() => ({ startDragging: vi.fn(), report: vi.fn() }));
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ startDragging }) }));
-vi.mock("./diagnostic-logging", () => ({ createDiagnosticLogger: () => ({ report }) }));
+vi.mock("./diagnostic-logging", () => ({ createDiagnosticLogger: () => ({ warn: report }) }));
 
 function send(target: EventTarget, type: string, props: Record<string, unknown> = {}) {
   const event = new Event(type, { cancelable: true });
@@ -144,7 +144,7 @@ describe("workbench titlebar dragging", () => {
     send(node, "pointerdown");
     send(host, "pointermove", { screenX: 110 });
     await Promise.resolve();
-    expect(report).toHaveBeenCalledWith(error, "frontend:titlebar-drag");
+    expect(report).toHaveBeenCalledWith("frontend:titlebar-drag", error);
     expect(send(node, "click").defaultPrevented).toBe(false);
   });
 

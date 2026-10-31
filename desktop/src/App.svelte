@@ -981,7 +981,7 @@
   $effect(() => sessionRename.reconcile());
   onDestroy(sessionRename.cancel);
 
-  const selectionAssist = createSelectionAssistStore({ client: () => client, workspace: () => workspace, report: diagnosticLogger.report });
+  const selectionAssist = createSelectionAssistStore({ client: () => client, workspace: () => workspace, report: (error, label) => diagnosticLogger.warn(label ?? "frontend:selection-assist", error) });
   $effect(() => { void workspace; return () => selectionAssist.close(); });
   onDestroy(selectionAssist.close);
   onMount(() => installDesktopContextMenu({
@@ -993,7 +993,7 @@
   onMount(desktopLifecycle.start);
   onMount(diagnosticLogger.start);
   onMount(() => toasts.setReporter(diagnosticLogger.report));
-  onMount(() => startThemePreference((error) => diagnosticLogger.report(error, "frontend:theme-preference")));
+  onMount(() => startThemePreference((error) => diagnosticLogger.warn("frontend:theme-preference", error)));
   onDestroy(headsUp.reset);
   onDestroy(backgroundJobs.reset);
   onDestroy(btw.reset);

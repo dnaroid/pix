@@ -169,7 +169,7 @@
     knowledgeJobs: () => knowledgeJobs,
     onEnqueueKnowledgeCheck: () => onEnqueueKnowledgeCheck,
     onCancelKnowledgeCheck: () => onCancelKnowledgeCheck,
-    onKnowledgeCheckError: (error) => diagnostics.report(error, "wiki:consistency-check-failed"),
+    onKnowledgeCheckError: (error) => diagnostics.warn("wiki:consistency-check-failed", error),
     onDirtyChange: () => onDirtyChange,
   });
   const editorState = editorController.state;
@@ -200,7 +200,7 @@
         VisualEditor = module.default;
       }
     }).catch((error) => {
-      diagnostics.report(error, "wiki:editor-load-failed");
+      diagnostics.warn("wiki:editor-load-failed", error);
       if (current && previewId === sourceId) visualLoadError = "The visual editor could not load. You can edit the Markdown source.";
     });
     return () => { current = false; };
@@ -243,7 +243,7 @@
     element: () => contentScrollElement,
     editing: () => editing,
     scrollPosition: () => scrollPosition,
-    onError: (error) => diagnostics.report(error, "wiki:evidence-highlight-failed"),
+    onError: (error) => diagnostics.warn("wiki:evidence-highlight-failed", error),
   });
   onDestroy(evidenceController.dispose);
 

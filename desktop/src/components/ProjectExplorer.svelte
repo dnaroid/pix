@@ -100,7 +100,7 @@
   let searchLoading = $state(false);
   let searchError = $state<string | null>(null);
   let entryClipboard = $state<ProjectEntryClipboard | null>(null);
-  const clipboardReader = createProjectEntryClipboardReader(readSystemProjectClipboard, (error) => diagnostics.report(error, "project-explorer:clipboard-failed"));
+  const clipboardReader = createProjectEntryClipboardReader(readSystemProjectClipboard, (error) => diagnostics.warn("project-explorer:clipboard-failed", error));
   let operationGeneration = 0;
   let searchGeneration = 0;
   let expansionSaveTail: Promise<void> = Promise.resolve();
@@ -124,7 +124,7 @@
           void gitRefresh.request();
         }
       } catch (error) {
-        diagnostics.report(error, "project-explorer:drag-failed");
+        diagnostics.warn("project-explorer:drag-failed", error);
         if (workspace === requestWorkspace && generation === operationGeneration) operationError = errorMessage(error);
       }
     } : undefined,
@@ -150,7 +150,7 @@
     tree: treeController,
     prepare: async () => onBeforeMutation ? onBeforeMutation() : () => {},
     closeMenu: () => menuController.close(),
-    report: (error, context) => diagnostics.report(error, context),
+    report: (error, context) => diagnostics.warn(context, error),
     setError: (message) => { operationError = message; },
     finish: finishOperation,
   });
@@ -162,7 +162,7 @@
     invoke: invokeName,
     onOpenFile: (path) => onOpenFile(path),
     onError: (error) => {
-      diagnostics.report(error, "project-explorer:name-operation-failed");
+      diagnostics.warn("project-explorer:name-operation-failed", error);
       operationError = errorMessage(error);
     },
     onSuccess: () => {}, // The history adapter preserves any recovery warning.
@@ -184,7 +184,7 @@
     generation: () => operationGeneration,
     hover: (destination) => { nativeDropDestination = destination; },
     mutate: runMutation,
-    report: (error) => diagnostics.report(error, "project-explorer:drop-failed"),
+    report: (error) => diagnostics.warn("project-explorer:drop-failed", error),
     error: (message) => { operationError = message; },
   }));
   const rootEntries = $derived(treeController.rootEntries);
@@ -397,7 +397,7 @@
       // keep scanning the project after its result can no longer be shown.
       if (started) {
         void invoke("cancel_search_project_files").catch((error) => {
-          diagnostics.report(error, "project-explorer:search-cancel-failed");
+          diagnostics.warn("project-explorer:search-cancel-failed", error);
         });
       }
     };
@@ -625,7 +625,7 @@
       entryClipboard = decodeProjectEntryClipboard(text);
       clearOperationError();
     } catch (error) {
-      diagnostics.report(error, "project-explorer:clipboard-failed");
+      diagnostics.warn("project-explorer:clipboard-failed", error);
       if (operations.isCurrent(operation) && workspace === requestWorkspace) operationError = errorMessage(error);
     } finally {
       finishOperation(operation);
@@ -703,7 +703,7 @@
         entryClipboard = null;
       }
     } catch (error) {
-      diagnostics.report(error, "project-explorer:paste-failed");
+      diagnostics.warn("project-explorer:paste-failed", error);
       if (generation === operationGeneration && workspace === requestWorkspace) operationError = errorMessage(error);
     }
   }
@@ -763,7 +763,7 @@
     try {
       await openExternalHref(link.url);
     } catch (error) {
-      diagnostics.report(error, "project-explorer:open-remote-failed");
+      diagnostics.warn("project-explorer:open-remote-failed", error);
       if (generation === operationGeneration && workspace === requestWorkspace) operationError = errorMessage(error);
     }
   }

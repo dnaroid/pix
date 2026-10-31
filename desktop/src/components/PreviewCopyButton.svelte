@@ -25,7 +25,7 @@
       if (onCopy) return onCopy(isCurrent);
       return isTauri() ? writeText(content) : navigator.clipboard.writeText(content);
     },
-    (error) => diagnostics.report(error, "frontend:preview-copy"),
+    (error) => diagnostics.warn("frontend:preview-copy", error),
   );
   onDestroy(controller.dispose);
 

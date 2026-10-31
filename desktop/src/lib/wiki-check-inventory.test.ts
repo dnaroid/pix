@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { invoke, report } = vi.hoisted(() => ({ invoke: vi.fn(), report: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
-vi.mock("./diagnostic-logging", () => ({ createDiagnosticLogger: () => ({ report }) }));
+vi.mock("./diagnostic-logging", () => ({ createDiagnosticLogger: () => ({ warn: report }) }));
 
 import { listWikiCheckDirectory, readWikiCheckDocument, releaseWikiCheckInventory } from "./wiki-check-inventory";
 
@@ -71,7 +71,7 @@ describe("Wiki background inventory bridge", () => {
     abort.abort(reason);
     native.resolve({ entries: [], nextCursor: "new" });
     await rejected;
-    expect(report).toHaveBeenCalledExactlyOnceWith(cleanupError, "wiki:inventory-release-failed");
+    expect(report).toHaveBeenCalledExactlyOnceWith("wiki:inventory-release-failed", cleanupError);
   });
 
   it("exposes explicit workspace-owned cursor release", async () => {

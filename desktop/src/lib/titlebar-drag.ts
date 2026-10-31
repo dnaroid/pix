@@ -69,7 +69,7 @@ export function titlebarDrag(node: HTMLElement, region = false): { destroy: () =
     event.preventDefault();
     const owner = generation;
     void getCurrentWindow().startDragging().catch((error) => {
-      diagnostics.report(error, "frontend:titlebar-drag");
+      diagnostics.warn("frontend:titlebar-drag", error);
       if (owner === generation) suppressClick = false;
     });
   }

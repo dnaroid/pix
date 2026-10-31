@@ -56,7 +56,7 @@ function cachedQuota(): QuotaCacheEntry | undefined {
     const entries = parsed.entries.filter((entry) => entry.state !== "loading" || entry.runtime?.modelUsage);
     return quotaCache = { entries, cacheScope };
   } catch (error) {
-    diagnostics.report(error, "frontend:provider-usage-cache");
+    diagnostics.warn("frontend:provider-usage-cache", error);
     return undefined;
   }
 }
@@ -66,7 +66,7 @@ function rememberQuota(next: QuotaCacheEntry): void {
   try {
     storage()?.setItem(QUOTA_STORAGE_KEY, JSON.stringify(next));
   } catch (error) {
-    diagnostics.report(error, "frontend:provider-usage-cache");
+    diagnostics.warn("frontend:provider-usage-cache", error);
   }
 }
 

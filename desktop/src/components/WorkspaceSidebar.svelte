@@ -399,7 +399,7 @@
   $effect(() => {
     const error = launchController.error;
     if (error) {
-      untrack(() => createDiagnosticLogger(() => ({ workspace })).report(error, "frontend:launch-commands"));
+      untrack(() => createDiagnosticLogger(() => ({ workspace })).warn("frontend:launch-commands", error));
     }
   });
   let usagePanel = $state<UsagePanelHandle | null>(null);
@@ -459,7 +459,7 @@
     get onCreatePlan() { return onCreateTaskPlan ? (task: ProjectTask) => { statusMenuController.close(); onCreateTaskPlan?.(task); } : undefined; },
     onOpenPlan: (path) => { statusMenuController.close(); onOpenProjectDocument(path, projectDocuments.plans.includes(path)); },
     canCreatePlan: () => sessionReady && !busy,
-    reportError: (cause) => createDiagnosticLogger(() => ({ workspace })).report(cause, "frontend:task-menu"),
+    reportError: (cause) => createDiagnosticLogger(() => ({ workspace })).warn("frontend:task-menu", cause),
     onStatusChange: (taskId, status) => onStatusChange(taskId, status),
     onPriorityChange: (taskId, priority) => onPriorityChange(taskId, priority),
     onDeleteRequest: (taskId) => {
@@ -472,7 +472,7 @@
   const plansView = createRegistryPlansView();
   // The Work tab stacks Plans and Tasks accordions; Registry stays a resource catalog.
   const workSections = createWorkPanelSections((cause, target) => {
-    createDiagnosticLogger(() => ({ workspace: target })).report(cause, "frontend:work-panel-state");
+    createDiagnosticLogger(() => ({ workspace: target })).warn("frontend:work-panel-state", cause);
   });
   $effect(() => {
     const target = effectWorkspace;

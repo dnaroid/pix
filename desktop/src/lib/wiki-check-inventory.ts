@@ -22,7 +22,7 @@ export interface WikiCheckInventoryRequest {
 async function releaseAfterAbandonment(workspace: string, cursor: string): Promise<void> {
   try { await releaseWikiCheckInventory(workspace, cursor); }
   catch (error) {
-    createDiagnosticLogger(() => ({ workspace })).report(error, "wiki:inventory-release-failed");
+    createDiagnosticLogger(() => ({ workspace })).warn("wiki:inventory-release-failed", error);
   }
 }
 

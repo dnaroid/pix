@@ -40,7 +40,7 @@ describe("Wiki search integration", () => {
     expect(search).toContain("next.dispose()");
     expect(search).toContain("window.removeEventListener(SEARCH_SOURCE_SELECTION_CHANGED, invalidate)");
     expect(search).toContain('window.removeEventListener("pix-semantic-config-changed", invalidate)');
-    expect(search).toContain('diagnostics.report(notice, "wiki:search-notice")');
+    expect(search).toContain('diagnostics.warn("wiki:search-notice", notice)');
     expect(search).toContain('aria-live="polite"');
     expect(search).toContain("aria-busy={busy}");
   });
