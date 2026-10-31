@@ -140,7 +140,8 @@ across actual component destruction/remount or tab switching.
 ### Quick-choice actions
 
 Choice rule: `pix-actions` offers optional next steps after the turn's work is
-finished; the turn ends and the selection arrives as a new user prompt. When the
+finished; the checklist is the last content of the final message, with no tool
+calls or further work after it, and the selection arrives as a new user prompt. When the
 agent needs the user's answer before it can continue, it calls the blocking
 `question` tool instead. The same choice is never offered both ways.
 
@@ -160,9 +161,12 @@ Choose what I should do next:
 
 Desktop renders a valid block as checkboxes and a submit button. A standalone
 title or other non-checklist body content makes the block invalid, so it stays
-ordinary escaped Markdown/code. Only a block
-in the latest assistant message is interactive, and only when no prompt is
-running and no later user message exists; older choices are read-only. An
+ordinary escaped Markdown/code. Only the latest assistant message that contains
+a valid block is interactive, and only when no prompt is running and no later
+user message exists; older choices are read-only. Later assistant replies
+without a block (the agent kept working despite the rule) do not disable it,
+so an offered checklist never becomes unreachable; a reply submitted from it is
+still recognized as a receipt. An
 inactive assistant checklist still allows native text selection and copy of
 option labels, with the transcript's visible selection highlight, without
 toggling or submitting the choice. An
@@ -178,8 +182,8 @@ extension (`src/bundled-extensions/choice-actions/`, parser shared with
 Desktop via its `contract.ts`). In `tui` mode it appends the same choice-rule
 guidance to the system prompt. The transcript renders a valid block as
 `☑ 1. item` / `☐ 2. item` lines plus `↳ <button label>`, and malformed blocks
-stay code. After an agent run ends, the last valid block of the final assistant
-message appears as a non-blocking widget above the editor. While the composer
+stay code. After an agent run ends, the last valid block of the latest assistant
+message that has one (since the last user message) appears as a non-blocking widget above the editor. While the composer
 is empty, digits 1–8 toggle items, Enter submits the selection through
 `sendUserMessage` (it refuses an empty selection), and Esc dismisses the widget.
 Typing a printable character dismisses the widget and keeps the keystroke. A

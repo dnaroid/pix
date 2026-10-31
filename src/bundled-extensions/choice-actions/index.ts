@@ -26,6 +26,23 @@ export function finalAssistantText(messages: readonly unknown[]): string | undef
 	return undefined;
 }
 
+/**
+ * The latest valid checklist an agent run offered since the last user message.
+ * The agent may keep working after offering one; later block-less replies
+ * must not make it unreachable.
+ */
+export function latestRunChoiceActions(messages: readonly unknown[]): ChoiceActions | undefined {
+	for (let index = messages.length - 1; index >= 0; index -= 1) {
+		const message = messages[index] as { role?: unknown } | undefined;
+		if (message?.role === "user") return undefined;
+		if (message?.role !== "assistant") continue;
+		const text = finalAssistantText([message]);
+		const actions = text ? lastChoiceActions(text) : undefined;
+		if (actions) return actions;
+	}
+	return undefined;
+}
+
 export function renderChoiceActionsWidget(actions: ChoiceActions, selected: ReadonlySet<number>): string[] {
 	return [
 		...actions.items.map((item, index) => `${selected.has(index) ? "☑" : "☐"} ${index + 1}. ${item.label}`),
@@ -95,8 +112,7 @@ export default function choiceActionsExtension(pi: ExtensionAPI): void {
 	pi.on("agent_end", (event, ctx) => {
 		hide();
 		if (ctx.mode !== "tui" || !ctx.hasUI) return;
-		const text = finalAssistantText(event.messages);
-		const actions = text ? lastChoiceActions(text) : undefined;
+		const actions = latestRunChoiceActions(event.messages);
 		if (!actions) return;
 		const selected = new Set(actions.items.flatMap((item, index) => item.checked ? [index] : []));
 		const current: ActiveChoice = { ctx, actions, selected };

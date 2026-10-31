@@ -52,7 +52,7 @@ describe("ChoiceActions quick-choice block", () => {
     expect(markdownSource).toContain("{#key JSON.stringify([choiceActionsScope, segment.actions])}");
     expect(markdownSource).toContain("stateScope={choiceActionsScope} blockIndex={index}");
     expect(transcriptSource).toContain("choiceActionsScope={activeSessionId ? JSON.stringify([activeSessionId, item.id]) : undefined}");
-    expect(transcriptSource).toContain("promptRunning ? undefined : latestAssistantMessageId(displayItems)");
+    expect(transcriptSource).toContain("promptRunning ? undefined : latestChoiceActionsMessageId(displayItems)");
     expect(transcriptSource).toContain("choiceActionsActive={item.id === choiceActionsMessageId}");
   });
 });

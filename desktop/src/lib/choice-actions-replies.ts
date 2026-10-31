@@ -38,6 +38,21 @@ function choiceBlocks(item: object, text: string): readonly ChoiceBlock[] {
   return blocks;
 }
 
+/**
+ * The assistant message whose checklist accepts input: the latest one with a
+ * valid block since the last user message. The agent may keep working after
+ * offering a checklist; trailing block-less replies must not disable it.
+ */
+export function latestChoiceActionsMessageId(items: readonly TranscriptDisplayItem[]): string | undefined {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index]!;
+    if (item.type !== "message") continue;
+    if (item.role === "user") return undefined;
+    if (item.role === "assistant" && choiceBlocks(item, item.text).length) return item.id;
+  }
+  return undefined;
+}
+
 /** Derive receipts and their hidden source blocks from persisted text. */
 export function choiceActionsPresentation(items: readonly TranscriptDisplayItem[]): {
   replies: ReadonlyMap<string, ChoiceActions>;
@@ -49,8 +64,10 @@ export function choiceActionsPresentation(items: readonly TranscriptDisplayItem[
   for (const item of items) {
     if (item.type !== "message") continue;
     if (item.role === "assistant") {
-      candidates = choiceBlocks(item, item.text)
-        .map(({ actions, blockIndex }) => ({ actions, messageId: item.id, blockIndex }));
+      // A later block-less reply (the agent kept working) does not retire the
+      // checklist: it stays the active source until the next user message.
+      const blocks = choiceBlocks(item, item.text);
+      if (blocks.length) candidates = blocks.map(({ actions, blockIndex }) => ({ actions, messageId: item.id, blockIndex }));
     } else if (item.role === "user") {
       const matches = candidates.flatMap((candidate) => {
         const reply = replySelection(item.text, candidate.actions);
