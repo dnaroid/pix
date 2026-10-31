@@ -182,6 +182,7 @@
       void requestClient.deleteSession(sessionId).catch(() => undefined);
     },
     onActivityChanged: (sessionId) => onSessionActivityChanged(sessionId),
+    promptRunning: (sessionId) => promptRuntime.isRunning(sessionId),
     reportError,
   });
   const sessionActivity = sessionServices.activity;
@@ -561,6 +562,8 @@
     setErrorMessage: errors.set,
     reportError,
     onOpeningChange: (opening) => workspaceOpening = opening,
+    promptText: () => promptText,
+    promptAttachments: () => promptAttachments,
   });
 
   const transcriptAttachments = createTranscriptAttachmentController({

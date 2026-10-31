@@ -27,6 +27,17 @@ type WorkspaceSessionStartupOptions = {
   reportError: (error: unknown) => void;
   /** Reports whether initial workspace session restoration is in flight. */
   onOpeningChange?: (opening: boolean) => void;
+  /** Composer contents, used to detect user input while the listing is pending. */
+  promptText?: () => string;
+  promptAttachments?: () => readonly unknown[];
+};
+
+type SelectionSnapshot = {
+  sessionId: string | null;
+  draftOpen: boolean;
+  draftActive: boolean;
+  promptText: string | undefined;
+  promptAttachmentCount: number | undefined;
 };
 
 export function createWorkspaceSessionStartup(options: WorkspaceSessionStartupOptions) {
@@ -58,12 +69,35 @@ export function createWorkspaceSessionStartup(options: WorkspaceSessionStartupOp
     return pending;
   }
 
+  function snapshotSelection(): SelectionSnapshot {
+    return {
+      sessionId: options.state.sessionId,
+      draftOpen: options.draft.open,
+      draftActive: options.draft.active,
+      promptText: options.promptText?.(),
+      promptAttachmentCount: options.promptAttachments?.().length,
+    };
+  }
+
+  function selectionChanged(before: SelectionSnapshot): boolean {
+    const after = snapshotSelection();
+    return before.sessionId !== after.sessionId
+      || before.draftOpen !== after.draftOpen
+      || before.draftActive !== after.draftActive
+      || before.promptText !== after.promptText
+      || before.promptAttachmentCount !== after.promptAttachmentCount;
+  }
+
   async function openNow(requestClient: AcpClient, requestWorkspace: string): Promise<void> {
     options.setErrorMessage(null);
     try {
       const desktopTabSessionIds = options.tabs.sessionTabsForProject(requestWorkspace);
+      const selection = snapshotSelection();
       const response = await options.catalog.listNow();
       if (!response || options.client() !== requestClient || options.workspace() !== requestWorkspace) return;
+      // Tabs and the draft stay interactive while the workspace opens. A tab the
+      // user picked or text typed meanwhile wins over the restored selection.
+      if (selectionChanged(selection)) return;
 
       const desktopSessionId = options.tabs.activeForProject(requestWorkspace);
       const sessionId = startupSessionId(response, desktopSessionId, desktopTabSessionIds);

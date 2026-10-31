@@ -1,12 +1,13 @@
 import type { AcpClient } from "../lib/acp-client";
 import type { LazySessionHistory } from "../lib/acp-client-types";
-import { mergeTranscriptHistory } from "../lib/transcript-history";
+import { mergeTranscriptHistory, supersedeLiveTranscript } from "../lib/transcript-history";
 import {
   applyDeferredToolResult,
   applySessionUpdates,
   emptyTranscript,
   markDeferredToolResults,
   setToolResultLoading,
+  type TranscriptState,
 } from "../lib/transcript";
 import type { ActiveSessionState } from "./active-session-state.svelte";
 
@@ -23,6 +24,11 @@ type SessionHistoryOptions = {
     workspace: string,
   ) => void | Promise<void>;
   reportError: (error: unknown) => void;
+  /**
+   * Whether a prompt is running in the session. When provided and idle, a
+   * never-hydrated live cache is superseded by history instead of merged.
+   */
+  promptRunning?: (sessionId: string) => boolean;
 };
 
 type HistoryRequestOwner = { client: AcpClient; workspace: string; generation: number };
@@ -35,7 +41,9 @@ export function createSessionHistory(options: SessionHistoryOptions) {
   const loadingOlderSessionIds = new Map<string, HistoryRequestOwner>();
   const hydrationBySessionId = new Map<string, { promise: Promise<void>; generation: number }>();
   const retainedHydrationBySessionId = new Map<string, number>();
-  const incompleteHydrationSessionIds = new Set<string>();
+  // Tracked positively: live updates and queued messages create caches for
+  // any session, so only these sessions hold their complete history.
+  const hydratedSessionIds = new Set<string>();
   const backgroundOwners = new Map<string, object>();
 
   function needsHydration(sessionId: string): boolean {
@@ -43,7 +51,7 @@ export function createSessionHistory(options: SessionHistoryOptions) {
     // Do not replace hydration retained by an accepted send on tab re-entry.
     const pending = hydrationBySessionId.get(sessionId);
     const retained = pending && retainedHydrationBySessionId.get(sessionId) === pending.generation;
-    return incompleteHydrationSessionIds.has(sessionId) && !retained;
+    return !hydratedSessionIds.has(sessionId) && !retained;
   }
 
   function begin(): number {
@@ -76,7 +84,7 @@ export function createSessionHistory(options: SessionHistoryOptions) {
     requestWorkspace: string,
     requestGeneration: number,
   ): Promise<void> {
-    incompleteHydrationSessionIds.add(sessionId);
+    hydratedSessionIds.delete(sessionId);
     retainedHydrationBySessionId.delete(sessionId);
     const pending = hydrateRequest(requestClient, sessionId, requestWorkspace, requestGeneration)
       .finally(() => {
@@ -117,6 +125,11 @@ export function createSessionHistory(options: SessionHistoryOptions) {
     requestGeneration: number,
   ): Promise<void> {
     olderCursorBySessionId.delete(sessionId);
+    // An idle session's cached live items (e.g. a queued prompt run in a
+    // background tab) are already persisted when this request starts.
+    const persistedLiveItems = options.promptRunning && !options.promptRunning(sessionId)
+      ? options.state.transcriptFor(sessionId)?.items ?? []
+      : null;
     try {
       const history = await requestClient.sessionHistory(sessionId);
       if (!isHydrationCurrent(requestClient, sessionId, requestWorkspace, requestGeneration)) return;
@@ -126,9 +139,11 @@ export function createSessionHistory(options: SessionHistoryOptions) {
       else olderCursorBySessionId.delete(sessionId);
 
       const currentTranscript = options.state.transcriptFor(sessionId) ?? emptyTranscript;
-      const nextTranscript = mergeTranscriptHistory(loadedTranscript, currentTranscript);
+      const nextTranscript = persistedLiveItems
+        ? supersedeLiveTranscript(loadedTranscript, currentTranscript, persistedLiveItems)
+        : mergeTranscriptHistory(loadedTranscript, currentTranscript);
       options.state.setTranscriptFor(sessionId, nextTranscript);
-      incompleteHydrationSessionIds.delete(sessionId);
+      hydratedSessionIds.add(sessionId);
       if (options.state.sessionId === sessionId) options.scheduleScrollToLatest();
     } catch (error) {
       if (!isCurrent(requestClient, sessionId, requestWorkspace, requestGeneration)) return;
@@ -140,7 +155,7 @@ export function createSessionHistory(options: SessionHistoryOptions) {
           // Input accepted during startup is not history and must survive an
           // empty/unavailable persisted history response.
           options.state.setSessionTranscript(sessionId, options.state.transcript);
-          incompleteHydrationSessionIds.delete(sessionId);
+          hydratedSessionIds.add(sessionId);
           loading = false;
           return;
         }
@@ -168,7 +183,7 @@ export function createSessionHistory(options: SessionHistoryOptions) {
         transcript = markDeferredToolResults(transcript, history.deferredToolCallIds);
         if (history.cursor) olderCursorBySessionId.set(sessionId, history.cursor);
         options.state.setSessionTranscript(sessionId, transcript);
-        incompleteHydrationSessionIds.delete(sessionId);
+        hydratedSessionIds.add(sessionId);
       }
       return true;
     } finally {
@@ -192,7 +207,7 @@ export function createSessionHistory(options: SessionHistoryOptions) {
     if (history.cursor) olderCursorBySessionId.set(sessionId, history.cursor);
     else olderCursorBySessionId.delete(sessionId);
     options.state.setTranscriptFor(sessionId, transcript);
-    incompleteHydrationSessionIds.delete(sessionId);
+    hydratedSessionIds.add(sessionId);
     return true;
   }
 
@@ -257,18 +272,23 @@ export function createSessionHistory(options: SessionHistoryOptions) {
     options.state.setTranscript(setToolResultLoading(options.state.transcript, toolCallId, true));
     try {
       const update = await requestClient.toolResult(sessionId, toolCallId);
-      if (!isCurrent(requestClient, sessionId, requestWorkspace, requestGeneration)) return;
+      if (!isCurrent(requestClient, sessionId, requestWorkspace, requestGeneration)) {
+        // The tab was left meanwhile: settle the cached copy, which still
+        // carries the loading flag, instead of leaving it stuck.
+        settleStaleToolResult(requestClient, sessionId, requestWorkspace, key, owner, toolCallId,
+          (cached) => applyDeferredToolResult(cached, update));
+        return;
+      }
       const nextTranscript = applyDeferredToolResult(options.state.transcript, update);
       options.state.setTranscript(nextTranscript);
       options.state.setSessionTranscript(sessionId, nextTranscript);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       if (isCurrent(requestClient, sessionId, requestWorkspace, requestGeneration)) {
-        options.state.setTranscript(setToolResultLoading(
-          options.state.transcript,
-          toolCallId,
-          false,
-          error instanceof Error ? error.message : String(error),
-        ));
+        options.state.setTranscript(setToolResultLoading(options.state.transcript, toolCallId, false, message));
+      } else {
+        settleStaleToolResult(requestClient, sessionId, requestWorkspace, key, owner, toolCallId,
+          (cached) => setToolResultLoading(cached, toolCallId, false, message));
       }
     } finally {
       // Cancellation may already have installed a new request with the same key.
@@ -276,24 +296,47 @@ export function createSessionHistory(options: SessionHistoryOptions) {
     }
   }
 
+  /**
+   * Settle a tool result whose tab was left before it arrived: the cached
+   * copy still carries the loading flag. A newer request for the same tool,
+   * an already loaded body, or a closed/reset session (no cache) wins.
+   */
+  function settleStaleToolResult(
+    requestClient: AcpClient,
+    sessionId: string,
+    requestWorkspace: string,
+    key: string,
+    owner: HistoryRequestOwner,
+    toolCallId: string,
+    update: (cached: TranscriptState) => TranscriptState,
+  ): void {
+    if (requestClient !== options.client() || requestWorkspace !== options.workspace()) return;
+    const newer = loadingToolResults.get(key);
+    if (newer && newer !== owner) return;
+    const cached = options.state.transcriptFor(sessionId);
+    const tool = cached?.items.find((item) => item.type === "tool" && item.toolCallId === toolCallId);
+    if (!cached || tool?.type !== "tool" || !tool.deferredResult) return;
+    options.state.setTranscriptFor(sessionId, update(cached));
+  }
+
   function markFullyLoaded(sessionId = options.state.sessionId): void {
     if (sessionId) {
       olderCursorBySessionId.delete(sessionId);
-      incompleteHydrationSessionIds.delete(sessionId);
+      hydratedSessionIds.add(sessionId);
     }
   }
 
   function captureRollback(sessionId: string): () => void {
-    const incomplete = incompleteHydrationSessionIds.has(sessionId);
+    const hydrated = hydratedSessionIds.has(sessionId);
     const cursor = olderCursorBySessionId.get(sessionId);
     return () => {
-      if (incomplete) incompleteHydrationSessionIds.add(sessionId);
+      if (hydrated) hydratedSessionIds.add(sessionId);
       if (cursor) olderCursorBySessionId.set(sessionId, cursor);
     };
   }
 
   function forget(sessionId: string): void {
-    incompleteHydrationSessionIds.delete(sessionId);
+    hydratedSessionIds.delete(sessionId);
     backgroundOwners.delete(sessionId);
     retainedHydrationBySessionId.delete(sessionId);
     olderCursorBySessionId.delete(sessionId);
@@ -307,7 +350,7 @@ export function createSessionHistory(options: SessionHistoryOptions) {
   }
 
   function reset(): void {
-    incompleteHydrationSessionIds.clear();
+    hydratedSessionIds.clear();
     backgroundOwners.clear();
     cancel();
     retainedHydrationBySessionId.clear();

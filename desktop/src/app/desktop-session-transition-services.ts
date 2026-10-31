@@ -94,7 +94,11 @@ export function createDesktopSessionTransitionServices(
     retargetWorkbenchAnchors: (sourceSessionId, targetSessionId) =>
       options.workbenchController().retargetSessionAnchors(sourceSessionId, targetSessionId),
     retargetAttachmentDraftKey: options.retargetAttachmentDraftKey,
-    adoptMaterializedTranscript: options.state.adoptDraftTranscript,
+    adoptMaterializedTranscript: (sessionId, transcript) => {
+      options.state.adoptDraftTranscript(sessionId, transcript);
+      // A freshly created session's whole history is the draft transcript.
+      options.sessions.history.markFullyLoaded(sessionId);
+    },
     setConfigOptions: options.state.setConfigOptions,
     markRuntimeReady: options.sessions.runtime.markReady,
     rememberActiveSession: options.sessions.tabs.rememberActive,

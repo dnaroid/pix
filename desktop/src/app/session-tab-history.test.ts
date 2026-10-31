@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AcpClient } from "../lib/acp-client";
 import type { LazySessionHistory } from "../lib/acp-client-types";
-import { appendLocalUserMessage, emptyTranscript } from "../lib/transcript";
+import { appendLocalUserMessage, applySessionUpdates, emptyTranscript } from "../lib/transcript";
 import { createActiveSessionState } from "./active-session-state.svelte";
 import { createSessionHistory } from "./session-history.svelte";
 import type { SessionTabControllerOptions } from "./session-tab-controller-options";
@@ -22,7 +22,7 @@ function page(text: string): LazySessionHistory {
   };
 }
 
-function fixture() {
+function fixture(extra: { promptRunning?: (sessionId: string) => boolean } = {}) {
   const sessionHistory = vi.fn<(...args: unknown[]) => Promise<LazySessionHistory>>();
   const client = { sessionHistory } as unknown as AcpClient;
   const state = createActiveSessionState();
@@ -33,7 +33,10 @@ function fixture() {
     client: () => client, state, workspace: () => "/work",
     ensureRuntime: vi.fn(async () => {}), runtimeReady: () => true,
     scheduleScrollToLatest: vi.fn(), recoverUnavailableSession: vi.fn(), reportError,
+    ...extra,
   });
+  // The open source tab was hydrated (or created) before these scenarios.
+  history.markFullyLoaded("source");
   const selection = createSessionTabSelection({
     client: () => client, state, workspace: () => "/work", statusReady: () => true,
     operationRunning: () => false, sessionMutationRunning: () => false,
@@ -46,7 +49,7 @@ function fixture() {
     refreshQueueState: vi.fn(), catalog: { refresh: vi.fn(), sessions: [] }, reportError,
     tabSessionIds: () => ["source", "target"], history,
   } as unknown as SessionTabControllerOptions);
-  return { state, history, selection, sessionHistory, reportError };
+  return { state, history, selection, sessionHistory, reportError, client };
 }
 
 describe("conversation tab history restoration", () => {
@@ -139,9 +142,75 @@ describe("conversation tab history restoration", () => {
     expect(h.history.needsHydration("target")).toBe(true);
     if (action === "forget") h.history.forget("target");
     else h.history.reset();
-    expect(h.history.needsHydration("target")).toBe(false);
+    // A forgotten session keeps no completeness claim: reopening hydrates it.
+    expect(h.history.needsHydration("target")).toBe(true);
     old.resolve(page("obsolete"));
     await Promise.resolve();
     expect(h.state.transcript.items).toEqual([]);
+  });
+
+  it("hydrates a background tab whose cache holds only a queued run and supersedes its live copy", async () => {
+    let running = false;
+    const h = fixture({ promptRunning: (id: string) => running && id === "target" });
+    // Prewarm drained the queue in the never-opened tab: queued user message
+    // plus live agent chunks, with stream IDs that differ from replay IDs.
+    running = true;
+    let live = appendLocalUserMessage(emptyTranscript, "queued prompt", "queued:1");
+    live = applySessionUpdates(live, [{ sessionUpdate: "agent_message_chunk", messageId: "live-1",
+      content: { type: "text", text: "answer" } }]);
+    h.state.setTranscriptFor("target", live);
+    running = false;
+    expect(h.history.needsHydration("target")).toBe(true);
+    h.sessionHistory.mockResolvedValueOnce({
+      updates: [
+        { sessionUpdate: "user_message_chunk", messageId: "replay-0", content: { type: "text", text: "old question" } },
+        { sessionUpdate: "agent_message_chunk", messageId: "replay-1", content: { type: "text", text: "old answer" } },
+        { sessionUpdate: "user_message_chunk", messageId: "replay-2", content: { type: "text", text: "queued prompt" } },
+        { sessionUpdate: "agent_message_chunk", messageId: "replay-3", content: { type: "text", text: "answer" } },
+      ],
+      deferredToolCallIds: [],
+    });
+    await h.selection.loadSession("target");
+    expect(h.sessionHistory).toHaveBeenCalledTimes(1);
+    await h.history.waitForHydration("target");
+    expect(h.state.transcript.items.map((item) => item.type === "message" ? item.text : item.id))
+      .toEqual(["old question", "old answer", "queued prompt", "answer"]);
+    await h.selection.loadSession("source");
+    await h.selection.loadSession("target");
+    expect(h.sessionHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps live items that arrive while a background tab hydrates", async () => {
+    const h = fixture({ promptRunning: () => false });
+    h.state.setTranscriptFor("target", appendLocalUserMessage(emptyTranscript, "persisted turn", "queued:1"));
+    const response = deferred<LazySessionHistory>();
+    h.sessionHistory.mockReturnValueOnce(response.promise);
+    await h.selection.loadSession("target");
+    h.state.setTranscriptFor("target", appendLocalUserMessage(h.state.transcript, "new send", "local:2"));
+    response.resolve(page("persisted turn"));
+    await h.history.waitForHydration("target");
+    expect(h.state.transcript.items).toMatchObject([{ text: "persisted turn" }, { text: "new send" }]);
+  });
+
+  it("settles a deferred tool result that completes after its tab was left", async () => {
+    const h = fixture();
+    const result = deferred<unknown>();
+    const toolResult = vi.fn(() => result.promise);
+    (h.client as unknown as { toolResult: typeof toolResult }).toolResult = toolResult;
+    h.sessionHistory.mockResolvedValueOnce({
+      updates: [{ sessionUpdate: "tool_call", toolCallId: "t1", title: "Read", kind: "read", status: "completed" }],
+      deferredToolCallIds: ["t1"],
+    });
+    await h.selection.loadSession("target");
+    await h.history.waitForHydration("target");
+    const loading = h.history.loadDeferredToolResult("t1");
+    expect(h.state.transcript.items[0]).toMatchObject({ resultLoading: true });
+    await h.selection.loadSession("source");
+    result.resolve({ sessionUpdate: "tool_call_update", toolCallId: "t1", status: "completed",
+      content: [{ type: "content", content: { type: "text", text: "file body" } }] });
+    await loading;
+    expect(h.state.sessionTranscript("target")?.items[0]).toMatchObject({
+      resultLoading: false, deferredResult: false, content: "file body",
+    });
   });
 });

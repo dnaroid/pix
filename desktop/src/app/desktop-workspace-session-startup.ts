@@ -15,6 +15,8 @@ type DesktopWorkspaceSessionStartupOptions = {
   setErrorMessage: (message: string | null) => void;
   reportError: (error: unknown) => void;
   onOpeningChange?: (opening: boolean) => void;
+  promptText?: () => string;
+  promptAttachments?: () => readonly unknown[];
 };
 
 export function createDesktopWorkspaceSessionStartup(options: DesktopWorkspaceSessionStartupOptions) {
@@ -30,6 +32,8 @@ export function createDesktopWorkspaceSessionStartup(options: DesktopWorkspaceSe
     setErrorMessage: options.setErrorMessage,
     reportError: options.reportError,
     onOpeningChange: options.onOpeningChange,
+    promptText: options.promptText,
+    promptAttachments: options.promptAttachments,
   });
 }
 

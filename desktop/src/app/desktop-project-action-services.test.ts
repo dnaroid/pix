@@ -29,6 +29,7 @@ describe("desktop project task session activation", () => {
     const showSession = vi.fn();
     const rememberActive = vi.fn();
     const ensureProvisional = vi.fn();
+    const markFullyLoaded = vi.fn();
     const saveTasks = vi.fn().mockResolvedValue(true);
     const runPromptRequest = vi.fn().mockResolvedValue(undefined);
     const state = {
@@ -54,6 +55,7 @@ describe("desktop project task session activation", () => {
         },
         catalog: { ensureProvisional, refresh: vi.fn() },
         tabs: { show: showSession, rememberActive },
+        history: { markFullyLoaded },
       } as any,
       transitions: {
         draft,
@@ -102,6 +104,7 @@ describe("desktop project task session activation", () => {
     expect(rememberActive).toHaveBeenCalledWith("/project", "task-session");
     expect(ensureProvisional).toHaveBeenCalledWith("task-session", "/project");
     expect(state.sessionId).toBe("task-session");
+    expect(markFullyLoaded).toHaveBeenCalledWith("task-session");
     expect(saveTasks).toHaveBeenCalledWith(expect.objectContaining({
       tasks: [expect.objectContaining({
         id: "task-1",
