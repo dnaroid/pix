@@ -1,9 +1,10 @@
-import type { FileAnnotation, FileAnnotations } from "../lib/acp-pix-extensions";
+import type { FileAnnotation, FileAnnotationProgress, FileAnnotations } from "../lib/acp-pix-extensions";
 
 export type PreviewAnnotationStatus = "idle" | "loading" | "done" | "error";
 export type PreviewFileAnnotator = (
   request: { readonly path: string; readonly text: string; readonly refresh?: boolean },
   signal: AbortSignal,
+  onProgress: (progress: FileAnnotationProgress) => void,
 ) => Promise<FileAnnotations>;
 
 interface PreviewAnnotationControllerOptions {
@@ -29,6 +30,10 @@ export function createPreviewAnnotationController(options: PreviewAnnotationCont
     language: "",
     annotatedLines: 0,
     totalLines: 0,
+    /** Parallel parts of a large file; notes arrive per finished part. */
+    completedParts: 0,
+    totalParts: 0,
+    failedParts: 0,
   });
   const results = new Map<string, FileAnnotations>();
   let controller: AbortController | null = null;
@@ -44,6 +49,7 @@ export function createPreviewAnnotationController(options: PreviewAnnotationCont
     Object.assign(state, {
       status: "done", error: "", summary: result.summary, annotations: result.annotations, language: result.language,
       annotatedLines: result.annotatedLines, totalLines: result.totalLines,
+      completedParts: result.parts, totalParts: result.parts, failedParts: result.failedParts,
     });
   }
 
@@ -51,7 +57,10 @@ export function createPreviewAnnotationController(options: PreviewAnnotationCont
     if (key === sourceKey) return;
     sourceKey = key;
     abort();
-    Object.assign(state, { showing: false, status: "idle", summary: "", annotations: [], error: "", language: "", annotatedLines: 0, totalLines: 0 });
+    Object.assign(state, {
+      showing: false, status: "idle", summary: "", annotations: [], error: "", language: "", annotatedLines: 0, totalLines: 0,
+      completedParts: 0, totalParts: 0, failedParts: 0,
+    });
   }
 
   function remember(key: string, result: FileAnnotations): void {
@@ -74,11 +83,18 @@ export function createPreviewAnnotationController(options: PreviewAnnotationCont
     const own = new AbortController();
     controller = own;
     const current = () => controller === own && sourceKey === owner && !disposed;
-    Object.assign(state, { showing: true, status: "loading", error: "" });
+    Object.assign(state, { showing: true, status: "loading", error: "", summary: "", annotations: [], completedParts: 0, totalParts: 0, failedParts: 0 });
     try {
-      const result = await annotator({ path, text, ...(refresh ? { refresh: true } : {}) }, own.signal);
+      const result = await annotator({ path, text, ...(refresh ? { refresh: true } : {}) }, own.signal, (progress) => {
+        if (!current()) return;
+        if (progress.summary) state.summary = progress.summary;
+        if (progress.annotations?.length) state.annotations = mergeNotes(state.annotations, progress.annotations);
+        state.completedParts = progress.completedParts;
+        state.totalParts = progress.totalParts;
+      });
       if (!current()) return;
-      if (owner !== undefined) remember(owner, result);
+      // A partial result (failed parts) is shown but not remembered, so the next open retries the gaps.
+      if (owner !== undefined && result.failedParts === 0) remember(owner, result);
       apply(result);
     } catch (error) {
       if (!current() || own.signal.aborted) return;
@@ -117,4 +133,10 @@ export function createPreviewAnnotationController(options: PreviewAnnotationCont
     cancel,
     dispose,
   };
+}
+
+function mergeNotes(current: readonly FileAnnotation[], incoming: readonly FileAnnotation[]): FileAnnotation[] {
+  const byLine = new Map(current.map((note) => [note.line, note.text]));
+  for (const note of incoming) byLine.set(note.line, note.text);
+  return [...byLine].sort(([left], [right]) => left - right).map(([line, text]) => ({ line, text }));
 }

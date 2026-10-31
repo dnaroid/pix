@@ -36,6 +36,8 @@ export const PIX_SELECTION_ASSIST_DELTA_METHOD = "pix/selection/assist_delta";
 export const PIX_DOCUMENT_TRANSLATE_METHOD = "pix/document/translate";
 /** Inline commentary for a Preview source file: `{ annotations: [{ line, text }] }`. */
 export const PIX_FILE_ANNOTATE_METHOD = "pix/file/annotate";
+/** Explain progress: `{ requestId, summary?, annotations?, completedParts, totalParts }`. */
+export const PIX_FILE_ANNOTATE_PROGRESS_METHOD = "pix/file/annotate_progress";
 export const PIX_BRANCH_USER_MESSAGES_METHOD = "pix/session/branch_user_messages";
 export const PIX_USER_MESSAGE_ACTION_METHOD = "pix/session/user_message_action";
 export const PIX_AGENT_CONTROL_METHOD = "pix/session/agent_control";
@@ -366,6 +368,8 @@ export interface DesktopFileAnnotateRequest {
 	readonly text: string;
 	readonly path?: string;
 	readonly refresh?: boolean;
+	/** Correlates progress notifications; omitted means no progress. */
+	readonly requestId?: string;
 }
 
 export interface DesktopFileAnnotateResponse {
@@ -374,6 +378,8 @@ export interface DesktopFileAnnotateResponse {
 	readonly language: string;
 	readonly annotatedLines: number;
 	readonly totalLines: number;
+	readonly parts: number;
+	readonly failedParts: number;
 	readonly cached: boolean;
 }
 
@@ -773,6 +779,7 @@ export function parseDesktopFileAnnotateRequest(value: unknown): DesktopFileAnno
 		|| value.text.length > FILE_ANNOTATE_MAX_TEXT
 		|| (value.path !== undefined && (typeof value.path !== "string" || value.path.length > 4_096))
 		|| (value.refresh !== undefined && typeof value.refresh !== "boolean")
+		|| (value.requestId !== undefined && (typeof value.requestId !== "string" || value.requestId.length === 0 || value.requestId.length > 128))
 	) {
 		throw new RequestError(ERROR_INVALID_PARAMS, "pix/file/annotate requires cwd and non-empty file text");
 	}
@@ -780,6 +787,7 @@ export function parseDesktopFileAnnotateRequest(value: unknown): DesktopFileAnno
 		cwd: value.cwd, text: value.text,
 		...(typeof value.path === "string" && value.path ? { path: value.path } : {}),
 		...(value.refresh === true ? { refresh: true } : {}),
+		...(typeof value.requestId === "string" ? { requestId: value.requestId } : {}),
 	};
 }
 

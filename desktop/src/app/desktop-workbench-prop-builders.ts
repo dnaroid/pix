@@ -426,10 +426,10 @@ export function buildWorkbenchEditorProps(
         ? (path) => void options.projectWorkspace.openInEditor(path)
         : undefined,
       onAnnotateFile: activePreview.kind === "file" && options.client && options.clientAvailable() && previewWorkspace
-        ? (request, signal) => {
+        ? (request, signal, onProgress) => {
           const client = options.client?.();
           if (!client) return Promise.reject(new Error("Pix is not connected to a workspace."));
-          return client.annotateFile({ cwd: previewWorkspace, ...request }, signal);
+          return client.annotateFile({ cwd: previewWorkspace, ...request }, signal, onProgress);
         }
         : undefined,
       onTranslateDocument: activePreview.kind === "file" && options.client && options.clientAvailable() && previewWorkspace
