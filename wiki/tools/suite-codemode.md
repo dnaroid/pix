@@ -74,3 +74,5 @@ off/on JSONC round trip. Sync the live suite after verification.
 
 - [Default-on integration decision](../decisions/0030-suite-codemode.md)
 - [Desktop config editing](../configuration/desktop-user-config-editing.md)
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"03067f357c017037fba0b3c867dd8e3f4a1b14216e82bea064be0ce553cc2922","checkedAt":"2026-10-30T23:09:30.237Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":65,"reportLanguage":"ru"} -->

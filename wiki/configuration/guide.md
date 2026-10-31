@@ -265,6 +265,91 @@ stopping/cancelling work without affecting existing conversations.
 
 See [Pix Desktop](../desktop/guide.md).
 
+### Wiki contradiction judge
+
+`knowledgeCheck.modelRef` selects a dedicated model for both manual and background
+Wiki contradiction checks. `knowledgeCheck.thinking` sets its reasoning effort.
+These settings are independent of `search.ragModelRef`, `search.ragThinking` and
+the session default. Configure the shared judge in
+`~/.config/pi/pi-tools-suite.jsonc`, or override it in
+`~/.config/pi/pix-desktop.jsonc`:
+
+```jsonc
+{
+  "knowledgeCheck": {
+    "modelRef": "zai/glm-5.3-flash",
+    "thinking": "low",
+    "reportLanguage": "ru"
+  }
+}
+```
+
+The model above is an example, not an automatically selected default. Select
+models and reasoning in the **model setup wizard → Features → Assistant**:
+**Contradiction judge** writes the shared Suite fields; **Contradiction judge
+(Desktop override)** writes only the Desktop profile. Both are optional slots
+without Main/Fast/Strong role defaults. **Use Tools Suite setting** clears the
+corresponding Desktop field; **Low (default)** clears explicit Suite reasoning.
+Model and reasoning can be reset independently, including when the model is
+inherited and reasoning is overridden. The TUI setup wizard exposes the same
+slots; Desktop-only overrides are never written to `pix.jsonc` and setup does
+not create a partial Desktop profile if it does not yet exist.
+
+**Settings → Tools Suite → General** and **Settings → Desktop → Assistant**
+show a read-only judge summary with **Edit in wizard…**, not separate model
+selectors. The report-language selector remains editable in Settings. Opening
+or cancelling the wizard writes nothing. Existing judge choices are read back,
+appear on **In use**, and participate in replace-everywhere. Saving unrelated
+roles with untouched judge slots does not select or replace the judge.
+
+Each nonempty Desktop field overrides only that Suite field; blank or omitted
+Desktop fields inherit Suite. When reasoning is unset in both files it is
+`low`; supported values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`
+and `max`. `off` omits an explicit reasoning request. Use `provider/model`
+without a `:thinking` suffix, since reasoning has its own field.
+
+No judge is selected by default. When both model fields are empty, checks fail
+with an actionable configuration message before retrieval; they do not silently
+use the Search or session model. An invalid explicit configuration or an
+unavailable judge also fails without provider fallback. Existing users who
+previously relied on the Search answer model must set `knowledgeCheck.modelRef`
+explicitly; there is no automatic configuration migration.
+
+These are user-global settings; project `.pi/` configs do not override them.
+Changes apply to the next check, not a request already running. Saved reports
+retain the judge that produced them; selecting another model does not by itself
+invalidate a content-hash stamp or restart a completed background pass.
+
+### Wiki contradiction report language
+
+`knowledgeCheck.reportLanguage` selects `en` (English) or `ru` (Russian) for
+Wiki contradiction reports. Set the shared preference in
+`~/.config/pi/pi-tools-suite.jsonc`, or override it in
+`~/.config/pi/pix-desktop.jsonc`:
+
+```jsonc
+{
+  "knowledgeCheck": { "reportLanguage": "ru" }
+}
+```
+
+The controls are **Settings → Tools Suite → General → Contradiction report
+language** and **Settings → Desktop → Assistant → Contradiction report
+language**. Desktop's **Use Tools Suite setting** saves an empty string; an
+omitted/empty Desktop value also inherits the suite preference. An explicit
+Desktop `en` or `ru` takes priority. When neither file supplies a supported
+value, reports use English. This preference is user-global; project files do
+not override it. It is read at the start of each new check, so existing results
+keep their original language until checked again.
+
+The setting covers model explanations, uncertainty prose, report labels and
+checker-owned diagnostics. Quotations stay verbatim in their original language;
+file paths, source IDs and JSON keys also remain unchanged. Unknown native or
+provider diagnostic messages retain their original text. It does not change
+the judge model or reasoning effort.
+
+See [Wiki contradiction checks](../desktop/workbench/desktop-project-wiki.md#contradiction-checks).
+
 ### Desktop Observer defaults
 
 **Settings → Desktop → Observer** edits the `headsUp` object in the Desktop
@@ -463,3 +548,5 @@ setting.
 
 > Shipped defaults contain no provider/model ids. Choose models with `pix install
 > [--models]` or Desktop's first-run dialog / Settings → **Edit in wizard…**.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"915fab124ea1563980f9ee578940fabc142d99cf8172e1fc7d8d1f4bf60a0892","checkedAt":"2026-10-30T23:06:08.089Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":58,"reportLanguage":"ru"} -->

@@ -6,6 +6,7 @@ import type { AcpClient, RuntimeStatus } from "../lib/acp-client";
 import ProjectSwitcher from "../components/ProjectSwitcher.svelte";
 import type { createAttachmentDraftController } from "./attachment-drafts";
 import type { createGitAssist } from "./git-assist";
+import type { createKnowledgeResolution } from "./knowledge-resolution.svelte";
 import type { createGitCiStore } from "./git-ci.svelte";
 import type { createGitWorkspaceStore } from "./git-workspace.svelte";
 import type { createPreviewStore } from "./preview.svelte";
@@ -55,6 +56,7 @@ export function createDesktopSidebarViewModel(options: {
   git: ReturnType<typeof createGitWorkspaceStore>;
   gitCi: ReturnType<typeof createGitCiStore>;
   gitAssist: ReturnType<typeof createGitAssist>;
+  knowledgeResolution?: ReturnType<typeof createKnowledgeResolution>;
   preview: ReturnType<typeof createPreviewStore>;
   attachments: ReturnType<typeof createAttachmentDraftController>;
   sessionTabs: ReturnType<typeof createSessionTabController>;
@@ -207,6 +209,21 @@ export function createDesktopSidebarViewModel(options: {
       onSaveIdentity: options.git.saveIdentity,
     },
     projectDocuments: options.projectDocuments.snapshot,
+    knowledgeJobs: options.projectDocuments.knowledgeJobs,
+    wikiAutoCheck: options.projectDocuments.wikiAutoCheck,
+    onSetWikiAutoCheck: options.projectDocuments.setWikiAutoCheck,
+    onCancelKnowledgeCheck: options.projectDocuments.cancelKnowledgeCheck,
+    onDismissKnowledgeCheck: options.projectDocuments.dismissKnowledgeCheck,
+    onOpenKnowledgeCitation: (citation, language) => options.preview.openKnowledgeCitation(citation, "push", language),
+    knowledgeSourcesEnabled: !options.preview.dirty,
+    knowledgeResolving: options.knowledgeResolution?.starting ?? false,
+    onResolveKnowledgeJob: options.knowledgeResolution && options.gitAssistantReady() && !options.sessionMutationRunning()
+      ? (job) => {
+        if (job.result && options.projectDocuments.knowledgeJobs.some(current => current.id === job.id && current.workspace === job.workspace && current.result === job.result)) {
+          return options.knowledgeResolution!.start({ workspace: job.workspace, result: job.result, content: job.content });
+        }
+      }
+      : undefined,
     activeProjectDocumentPath: options.preview.active?.kind === "file"
       ? options.preview.active.file.virtualWikiDirectory ?? options.preview.active.file.path : null,
     planActionsDisabled: options.projectActions.actionId !== null || options.projectDocuments.removing !== null,

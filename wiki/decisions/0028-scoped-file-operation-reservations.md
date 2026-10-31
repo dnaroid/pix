@@ -62,3 +62,5 @@ does not cancel filesystem work already running.
 
 Root-destination copy concurrency, cross-window serialization, cancellation,
 or precise native progress/target reservation becomes a product requirement.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"2966d34a589fc8f28193eb3c7dc7236b34d046b876706fbfd1b6cfb4266d3523","checkedAt":"2026-10-30T23:40:36.289Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":70,"reportLanguage":"ru"} -->

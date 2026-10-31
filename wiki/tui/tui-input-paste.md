@@ -46,3 +46,5 @@ different active input scope. Classification does not bypass those guards.
 Run the input paste and controller tests. In the real TUI, enter the provider
 doctor command after startup: the editor must show the command without quotes,
 and a separate Enter must invoke the command rather than submit a model prompt.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"a9f84851353e111ad5bfe8de66dfec4199f4d529ad429a2f9622a7ac22271174","checkedAt":"2026-10-30T23:25:08.965Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":62,"reportLanguage":"ru"} -->

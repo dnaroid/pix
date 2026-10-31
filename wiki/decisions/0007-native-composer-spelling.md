@@ -52,3 +52,5 @@ context requests retain editing commands but not spelling suggestions.
 Native acceptance shows that WebKit's menu cannot provide corrections reliably,
 its additional text services conflict with product requirements, or spelling
 suggestions are required for keyboard-only use or other prose fields.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"e2a32070d4c9a0afd6ae33e4e4572ba454f86ebf7daaea2485dc5dfe561f4631","checkedAt":"2026-10-30T23:46:59.615Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":55,"reportLanguage":"ru"} -->

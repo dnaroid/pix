@@ -60,3 +60,5 @@ A runaway profile identifies the causal path; repeated profiles require a longer
 bounded window or stronger heap attribution; or ordinary launcher signal/terminal
 behavior proves disruptive. Remove or replace diagnostic-only tooling when a
 verified narrow fix and appropriate regression cover the incident.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"3761f8b6748296d8ccc34e4e7552d7dcd41fdd6a5219fc454f5d04d22e858b6a","checkedAt":"2026-10-30T23:40:02.949Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":45,"reportLanguage":"ru"} -->

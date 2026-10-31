@@ -196,3 +196,5 @@ status: active
 Run targeted registry/metadata, ACP command-validation and Desktop unit tests,
 tools-suite typecheck and Desktop/ACP typechecks. Real UI QA checks both tabs,
 tag editing/search and both conversion directions with retained evidence.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"e40f7f68076e7dabcc7cd8e779102b2ad9f5a69e270000144a4c0900e412429f","checkedAt":"2026-10-31T00:18:17.197Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":56,"reportLanguage":"ru"} -->

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { applyRolesToPixConfig, applyRolesToSuiteConfig, suggestRoles } from "../acp/src/acp/model-setup.js";
-import { applyModelRolesToPixConfig, applyModelRolesToSuiteConfig, suggestModelRoles } from "../src/setup/model-profile.js";
+import { applyRolesToPixConfig, applyRolesToSuiteConfig, applyRolesToDesktopConfig, MODEL_SLOTS as ACP_SLOTS, suggestRoles } from "../acp/src/acp/model-setup.js";
+import { applyModelRolesToPixConfig, applyModelRolesToSuiteConfig, applyModelRolesToDesktopConfig, MODEL_SLOTS, suggestModelRoles } from "../src/setup/model-profile.js";
 
 // acp cannot import root src, so the writers are duplicated; this keeps them identical.
 const roles = { main: "p/a", fast: "p/b", strong: "p/c" };
@@ -24,6 +24,19 @@ test("acp and root suite config writers agree", () => {
 
 test("acp and root role suggestions agree", () => {
 	assert.deepEqual(suggestRoles(models), suggestModelRoles(models));
+});
+
+test("both wizards expose identical judge slots and preserve independent config fields", () => {
+	assert.deepEqual(ACP_SLOTS, MODEL_SLOTS);
+	const source = '{ // Keep reports and search separate\n"knowledgeCheck":{"modelRef":"old/judge","thinking":"high","reportLanguage":"ru"},"search":{"ragModelRef":"p/rag","ragThinking":"max"}}';
+	for (const overrides of [{}, { "knowledge-judge": "p/judge", "knowledge-judge:thinking": "low" },
+		{ "knowledge-judge-desktop": "p/override", "knowledge-judge-desktop:thinking": "off" },
+		{ "knowledge-judge-desktop": "", "knowledge-judge-desktop:thinking": "" },
+		{ "knowledge-judge:thinking": "", "knowledge-judge-desktop:thinking": "high" }]) {
+		assert.equal(applyRolesToSuiteConfig(source, roles, overrides), applyModelRolesToSuiteConfig(source, roles, overrides));
+		assert.equal(applyRolesToPixConfig(source, roles, overrides), applyModelRolesToPixConfig(source, roles, overrides));
+		assert.equal(applyRolesToDesktopConfig(source, roles, overrides), applyModelRolesToDesktopConfig(source, roles, overrides));
+	}
 });
 
 test("writers agree with slot overrides, optional fallbacks and search", async () => {

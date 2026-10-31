@@ -66,6 +66,7 @@ export interface ModelSetupSlot {
   readonly id: string; readonly label: string; readonly group: string; readonly role: keyof ModelSetupRoles;
   readonly optional?: boolean; readonly vision?: boolean;
   readonly parent?: string; readonly list?: boolean; readonly thinking?: boolean; readonly openrouter?: boolean;
+  readonly emptyLabel?: string; readonly thinkingDefaultLabel?: string;
 }
 export interface ModelSetupSearch {
   readonly provider: "openrouter" | "ollama"; readonly model: string; readonly vectorSize: number;
@@ -568,7 +569,7 @@ export class AcpPixExtensions {
     const slots = Array.isArray(response.slots)
       ? response.slots.flatMap((x) => isRecord(x) && typeof x.id === "string" && typeof x.label === "string" && typeof x.group === "string"
         && (x.role === "main" || x.role === "fast" || x.role === "strong")
-        ? [{ id: x.id, label: x.label, group: x.group, role: x.role, ...(x.optional === true ? { optional: true } : {}), ...(x.vision === true ? { vision: true } : {}), ...(typeof x.parent === "string" ? { parent: x.parent } : {}), ...(x.list === true ? { list: true } : {}), ...(x.thinking === true ? { thinking: true } : {}), ...(x.openrouter === true ? { openrouter: true } : {}) } as ModelSetupSlot] : [])
+        ? [{ id: x.id, label: x.label, group: x.group, role: x.role, ...(x.optional === true ? { optional: true } : {}), ...(x.vision === true ? { vision: true } : {}), ...(typeof x.parent === "string" ? { parent: x.parent } : {}), ...(x.list === true ? { list: true } : {}), ...(x.thinking === true ? { thinking: true } : {}), ...(x.openrouter === true ? { openrouter: true } : {}), ...(typeof x.emptyLabel === "string" ? { emptyLabel: x.emptyLabel } : {}), ...(typeof x.thinkingDefaultLabel === "string" ? { thinkingDefaultLabel: x.thinkingDefaultLabel } : {}) } as ModelSetupSlot] : [])
       : [];
     const currentSlots: Record<string, string> = {};
     if (isRecord(response.currentSlots)) {

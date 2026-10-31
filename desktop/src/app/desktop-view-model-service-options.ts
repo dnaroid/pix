@@ -26,6 +26,7 @@ import type { LspOnboardingStore } from "./lsp-onboarding.svelte";
 import type { QuotaWaitStore } from "./quota-wait.svelte";
 import type { HeadsUpStore } from "./heads-up.svelte";
 import type { BackgroundJobsStore } from "./background-jobs.svelte";
+import type { WorkbenchWikiConflictsState } from "./workbench-wiki-conflicts.svelte";
 
 type ErrorState = ReturnType<typeof createErrorState>;
 type SessionOrchestration = ReturnType<typeof createDesktopSessionOrchestration>;
@@ -69,11 +70,13 @@ export type DesktopViewModelServicesOptions = {
   transcriptAttachments: TranscriptAttachments;
   orchestration: SessionOrchestration;
   lspOnboarding: LspOnboardingStore;
+  workbenchWikiConflicts?: WorkbenchWikiConflictsState;
   quotaWait: QuotaWaitStore;
   headsUp: HeadsUpStore;
   backgroundJobs?: BackgroundJobsStore;
   openObserverSettings: () => void;
   openProjectSettings: () => void;
+  openTasksPanel?: (taskId: string) => void | Promise<void>;
   openClaudeLoginTerminal?: (command: string) => Promise<void>;
   openBtw?: (sessionId: string, question?: string) => void | Promise<void>;
 };

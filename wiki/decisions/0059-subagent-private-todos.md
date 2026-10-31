@@ -55,3 +55,5 @@ must report blockers. No additional model turn is scheduled by todo hooks.
 
 Parent-side aggregation is requested, child sessions gain interactive navigation,
 or SDK changes affect extension allowlists, branch replay or compaction events.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"3659c9edffa2b1739d5a8210d907350ab293eee00615a7f2dd53162128d98774","checkedAt":"2026-10-30T23:32:37.604Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":46,"reportLanguage":"ru"} -->

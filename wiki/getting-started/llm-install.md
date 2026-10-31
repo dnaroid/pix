@@ -126,22 +126,12 @@ to remain beside it.
 
 Unless the user requested TUI-only:
 
-- **macOS:** mount the DMG and copy the app to `~/Applications` or
-  `/Applications` according to available permissions;
-- **Windows:** run the NSIS installer;
-- **Linux Debian/Ubuntu:** the `.deb` is preferred when package installation is
-  appropriate;
-- **other Linux x64:** place the AppImage in a stable user-owned directory such
-  as `~/.local/opt/pix-desktop/pix-desktop.AppImage`, mark it executable and
-  create/update a user desktop entry if desired.
+Pix Desktop is supported only on macOS (Apple Silicon): mount the DMG and copy
+the app to `~/Applications` or `/Applications` according to available
+permissions. On Windows and Linux, skip this step: Desktop packages there are
+not published or supported, so install only the TUI.
 
 Do not remove `~/.config/pi/pix-desktop.jsonc` during replacement.
-
-If Linux AppImage opens a blank window and stderr contains
-`Could not create default EGL display: EGL_BAD_PARAMETER`, apply the
-host-`libwayland-client` workaround from
-[Pix Desktop → Linux AppImage blank window](../desktop/guide.md#linux-appimage-blank-window-eglbadparameter).
-Do not apply that workaround preemptively when the AppImage works normally.
 
 ### 7. Configure without overwriting credentials
 
@@ -180,8 +170,7 @@ Report:
 - preserved config/session locations;
 - `pix --help`, `pix install --check`, and `pix update --check` results;
 - Desktop launch result when it can be verified;
-- any remaining manual provider login, microphone permission, signing warning or
-  Linux AppImage compatibility step.
+- any remaining manual provider login, microphone permission or signing warning.
 
 Do not claim Desktop UI verification if the agent could not actually launch or
 observe the native application.

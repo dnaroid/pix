@@ -290,3 +290,5 @@ runtime-lifecycle test, not a live Desktop/TUI GUI or remote-model test.
 Run the named host tests with `node --import tsx --test`, the DCP tests with
 `bun test`, and both root/suite TypeScript checks. Live model-choice evals are a
 separate layer; changing report accounting does not imply a new live-model pass.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"cd7b0c653d3fab0d661dc858b72d68b679fda932e5710a2dee373ed206f68ad2","checkedAt":"2026-10-30T23:16:52.994Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":51,"reportLanguage":"ru"} -->

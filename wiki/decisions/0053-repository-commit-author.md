@@ -48,3 +48,5 @@ No global identity reset/removal control is introduced.
 Revisit if users request global identity management, repository presets, explicit
 worktree-specific settings, environment-override visibility or authentication
 account switching. None is implied by this change.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"5c448d82917dbc7d787b599d8c13ab51e1037f7dc0dfe2f69bc3daf235811840","checkedAt":"2026-10-30T23:45:52.846Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":66,"reportLanguage":"ru"} -->

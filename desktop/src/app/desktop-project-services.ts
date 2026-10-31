@@ -3,6 +3,7 @@ import type { Attachment } from "../lib/attachments";
 import { isCanonicalProjectPlanPath } from "../lib/project-documents";
 import type { TranscriptState } from "../lib/transcript";
 import type { WorkbenchTabId } from "../lib/workbench-tabs";
+import { createDiagnosticLogger } from "../lib/diagnostic-logging";
 import { createGitCiStore } from "./git-ci.svelte";
 import { createGitWorkspaceStore } from "./git-workspace.svelte";
 import { toasts } from "./toasts.svelte";
@@ -12,11 +13,19 @@ import { createPlanLaunchesStore } from "./plan-launches.svelte";
 import { createProjectTasksStore } from "./project-tasks.svelte";
 import { createProjectWorkspaceStore } from "./project-workspace.svelte";
 import { createRegistryStore } from "./registry.svelte";
+import { createWikiConflictNotifications } from "./wiki-conflict-notifications";
+import { createWikiConsistencyOwner } from "./wiki-consistency-owner.svelte";
+import { createWikiConflictsRecheck } from "./wiki-conflicts-recheck.svelte";
+import type { WikiConflictsOpenInput } from "./workbench-wiki-conflicts.svelte";
+import { readWikiCheckDocument } from "../lib/wiki-check-inventory";
 
 type DesktopProjectServicesOptions = {
   client: () => AcpClient | null;
+  knowledgeBackgroundReady?: () => boolean;
   workspace: () => string;
   revealProjectEntry?: (path: string) => Promise<void>;
+  openKnowledgeChecks?: () => void | Promise<void>;
+  openWikiConflicts?: (input: WikiConflictsOpenInput) => void;
   operationRunning: () => boolean;
   sessionWorkspace: (sessionId: string) => string | undefined;
   transcript: () => TranscriptState;
@@ -62,15 +71,42 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
     setErrorMessage: (message) => options.setErrorMessage(message),
   });
 
-  const documents = createProjectDocumentsStore({
+  let documents!: ReturnType<typeof createProjectDocumentsStore>;
+  const backgroundDiagnostics = createDiagnosticLogger(() => ({ workspace: options.workspace() }));
+  const knowledgeNotifications = createWikiConflictNotifications({
     workspace: options.workspace,
+    generation: () => documents.generation,
+    notify: input => { toasts.error(input); },
+    openPage: path => preview.openProjectFile(path, "push", undefined, false, "document"),
+    openChecks: options.openKnowledgeChecks,
+    openConflicts: options.openWikiConflicts,
+    reportError: error => backgroundDiagnostics.report(error, "wiki:notification-failed"),
+  });
+  documents = createProjectDocumentsStore({
+    workspace: options.workspace,
+    knowledgeBackgroundReady: options.knowledgeBackgroundReady ?? (() => Boolean(options.client())),
+    reportBackgroundKnowledgeError: (error, workspace = options.workspace()) =>
+      createDiagnosticLogger(() => ({ workspace })).report(error, "wiki:background-check"),
+    checkKnowledge: (request, signal) => {
+      const client = options.client();
+      if (!client) throw new Error("Connect the project backend before checking Wiki contradictions.");
+      return client.checkKnowledge(request, signal);
+    },
     openProjectFile: preview.openProjectFile,
     showEmptyFile: (file) => preview.show({ kind: "file", file }, "replace"),
     previewId: () => preview.active?.id,
     currentFile: () => preview.active?.kind === "file" ? preview.active.file : undefined,
-    afterSave: (file, _workspace, previewId) => {
-      if (preview.active?.id === previewId) preview.replaceCurrentFile(file);
+    afterSave: (file, workspace, previewId) => {
+      if (workspace !== options.workspace()) return;
+      const active = preview.active;
+      if (active && active.id === previewId && active.kind === "file"
+        && active.file.path === file.path) preview.replaceCurrentFile(file);
       if (isCanonicalProjectPlanPath(file.path)) registry.scheduleProjectSync("plans");
+    },
+    onKnowledgeJobComplete: job => {
+      // A completed check rewrites its page report; refresh findings without waiting for the timer.
+      wikiConsistency.refresh();
+      return knowledgeNotifications.complete(job);
     },
     afterDelete: (path) => {
       preview.invalidateFileLoads();
@@ -80,6 +116,27 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
     clearError: options.clearError,
     reportError: options.reportError,
   });
+  const wikiConsistency = createWikiConsistencyOwner({
+    workspace: options.workspace,
+    wikiPath: () => documents.wikiPath,
+    reportError: error => backgroundDiagnostics.report(error, "wiki:consistency-status-failed"),
+  });
+  const wikiConflictsRecheck = createWikiConflictsRecheck({
+    workspace: options.workspace,
+    wikiPath: wikiConsistency.wikiPath,
+    jobs: () => documents.knowledgeJobs,
+    read: (workspace, wikiPath, path, signal) => readWikiCheckDocument(workspace, wikiPath, path, signal),
+    enqueue: input => documents.enqueueKnowledgeCheck(input),
+    reportError: error => {
+      backgroundDiagnostics.report(error, "wiki:conflicts-recheck-failed");
+      options.reportError(error);
+    },
+  });
+  // The Wiki root becomes known after the project documents load.
+  const loadDocuments = async (workspace: string) => {
+    await documents.load(workspace);
+    wikiConsistency.refresh();
+  };
   registry = createRegistryStore({
     client: options.client,
     operationRunning: options.operationRunning,
@@ -87,7 +144,7 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
     sessionWorkspace: options.sessionWorkspace,
     setErrorMessage: options.setErrorMessage,
     loadProjectTasks: tasks.load,
-    loadProjectDocuments: documents.load,
+    loadProjectDocuments: loadDocuments,
     loadWorkspaceSettings: (workspace) => {
       if (options.workspace() === workspace) projectWorkspace.refreshColors([workspace]);
     },
@@ -105,7 +162,7 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
       preview.close();
       await Promise.all([
         tasks.load(workspace),
-        documents.load(workspace),
+        loadDocuments(workspace),
         projectWorkspace.loadPreferences(workspace),
       ]);
     },
@@ -123,6 +180,9 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
     workspace: projectWorkspace,
     preview,
     documents,
+    loadDocuments,
+    wikiConsistency,
+    wikiConflictsRecheck,
     planLaunches,
     registry,
     git,

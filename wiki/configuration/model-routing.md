@@ -100,3 +100,5 @@ Pix can optionally expose an `Auto` model choice for a new, still-sessionless dr
 - TUI input tests verify routing occurs before materialization and passes the routed model into first-session creation.
 - Desktop tests verify the private ACP routing request, draft-only Auto option, first-prompt routing, cancellation guards, and model-picker presentation.
 - Root, ACP, Desktop, and generated-schema checks must pass.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"d0ebbe938c5f020921728615e04f78154e920bf60c05e42707638fe0697c6afd","checkedAt":"2026-10-30T23:05:44.378Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":57,"reportLanguage":"ru"} -->

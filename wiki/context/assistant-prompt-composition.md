@@ -75,3 +75,5 @@ structured and forced prompts over tool-loop and new-turn requests. Assert docs
 absence, preserved custom/skill text and tool declarations, and a single full
 delegation policy with strategy enabled or disabled. Sync the source suite into
 the live extension and check drift. Existing processes require reload/restart.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"df110766586c546a6eccda85a2732ff05d7ac45f51002d78dd6f86c0049308d6","checkedAt":"2026-10-30T23:17:23.358Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":68,"reportLanguage":"ru"} -->

@@ -74,6 +74,92 @@ describe("independent native Code/Knowledge search", () => {
     expect((await searchNative(root, request("healthyNeedle"))).hits.map(hit => hit.path)).toContain("healthy.ts");
   });
 
+  test("inline Wiki reports keep body searchable without indexing report claims or changing raw hashes", async () => {
+    const root = await fixture();
+    const report = `<!-- pix:wiki-report ${JSON.stringify({ version: 1, result: { notices: ["ambermarigold " + "x".repeat(12_000)] } })} -->\n`;
+    const body = "# Current rules\nvermilionwillow remains authoritative.\n";
+    const footer = '\n<!-- pix:wiki-check {"modelRef":"cobaltsequoia"} -->\n';
+    const content = report + body + footer;
+    await put(root, "wiki/rules.md", content);
+    const scanned = await scanProject(root, { files: new Map() });
+    expect(scanned.complete).toBe(true);
+    expect(scanned.files.get("wiki/rules.md")?.hash).toBe(createHash("sha256").update(`knowledge:${digest(Buffer.from(content))}`).digest("hex"));
+    const result = await searchNative(root, request("vermilionwillow", { sources: ["knowledge"], includeContent: true }));
+    expect(result.status.complete).toBe(true);
+    expect(result.hits.length).toBeGreaterThan(0);
+    expect(result.notices.join(" ")).not.toContain("Excluded");
+    const rawLines = content.split("\n");
+    for (const hit of result.hits) {
+      expect(hit.path).toBe("wiki/rules.md");
+      expect(hit.startLine).toBeLessThanOrEqual(3);
+      expect(hit.endLine).toBeGreaterThanOrEqual(3);
+      const lines = hit.content.split("\n");
+      expect(lines.length).toBe(hit.endLine - hit.startLine + 1);
+      expect(lines[3 - hit.startLine]).toBe(rawLines[2]);
+      expect(hit.content).not.toContain("ambermarigold");
+      expect(hit.content).not.toContain("cobaltsequoia");
+    }
+    expect((await searchNative(root, request("ambermarigold", { sources: ["knowledge"] }))).hits).toEqual([]);
+    expect((await searchNative(root, request("cobaltsequoia", { sources: ["knowledge"] }))).hits).toEqual([]);
+    expect((await readFile(path.join(root, "wiki/rules.md"), "utf8"))).toBe(content);
+
+    const warm = await searchNative(root, request("vermilionwillow", { sources: ["knowledge"] }));
+    expect(warm.status.updatedFiles).toBe(0);
+    await put(root, "wiki/rules.md", body + footer);
+    const cleared = await searchNative(root, request("vermilionwillow", { sources: ["knowledge"], includeContent: true }));
+    expect(cleared.status.updatedFiles).toBe(1);
+    expect(cleared.hits[0].startLine).toBe(1);
+    expect(cleared.hits[0].content).toContain("vermilionwillow");
+  });
+
+  test("Wiki report blanking preserves physical lines with BOM, YAML/TOML and CRLF frontmatter", async () => {
+    const root = await fixture();
+    const report = `<!-- pix:wiki-report ${JSON.stringify({ notices: ["indigomagnolia " + "x".repeat(9_000)] })} -->\n`;
+    const sources = new Map([
+      ["plain.md", report + "# Rules\nvermilionwillow\n"],
+      ["bom.MARKDOWN", "\uFEFF" + report + "# Rules\nvermilionwillow\n"],
+      ["yaml.md", "---\ntitle: Rules\n---\n\n" + report + "# Rules\nvermilionwillow\n"],
+      ["yaml-crlf.md", "---\r\ntitle: Rules\r\n...\r\n\n" + report + "# Rules\r\nvermilionwillow\r\n"],
+      ["toml.md", "+++\ntitle = 'Rules'\n+++\n\n" + report + "# Rules\nvermilionwillow\n"],
+      ["frontmatter-eof.md", "---\ntitle: vermilionwillow\n---\n" + report],
+    ]);
+    for (const [name, content] of sources) await put(root, name, content);
+    const result = await searchNative(root, request("vermilionwillow", { sources: ["knowledge"], includeContent: true, limit: 20 }));
+    expect(result.status.complete).toBe(true);
+    expect(result.hits.map(hit => hit.path).sort()).toEqual([...sources.keys()].sort());
+    for (const hit of result.hits) {
+      const rawLines = sources.get(hit.path)!.split("\n");
+      const matchingLine = rawLines.findIndex(line => line.includes("vermilionwillow")) + 1;
+      expect(hit.startLine).toBeLessThanOrEqual(matchingLine);
+      expect(hit.endLine).toBeGreaterThanOrEqual(matchingLine);
+      expect(hit.content.split("\n")[matchingLine - hit.startLine]).toBe(rawLines[matchingLine - 1]);
+      expect(hit.content).not.toContain("indigomagnolia");
+    }
+    expect((await searchNative(root, request("indigomagnolia", { sources: ["knowledge"] }))).hits).toEqual([]);
+  });
+
+  test("only reserved Markdown metadata is blanked, preserving ordinary fenced examples and code", async () => {
+    const root = await fixture();
+    await put(root, "examples.md", '# Examples\n```html\n<!-- pix:wiki-report {"claim":"saffronjuniper"} -->\n<!-- pix:wiki-check {"claim":"ceruleanorchid"} -->\n```\n');
+    await put(root, "body.md", '# Body\n<!-- pix:wiki-report {"claim":"violetcedar"} -->\n');
+    await put(root, "example.ts", '<!-- pix:wiki-report {"claim":"ochreazalea"} -->\n');
+    expect((await searchNative(root, request("saffronjuniper"))).hits.map(hit => hit.path)).toEqual(["examples.md"]);
+    expect((await searchNative(root, request("ceruleanorchid"))).hits.map(hit => hit.path)).toEqual(["examples.md"]);
+    expect((await searchNative(root, request("violetcedar"))).hits.map(hit => hit.path)).toEqual(["body.md"]);
+    expect((await searchNative(root, request("ochreazalea"))).hits.map(hit => hit.path)).toEqual(["example.ts"]);
+  });
+
+  test("oversized Wiki report metadata keeps the existing bounded exclusion without blocking other files", async () => {
+    const root = await fixture();
+    await put(root, "oversized.md", `<!-- pix:wiki-report {"text":"${"x".repeat(384 * 1024 + 1)}"} -->\n# Hidden\nchartreusefir\n`);
+    await put(root, "healthy.md", "# Healthy\ncrimsonlarch\n");
+    const result = await searchNative(root, request("crimsonlarch", { sources: ["knowledge"] }));
+    expect(result.status.complete).toBe(true);
+    expect(result.hits.map(hit => hit.path)).toEqual(["healthy.md"]);
+    expect(result.notices.join(" ")).toContain("Excluded 1");
+    expect((await searchNative(root, request("chartreusefir", { sources: ["knowledge"] }))).hits).toEqual([]);
+  });
+
   test("a missing tracked source or ignore file recreated before validation invalidates freshness", async () => {
     const root = await fixture();
     const absent = ["tracked.ts", ".gitignore"];
@@ -97,6 +183,7 @@ describe("independent native Code/Knowledge search", () => {
       const result = await searchNative(root, request("retainedSentinel", { sources: ["knowledge"] }));
       expect(result.status.generation).toBe(initial.status.generation);
       expect(result.status.stale).toBe(true);
+      expect(result.status.completeForSelection).toBe(false);
       expect(result.hits).toEqual(initial.hits);
       expect(result.notices.join(" ")).toContain("previous snapshot retained");
       expect(result.notices.join(" ")).not.toContain("unavailable");
@@ -251,8 +338,18 @@ describe("independent native Code/Knowledge search", () => {
     for (let i = 0; i < 205; i++) await put(root, `many/file-${i}.ts`, "broadTerm");
     const capped = await searchNative(root, request("broad term", { limit: 20 }));
     expect(capped.hits.length).toBe(20); expect(capped.status.complete).toBe(false);
+    expect(capped.status.completeForSelection).toBe(true);
     expect(capped.status.stale).toBe(false);
     expect(capped.notices.some(notice => notice.includes("candidate limit"))).toBe(true);
+    expect(capped.limitNotices).toEqual(["Native query candidate limit reached; results are partial."]);
+    expect(capped.limitNotices.every(notice => capped.notices.includes(notice))).toBe(true);
+
+    // One source's ordinary cap must not hide another source's failed scan.
+    await put(root, "overflow.md", Array.from({ length: SCAN_LIMITS.chunks }, (_, i) => `# section-${i}`).join("\n"));
+    const stale = await searchNative(root, request("broad term", { limit: 20 }));
+    expect(stale.status).toMatchObject({ complete: false, completeForSelection: false, stale: true });
+    expect(stale.limitNotices).toEqual(capped.limitNotices);
+    expect(stale.notices.some(notice => notice.includes("previous snapshot retained"))).toBe(true);
   });
 
   test("incomplete Knowledge scanning retains its snapshot while Code independently updates", async () => {
@@ -264,6 +361,7 @@ describe("independent native Code/Knowledge search", () => {
     await put(root, "overflow.md", Array.from({ length: SCAN_LIMITS.chunks }, (_, i) => `# section-${i}`).join("\n"));
     const result = await searchNative(root, request("needle"));
     expect(result.status.complete).toBe(false); expect(result.status.stale).toBe(true);
+    expect(result.status.completeForSelection).toBe(false);
     expect(result.hits.map(hit => hit.path)).toContain("valid.ts");
     expect(result.hits.map(hit => hit.path)).toContain("retained.md");
     const code = await searchNative(root, request("new needle", { sources: ["code"] }));
@@ -288,6 +386,7 @@ describe("independent native Code/Knowledge search", () => {
       await symlink(target, path.join(root, destination));
       const result = await searchNative(root, request("anything"));
       expect(result.status.complete).toBe(false); expect(result.hits).toEqual([]);
+      expect(result.status.completeForSelection).toBe(false);
       if (!directory) expect(await readFile(target, "utf8")).toBe("DO NOT OVERWRITE");
     }
     for (const suffix of ["", "-wal", "-shm", "-journal"]) {
@@ -357,11 +456,13 @@ describe("independent native Code/Knowledge search", () => {
     const heading = "你".repeat(7600);
     for (let i = 0; i < 20; i++) await put(root, `doc-${i}.md`, `# ${heading}\nwideOutputNeedle\n`);
     const result = await searchNativeProject(root, { query: "wide output needle", sources: ["knowledge"],
-      limit: 20, includeContent: true }, new AbortController().signal);
+      mode: "lexical", limit: 20, includeContent: true }, new AbortController().signal);
     expect(result.hits.length).toBeGreaterThan(0);
     expect(result.hits.length).toBeLessThan(20);
     expect(result.status.complete).toBe(false); expect(result.status.stale).toBe(false);
+    expect(result.status.completeForSelection).toBe(true);
     expect(result.notices.some(notice => notice.includes("output limit"))).toBe(true);
+    expect(result.limitNotices).toContain("Native output limit reached; results are partial.");
     expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(480 * 1024);
     expect(result.hits[0].title).toBe(heading);
     expect(result.hits[0].content).toContain(heading);

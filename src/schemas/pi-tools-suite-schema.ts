@@ -317,6 +317,16 @@ const ClaudeCodeProviderConfig = Type.Object({
 export const PiToolsSuiteConfigSchema = Type.Object(
 	{
 		$schema: Type.Optional(Type.String({ description: "JSON Schema URL used by editors for validation and autocomplete." })),
+		knowledgeCheck: Type.Optional(Type.Object({
+			modelRef: Type.Optional(Type.String({ default: "", maxLength: 256, pattern: "^(?:[^\\s/:]+/[^\\s:]+)?$",
+				description: "User-global Wiki contradiction judge, in provider/model format without a thinking suffix. Desktop knowledgeCheck.modelRef can override it. Empty means no judge is selected; Search and session models are never used as fallbacks." })),
+			thinking: Type.Optional(Type.Union(["", "off", "minimal", "low", "medium", "high", "xhigh", "max"].map(value => Type.Literal(value)), {
+				default: "low", description: "Reasoning budget for the Wiki contradiction judge; low when empty or omitted. Desktop knowledgeCheck.thinking can override it independently of the model." })),
+			reportLanguage: Type.Optional(Type.Union([Type.Literal("en"), Type.Literal("ru")], {
+				default: "en",
+				description: "User-global language for Wiki contradiction reports. Desktop can override it; source quotations are preserved.",
+			})),
+		}, { description: "Wiki contradiction judge and report preferences, read from the user-global configuration." })),
 		enabled: Type.Optional(Type.Boolean({ description: "Enable or disable the entire pi-tools-suite extension." })),
 		disabledModules: Type.Optional(Type.Array(Type.String(), { description: "List of disabled module names (e.g. ['lsp', 'prompt-commands'])." })),
 		enabledModules: Type.Optional(Type.Array(Type.String(), { description: "List of module names to explicitly enable, including modules that are disabled by default." })),

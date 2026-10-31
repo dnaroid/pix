@@ -1,3 +1,7 @@
+import { saveWikiSideEdit } from "./wiki-side-edit";
+import type { ProjectTaskDraft } from "./project-tasks.svelte";
+import { createWikiFindingTask } from "./wiki-finding-task";
+import type { WikiFileDates, WikiFileDatesRequest } from "../lib/wiki-file-dates";
 import type { ComponentProps } from "svelte";
 import type { AcpClient } from "../lib/acp-client";
 import DesktopWorkbenchSurface from "../components/DesktopWorkbenchSurface.svelte";
@@ -13,6 +17,7 @@ import type { createConversationBranchActions } from "./conversation-branch-acti
 import type { createConversationSessionActions } from "./conversation-session-actions";
 import type { createErrorState } from "./error-state.svelte";
 import type { createGitAssist } from "./git-assist";
+import type { createKnowledgeResolution } from "./knowledge-resolution.svelte";
 import type { createGitWorkspaceStore } from "./git-workspace.svelte";
 import type { LspOnboardingStore } from "./lsp-onboarding.svelte";
 import type { createPreviewStore } from "./preview.svelte";
@@ -31,6 +36,10 @@ import type { createTranscriptScrollController } from "./transcript-scroll.svelt
 import type { QuotaWaitStore } from "./quota-wait.svelte";
 import type { HeadsUpFeedback, HeadsUpStore } from "./heads-up.svelte";
 import type { createWorkspaceController } from "./workspace-controller";
+import type { WikiConflictsRecheck } from "./wiki-conflicts-recheck.svelte";
+import { resolveWikiFinding, resolveWikiFindings } from "./wiki-finding-resolution";
+import { createWikiFindingDecider, type WikiFindingUndoOffer } from "./wiki-finding-decision";
+import type { WorkbenchWikiConflictsState } from "./workbench-wiki-conflicts.svelte";
 
 export type DesktopWorkbenchSurfaceViewProps = Omit<
   ComponentProps<typeof DesktopWorkbenchSurface>,
@@ -110,7 +119,42 @@ export type WorkbenchEditorBuilderOptions = {
   projectWorkspace: ReturnType<typeof createProjectWorkspaceStore>;
   git: ReturnType<typeof createGitWorkspaceStore>;
   gitAssist: ReturnType<typeof createGitAssist>;
+  knowledgeResolution?: ReturnType<typeof createKnowledgeResolution>;
   lspOnboarding: LspOnboardingStore;
+  wikiConflicts?: {
+    state: WorkbenchWikiConflictsState;
+    recheck: WikiConflictsRecheck;
+    /** Reads a current project file body for comparison; never writes. */
+    read: (workspace: string, path: string, signal: AbortSignal) => Promise<string>;
+    reportError: (error: unknown) => void;
+    /** Git/file timestamps of one comparison side; resolves null on failure. */
+    dates?: (workspace: string, request: WikiFileDatesRequest, signal: AbortSignal) => Promise<WikiFileDates | null>;
+    /** Creates a compare-and-swap report writer fenced to the current project generation. */
+    decisionWriter: () => {
+      isCurrent: () => boolean;
+      write: (path: string, content: string, expectedContent: string) => Promise<boolean>;
+    };
+    /** Republishes saved-report findings after a decision write. */
+    refresh: () => void;
+    /** Logs and shows a failed or partial decision write. */
+    reportDecisionError: (error: unknown) => void;
+    /** Shows the short-lived undo notification after a successful decision change. */
+    offerDecisionUndo?: (offer: WikiFindingUndoOffer) => void;
+    /** Fenced compare-and-swap writer for inline edits of a comparison side. */
+    editWriter?: () => {
+      isCurrent: () => boolean;
+      write: (path: string, content: string, expectedContent: string) => Promise<boolean>;
+    };
+    /** Logs and shows a failed inline edit. */
+    reportEditError?: (error: unknown) => void;
+    /** Project tasks for the explicit «Create task» action of deferred findings. */
+    tasks?: {
+      prepare: (workspace: string) => Promise<boolean>;
+      newId: () => string;
+      create: (draft: ProjectTaskDraft) => Promise<boolean>;
+      open: (taskId: string) => void | Promise<void>;
+    };
+  };
 };
 
 export function buildWorkbenchShellProps(
@@ -313,8 +357,11 @@ export function buildWorkbenchEditorProps(
 ): Pick<
   DesktopWorkbenchSurfaceViewProps,
   "preview" | "previewVisible" | "gitDiff" | "gitDiffVisible" | "lspInstall" | "lspInstallVisible" | "terminal" | "terminalVisible"
+  | "wikiConflicts" | "wikiConflictsVisible"
 > {
   const activePreview = options.preview.active;
+  const previewWorkspace = options.workspace();
+  const documentGeneration = options.projectDocuments.generation;
   const userConfigKind = activePreview?.kind === "file" ? activePreview.userConfigKind : undefined;
   const virtualContents = activePreview?.kind === "file" && Boolean(activePreview.file.virtualWikiDirectory);
   const saveProjectFile = userConfigKind
@@ -325,7 +372,7 @@ export function buildWorkbenchEditorProps(
 
   return {
     preview: activePreview ? {
-      workspace: options.workspace(),
+      workspace: previewWorkspace,
       previewId: activePreview.id,
       active: options.activeWorkbenchTabId() === "preview",
       scrollPosition: activePreview.scrollPosition,
@@ -333,6 +380,8 @@ export function buildWorkbenchEditorProps(
       markdownLinkBase: activePreview.kind === "file" ? activePreview.markdownLinkBase : undefined,
       lineRange: activePreview.kind === "file" ? activePreview.lineRange : undefined,
       searchRange: activePreview.kind === "file" ? activePreview.searchRange : undefined,
+      evidenceCitation: activePreview.kind === "file" ? activePreview.evidenceCitation : undefined,
+      evidenceLanguage: activePreview.kind === "file" ? activePreview.evidenceLanguage : undefined,
       attachment: activePreview.kind === "attachment" ? activePreview.attachment : undefined,
       autoplay: activePreview.kind === "attachment" && activePreview.autoplay === true,
       onAutoplayConsumed: () => options.preview.consumeAutoplay(activePreview.id),
@@ -355,6 +404,22 @@ export function buildWorkbenchEditorProps(
       onOpenLocalFile: (path) => options.preview.openLocalFile(path, "push"),
       onResolveLocalMedia: options.preview.resolveLocalMedia,
       onSaveProjectFile: virtualContents ? undefined : saveProjectFile,
+      onCheckKnowledge: userConfigKind || virtualContents ? undefined : options.projectDocuments.checkKnowledge,
+      onOpenKnowledgeCitation: (citation, language) => options.preview.openKnowledgeCitation(citation, "push", language),
+      onResolveKnowledge: !userConfigKind && !virtualContents && options.knowledgeResolution
+        && options.statusReady() && options.clientAvailable() && !options.operationRunning()
+        ? (result, content) => {
+          if (options.workspace() === previewWorkspace && options.projectDocuments.generation === documentGeneration) {
+            return options.knowledgeResolution!.start({ workspace: previewWorkspace, result, content });
+          }
+        }
+        : undefined,
+      knowledgeResolving: options.knowledgeResolution?.starting ?? false,
+      knowledgeJobs: userConfigKind || virtualContents ? [] : options.projectDocuments.knowledgeJobs,
+      onEnqueueKnowledgeCheck: userConfigKind || virtualContents ? undefined : options.projectDocuments.enqueueKnowledgeCheck,
+      onCancelKnowledgeCheck: userConfigKind || virtualContents ? undefined : options.projectDocuments.cancelKnowledgeCheck,
+      knowledgeCheckEnabled: activePreview.kind === "file" && !userConfigKind && !virtualContents
+        && Boolean(options.projectDocuments.wikiPath && activePreview.file.path.startsWith(`${options.projectDocuments.wikiPath}/`)),
       onOpenExternalEditor: activePreview.kind === "file" && !virtualContents && isWorkspaceProjectFilePath(activePreview.file.path)
         ? (path) => void options.projectWorkspace.openInEditor(path)
         : undefined,
@@ -387,5 +452,105 @@ export function buildWorkbenchEditorProps(
     lspInstallVisible: options.activeWorkbenchTabId() === "lsp-install",
     terminal: options.terminalOpen() ? { workspace: options.workspace() } : null,
     terminalVisible: options.activeWorkbenchTabId() === "terminal",
+    ...buildWikiConflictsProps(options),
+  };
+}
+
+function buildWikiConflictsProps(
+  options: WorkbenchEditorBuilderOptions,
+): Pick<DesktopWorkbenchSurfaceViewProps, "wikiConflicts" | "wikiConflictsVisible"> {
+  const wiki = options.wikiConflicts;
+  if (!wiki?.state.open) return { wikiConflicts: null, wikiConflictsVisible: false };
+  const workspace = options.workspace();
+  const isCurrent = () => options.workspace() === workspace;
+  const decider = () => createWikiFindingDecider({
+    read: (path, signal) => wiki.read(workspace, path, signal),
+    writer: wiki.decisionWriter,
+    refresh: wiki.refresh,
+    reportError: wiki.reportDecisionError,
+    offerUndo: wiki.offerDecisionUndo,
+  });
+  const tasks = wiki.tasks;
+  return {
+    wikiConflicts: {
+      workspace,
+      inbox: wiki.state.inbox,
+      read: (path, signal) => wiki.read(workspace, path, signal),
+      reportError: wiki.reportError,
+      dates: wiki.dates ? (request, signal) => wiki.dates!(workspace, request, signal) : undefined,
+      rechecking: wiki.recheck.rechecking,
+      onRecheck: wiki.recheck.recheck,
+      resolving: options.knowledgeResolution?.starting ?? false,
+      onResolve: options.knowledgeResolution && options.statusReady() && options.clientAvailable() && !options.operationRunning()
+        ? async (finding) => {
+          const resolution = options.knowledgeResolution!;
+          try {
+            await resolveWikiFinding(finding, {
+              workspace,
+              read: (path, signal) => wiki.read(workspace, path, signal),
+              start: (request) => options.workspace() === workspace ? resolution.start(request) : undefined,
+            });
+          } catch (error) {
+            if (options.workspace() === workspace) wiki.reportError(error);
+          }
+        }
+        : undefined,
+      onResolveBasket: options.knowledgeResolution && options.statusReady() && options.clientAvailable() && !options.operationRunning()
+        ? async (findings) => {
+          const resolution = options.knowledgeResolution!;
+          let started = false;
+          try {
+            const outcome = await resolveWikiFindings(findings, {
+              workspace,
+              read: (path, signal) => wiki.read(workspace, path, signal),
+              start: async (request) => {
+                started = options.workspace() === workspace && await resolution.startBatch(request);
+              },
+            });
+            return started && options.workspace() === workspace ? outcome : null;
+          } catch (error) {
+            if (options.workspace() === workspace) wiki.reportError(error);
+            return null;
+          }
+        }
+        : undefined,
+      onDecide: (finding, decision) => decider().decide(finding, decision),
+      onCreateTask: tasks ? async (finding) => {
+        try {
+          await createWikiFindingTask(finding, {
+            prepare: () => tasks.prepare(workspace),
+            newId: tasks.newId,
+            create: tasks.create,
+            decide: (target, decision) => decider().decide(target, decision),
+            open: tasks.open,
+            isCurrent,
+          });
+        } catch (error) {
+          if (isCurrent()) wiki.reportDecisionError(error);
+        }
+      } : undefined,
+      onOpenTask: tasks ? (taskId) => tasks.open(taskId) : undefined,
+      onEditSide: wiki.editWriter ? async (finding, request) => {
+        const writer = wiki.editWriter!();
+        try {
+          const saved = await saveWikiSideEdit(request, {
+            read: (path, signal) => wiki.read(workspace, path, signal),
+            write: writer.write,
+            isCurrent: writer.isCurrent,
+            language: finding.reportLanguage,
+          });
+          if (saved && writer.isCurrent()) wiki.refresh();
+          return saved && writer.isCurrent();
+        } catch (error) {
+          if (writer.isCurrent()) (wiki.reportEditError ?? wiki.reportDecisionError)(error);
+          return false;
+        }
+      } : undefined,
+      onOpenCitation: (citation, language) => options.preview.openKnowledgeCitation(citation, "push", language),
+      onOpenProjectFile: (path, range) => options.preview.openProjectFile(path, "push", range, false, "document"),
+      onValidateProjectFile: options.preview.validateProjectFile,
+      onShowList: wiki.state.showList,
+    },
+    wikiConflictsVisible: options.activeWorkbenchTabId() === "wiki-conflicts",
   };
 }

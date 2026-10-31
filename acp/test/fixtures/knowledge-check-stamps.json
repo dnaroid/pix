@@ -1,0 +1,217 @@
+[
+  {
+    "name": "canonical-lf",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": true
+  },
+  {
+    "name": "no-final-body-newline",
+    "content": "# Policy\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"1d7967ac3a93c3a3c0852b20eb85b54326a0e63c2eed2410730f0abd564a59b9\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": true
+  },
+  {
+    "name": "body-crlf",
+    "content": "# Правило\r\nЦитата.\r\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"5b9c9c2835626ce05047b15bb6e0ad117e39d97ddf25d5d01331faabfdedcfcd\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": true
+  },
+  {
+    "name": "frontmatter",
+    "content": "---\nstatus: active\n---\n# Policy\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"c625ebc83858201403931dcbf8eff39f1e06d77912df8aabb8e7cc52c56822b9\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": true
+  },
+  {
+    "name": "fenced-example-is-body",
+    "content": "# Marker example\n```html\n<!-- pix:wiki-check {example} -->\n```\nOrdinary documentation.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"8b911b51db8820522bdf3137f1c85c2208663c1d232d65120081662edbc4c808\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": true
+  },
+  {
+    "name": "changed-body",
+    "content": "# Policy\nRequests allow eleven attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"coneleventHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "copied-footer",
+    "content": "Another body\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "changed-line-endings",
+    "content": "# Policy\r\nRequests allow ten attempts.\r\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "unknown-version",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":2,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "wrong-status",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"incomplete\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "wrong-scope",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"entire-wiki\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "uppercase-hash",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"A2E683D5190A6C80A21451A226FE79B9B54A06260B3CEE4FB46EA8410EC477B1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "malformed-hash",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "invalid-date",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-02-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "timestamp-offset",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789+00:00\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "timestamp-no-ms",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "timestamp-leap-second",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:60.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "empty-model",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\" \",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "model-control",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/\\nmodel\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "model-over-byte-limit",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "model-at-byte-limit",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": true
+  },
+  {
+    "name": "zero-checked",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":0,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "fractional-count",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":1.5,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "count-over-limit",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":4097,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "candidates-below-checked",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":1,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "count-at-limit",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":4096,\"candidateSources\":4096,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": true
+  },
+  {
+    "name": "unsupported-language",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"fr\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "extra-field",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\",\"extra\":true} -->\n",
+    "valid": false
+  },
+  {
+    "name": "escaped-html-delimiters",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"provider/\\u003cmodel--\\u003ename\\u003e\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": true
+  },
+  {
+    "name": "unescaped-html-delimiters",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"provider/<model-->name>\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "missing-final-lf",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->",
+    "valid": false
+  },
+  {
+    "name": "footer-crlf",
+    "content": "# Policy\nRequests allow ten attempts.\n\r\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\r\n",
+    "valid": false
+  },
+  {
+    "name": "blank-after-footer",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n\n",
+    "valid": false
+  },
+  {
+    "name": "malformed-json",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {broken} -->\n",
+    "valid": false
+  },
+  {
+    "name": "missing-comment-close",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {broken}\n",
+    "valid": false
+  },
+  {
+    "name": "duplicate-footers",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "duplicate-with-outer-matching-hash",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"e23a84cc6a4fbd69b804b15de283811645bd27ed05e08efaa0e474602dfacb36\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "oversized-footer",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx -->\n",
+    "valid": false
+  },
+  {
+    "name": "over-budget-consecutive-footer",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx -->\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"dc18ba701133c56cdb21ff8e0a443001d65f210687f1b3af390047634f44137f\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": false
+  },
+  {
+    "name": "json-key-order-and-whitespace",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"reportLanguage\": \"ru\", \"candidateSources\": 7, \"checkedSources\": 2, \"scope\": \"retrieved-passages\", \"modelRef\": \"test/model\", \"checkedAt\": \"2026-10-30T12:34:56.789Z\", \"contentHash\": \"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\", \"status\": \"clear\", \"version\": 1} -->\n",
+    "valid": true
+  },
+  {
+    "name": "duplicate-json-key-last-wins",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":9,\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": true
+  },
+  {
+    "name": "equivalent-json-float-integers",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1.0,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2.0,\"candidateSources\":7,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": true
+  },
+  {
+    "name": "equivalent-json-exponent-integers",
+    "content": "# Policy\nRequests allow ten attempts.\n\n<!-- pix:wiki-check {\"version\":1,\"status\":\"clear\",\"contentHash\":\"a2e683d5190a6c80a21451a226fe79b9b54a06260b3cee4fb46ea8410ec477b1\",\"checkedAt\":\"2026-10-30T12:34:56.789Z\",\"modelRef\":\"test/model\",\"scope\":\"retrieved-passages\",\"checkedSources\":2,\"candidateSources\":7e0,\"reportLanguage\":\"ru\"} -->\n",
+    "valid": true
+  }
+]

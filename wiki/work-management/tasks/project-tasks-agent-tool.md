@@ -197,3 +197,5 @@ CREATE TABLE task_attachments (
 - `acp/src/registry/{task-database,task-bundle}.ts`
 - `acp/test/registry.test.ts`
 - [Desktop panel and launch](desktop.md)
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"b6b132441030dec597c79ae9839b566868ea26235fb4adde1c6625061ee46594","checkedAt":"2026-10-31T00:15:58.516Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":55,"reportLanguage":"ru"} -->

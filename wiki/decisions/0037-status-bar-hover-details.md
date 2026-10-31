@@ -118,3 +118,5 @@ delay is less intrusive, at the cost of a briefly lingering panel after departur
 Revisit the duration or pointer corridor if real Desktop use still shows difficulty
 reaching actions. Fake-timer tests verify cancellation/lifecycle, not native cursor
 geometry; no native UI verification is claimed.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"f3460155eef24712027dfbebf84b26572a2efdd4c506089e96210c4e65e1b159","checkedAt":"2026-10-30T23:44:56.699Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":39,"reportLanguage":"ru"} -->

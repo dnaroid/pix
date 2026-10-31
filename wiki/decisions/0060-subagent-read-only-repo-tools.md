@@ -75,3 +75,5 @@ code; already running children are not upgraded.
 Repo tools gain mutating operations, SDK registry/lifecycle semantics change,
 strict filesystem isolation is required, or measured capability overhead warrants
 a new policy approved by the user.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"00e0d9df0a2ca800e32dd6ee47a2e708ad2c1b0e68cf2d99b376a046529d2a97","checkedAt":"2026-10-30T23:45:18.826Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":48,"reportLanguage":"ru"} -->

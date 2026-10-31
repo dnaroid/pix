@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Attachment } from "../lib/attachments";
+import type { KnowledgeCitation } from "../../../acp/src/knowledge/contract";
 import { createPreviewStore } from "./preview.svelte";
 
 const tauri = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -33,6 +34,81 @@ function fixture(revealProjectEntry?: (path: string) => Promise<void>) {
   };
   return { preview: createPreviewStore(options), options, setWorkspace: (value: string) => { workspace = value; } };
 }
+
+describe("Wiki evidence navigation", () => {
+  const citation: KnowledgeCitation = { path: "wiki/rules.md", quote: "Five retries.", startLine: 2, endLine: 2 };
+  beforeEach(() => { tauri.invoke.mockReset(); });
+
+  it("opens a citation in rendered Markdown and preserves evidence, language and scroll in history", async () => {
+    const { preview } = fixture();
+    tauri.invoke.mockImplementation(async (_command: string, { path }: { path: string }) => ({ kind: "text", file: { path, content: "# Rules\n\nFive retries." } }));
+    await preview.openKnowledgeCitation(citation, "push", "ru");
+    expect(preview.active).toMatchObject({ kind: "file", markdownLinkBase: "document", evidenceCitation: citation, evidenceLanguage: "ru" });
+    expect(preview.active).not.toHaveProperty("lineRange");
+    expect(preview.active).not.toHaveProperty("searchRange");
+    preview.rememberScroll(preview.active!.id, { top: 320, left: 0 });
+    await preview.openProjectFile("next.md", "push");
+    expect(preview.active).not.toHaveProperty("evidenceCitation");
+    preview.move(-1);
+    expect(preview.active).toMatchObject({ evidenceCitation: citation, evidenceLanguage: "ru", scrollPosition: { top: 320, left: 0 } });
+    preview.move(1);
+    expect(preview.active).toMatchObject({ file: { path: "next.md" } });
+    expect(tauri.invoke).toHaveBeenCalledWith("read_preview_file", { workspace: "/one", path: citation.path });
+  });
+
+  it("rejects unsafe paths before native IO and keeps the previous Preview", async () => {
+    const { preview, options } = fixture();
+    preview.show({ kind: "file", file: { path: "one.md", content: "one" } }, "push");
+    const previous = preview.active;
+    await preview.openKnowledgeCitation({ ...citation, path: "../outside.md" }, "push", "ru");
+    expect(tauri.invoke).not.toHaveBeenCalled();
+    expect(preview.active).toBe(previous);
+    expect(options.setErrorMessage).toHaveBeenCalledWith("Ссылка на доказательство некорректна.");
+  });
+
+  it("snapshots evidence and opens changed source text without using stale line ranges", async () => {
+    const { preview } = fixture();
+    const pending = deferred<{ kind: "text"; file: { path: string; content: string } }>();
+    tauri.invoke.mockReturnValue(pending.promise);
+    const reference = { ...citation };
+    const opening = preview.openKnowledgeCitation(reference);
+    reference.quote = "mutated";
+    pending.resolve({ kind: "text", file: { path: citation.path, content: "The rule changed." } });
+    await opening;
+    expect(preview.active).toMatchObject({ evidenceCitation: citation, file: { content: "The rule changed." } });
+    expect(preview.active).not.toHaveProperty("lineRange");
+    expect(preview.active).not.toHaveProperty("searchRange");
+  });
+
+  it.each(["close", "workspace", "new-file", "history"])("discards late citation reads after %s", async (action) => {
+    const { preview, setWorkspace } = fixture();
+    preview.show({ kind: "file", file: { path: "one.md", content: "one" } }, "push");
+    preview.show({ kind: "file", file: { path: "two.md", content: "two" } }, "push");
+    const pending = deferred<{ kind: "text"; file: { path: string; content: string } }>();
+    tauri.invoke.mockImplementation((_command: string, { path }: { path: string }) => path === citation.path
+      ? pending.promise : { kind: "text", file: { path, content: "Next" } });
+    const opening = preview.openKnowledgeCitation(citation);
+    if (action === "close") preview.close();
+    if (action === "workspace") { setWorkspace("/two"); preview.resetForWorkspaceChange(); }
+    if (action === "new-file") await preview.openProjectFile("new.md", "push");
+    if (action === "history") preview.move(-1);
+    const previous = preview.active;
+    pending.resolve({ kind: "text", file: { path: citation.path, content: citation.quote } });
+    await opening;
+    expect(preview.active).toBe(previous);
+  });
+
+  it("keeps a dirty draft when its citation read finishes", async () => {
+    const { preview, options } = fixture();
+    preview.show({ kind: "file", file: { path: "one.md", content: "one" } }, "push");
+    tauri.invoke.mockResolvedValue({ kind: "text", file: { path: citation.path, content: citation.quote } });
+    preview.setDirty(true);
+    await preview.openKnowledgeCitation(citation);
+    expect(preview.active).toMatchObject({ file: { path: "one.md" } });
+    expect(preview.dirty).toBe(true);
+    expect(options.setErrorMessage).toHaveBeenCalledWith(expect.stringContaining("Save or discard"));
+  });
+});
 
 describe("Preview async ownership", () => {
   it("preserves a Wiki draft when another file or late read tries to replace it", async () => {

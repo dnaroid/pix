@@ -90,3 +90,5 @@ PI_TERMINAL_BELL_NOTIFY_MESSAGE="Waiting in {cwd}"
 PI_TERMINAL_BELL_NOTIFY_TITLE="Pix - error"
 PI_TERMINAL_BELL_NOTIFY_MESSAGE="Failed after retries: {reason}"
 ```
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"8386307b213d5367e93ab312d3301b43b2a648069adca643a0bdb0c7f0f56cb6","checkedAt":"2026-10-30T23:24:52.842Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":57,"reportLanguage":"ru"} -->

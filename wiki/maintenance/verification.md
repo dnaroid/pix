@@ -53,3 +53,5 @@ The dedicated QA agent used an isolated workspace containing all **283 real Wiki
 The interaction blocker is not evidence of a missing Markdown target or heading: both passed the static check. It also does not prove a product defect. A manual pointer-driven check, or a supported automation activation path, is still needed for the last two interactions. No product code was changed to work around this limitation.
 
 Screenshots and accessibility snapshots were retained under `.pi/artifacts/subagents/2026-10-28T21-24-48-wiki-ui/evidence/` and linked in the migration's user-facing report. These are temporary QA artifacts, not permanent Wiki dependencies. Earlier captures with an incorrect “Why Pix?” assertion and a runner-configuration failure are diagnostic evidence only, not product failures.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"f1f3d6399ed7c4f98c15f3b38d5aae4d9890a52f515134768ec11dc5711bf1b4","checkedAt":"2026-10-31T00:12:10.871Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":52,"reportLanguage":"ru"} -->

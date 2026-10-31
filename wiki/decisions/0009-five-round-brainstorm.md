@@ -69,3 +69,5 @@ Crashes may still require manual lock/artifact inspection; no automatic resume.
 Live results show repetitive rounds, loss of minority views, unaffordable context,
 frequent size-limit failures, or a need for resumability. Benchmark before adding
 automatic consensus rules, judges or further rounds.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"535bdc470925be97ff37d77e636a13ea5f9a93d61809be72711c82e1b98c56b1","checkedAt":"2026-10-30T23:43:07.775Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":57,"reportLanguage":"ru"} -->

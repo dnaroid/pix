@@ -75,3 +75,5 @@ Render supported Mermaid fenced code blocks as readable Unicode diagrams in chat
 ## Tests
 
 - `tests/markdown-format.test.ts`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"3a6612a1ff2cbf624772182bb97ce64e694dca130e7fad3e020f864c20a805e2","checkedAt":"2026-10-31T00:10:17.439Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":61,"reportLanguage":"ru"} -->

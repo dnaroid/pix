@@ -316,3 +316,5 @@ docs/                        user/developer/release documentation
 tests/                       TUI unit/integration/PTY tests
 scripts/                     build, release, sync and capture tooling
 ```
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"1ac86fe342e14783c98e2edb484433ae667e9600b99d9575589c028acf68b58c","checkedAt":"2026-10-30T23:21:38.418Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":56,"reportLanguage":"ru"} -->

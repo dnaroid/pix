@@ -16,3 +16,5 @@ Prompt composition, DCP, continuity protection, statistics and session recovery.
 - [Reload context inventory](reload-context-inventory.md) — active
 - [Session tool](session-recovery.md) — active
 - [Name sessions after a leading resource command](session-title-after-resource-command.md)
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"ca50776606aa2d4cfa541e9c7f9095265fb06b2779d9df766a02fd9b603e81ec","checkedAt":"2026-10-30T23:16:31.069Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":52,"reportLanguage":"ru"} -->

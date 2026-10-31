@@ -78,3 +78,5 @@ Expose Pix's existing Git review and commit-message helper workflows directly in
 ## Tests
 
 - `tests/command-git-actions.test.ts`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"def346ef6ad4fd5ec12be3407b0d132625dc7212c8ce3cbdf0e2197f7b8022de","checkedAt":"2026-10-30T23:22:00.269Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":53,"reportLanguage":"ru"} -->

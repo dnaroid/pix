@@ -50,3 +50,5 @@ uncertain product decisions and documentation blockers.
 
 Repeated concrete documentation regressions show a gap in task-scoped review, or an
 explicit compliance requirement calls for separately scoped review receipts.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"64670e3f46e21a75977e3f742452341ca82c872c029579d7e9c82b618f306cea","checkedAt":"2026-10-31T00:00:00.944Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":42,"reportLanguage":"ru"} -->

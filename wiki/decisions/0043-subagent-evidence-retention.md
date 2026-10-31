@@ -37,3 +37,5 @@ automatic retention timer. Retained evidence is still disposable and must be
 exported for durable storage. Revisit if users need pinning, storage quotas or
 a different retention period. No real Desktop restart QA is implied by the
 deterministic extension tests.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"fffcfb6cff2f0aec094c9d4516aa8ea9cddcf1f2ad0d00d1eb981cc31a1edec2","checkedAt":"2026-10-30T23:57:36.269Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":62,"reportLanguage":"ru"} -->

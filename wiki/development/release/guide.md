@@ -281,7 +281,9 @@ npm --prefix external/pi-tools-suite test
 
 Some modules have optional runtime dependencies or host services:
 
-- `web-search` requires a local Ollama web-search/web-fetch API.
+- `web-search` uses local Ollama by default, the Ollama cloud API when an
+  Ollama API key is configured, and Tavily as an optional fallback (see
+  [Tavily fallback](../../tools/web-search-tavily-fallback.md)).
 - `terminal-bell` uses optional platform notification helpers when present.
 - `async-subagents` writes run state under the workspace `.pi/subagents/` directory.
 

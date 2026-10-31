@@ -233,3 +233,5 @@ whose filename creation timestamp is at least 24 hours old. No cleanup occurs
 while all applications are closed. Since expiration is based on segment
 creation rather than each record's timestamp, records near the end of a
 segment can expire up to one hour early.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"c5d69555d048fd0e0e550990c403f96106bc5a66c3bf1da1341459f984843b93","checkedAt":"2026-10-31T00:03:01.984Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":70,"reportLanguage":"ru"} -->

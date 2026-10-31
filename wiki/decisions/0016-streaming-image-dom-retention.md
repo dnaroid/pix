@@ -36,3 +36,5 @@ Expected to prevent repeated image hydration gaps while preserving existing dime
 ## Revisit when
 
 Actual Desktop captures still show flicker, parsed preview markup changes between equivalent chunks, or broader renderer state needs preservation.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"348f5704d89cb2e38e5b578b9c08edc68578c0dd1de81e086626d9c740a72a99","checkedAt":"2026-10-30T23:55:35.556Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":68,"reportLanguage":"ru"} -->

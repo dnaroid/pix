@@ -272,3 +272,5 @@ run and is not implied by those results.
   entries; the DCP journal does not add its own fsync/WAL layer.
 - Lossy summary quality still requires task-level/live evaluation; local prefix
   equality proves a cache invariant, not semantic quality.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"9a7dd09ed191e891b41eaf95a50e8477d860f07830e177d0e60fe4132e5e87b5","checkedAt":"2026-10-30T23:14:38.455Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":55,"reportLanguage":"ru"} -->

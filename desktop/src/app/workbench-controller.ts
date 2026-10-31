@@ -21,6 +21,7 @@ type WorkbenchControllerOptions = {
   closeGitDiff: () => void;
   closeLspInstall: () => void;
   closeTerminal: () => void;
+  closeWikiConflicts: () => void;
   retargetPreviewAnchor: (sourceId: WorkbenchTabId, targetId: WorkbenchTabId | null) => void;
   retargetGitAnchor: (sourceId: WorkbenchTabId, targetId: WorkbenchTabId | null) => void;
 };
@@ -65,9 +66,15 @@ export function createWorkbenchController(options: WorkbenchControllerOptions) {
     } else if (tab.kind === "lsp-install") {
       options.closeLspInstall();
       closed = true;
-    } else {
+    } else if (tab.kind === "terminal") {
       options.closeTerminal();
       closed = true;
+    } else if (tab.kind === "wiki-conflicts") {
+      options.closeWikiConflicts();
+      closed = true;
+    } else {
+      const unknown: never = tab;
+      throw new Error(`Unsupported workbench tab: ${String((unknown as { kind?: unknown }).kind)}`);
     }
 
     if (closed && wasSelected && options.activeTabId() === id) {

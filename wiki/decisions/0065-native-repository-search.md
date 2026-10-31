@@ -67,3 +67,5 @@ future recovery flow rather than destructive auto-repair.
 Measurements justify a persistent worker or metadata-only warm scans; the existing vector
 writer no longer holds locks over network work; native semantic/AST retrieval is approved;
 or lexical quality/large-project limits prevent useful results for supported workspaces.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"12b02489b3b808bd41cc6d5fcd1b84f895641d3317b67abe951d45d6c3f5cd31","checkedAt":"2026-10-30T23:55:53.302Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":59,"reportLanguage":"ru"} -->

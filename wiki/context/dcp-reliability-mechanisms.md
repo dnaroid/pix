@@ -398,3 +398,5 @@ git history.
 - Canonical from the repo root: `npm run check` and
   `npm run test:tools-suite`; the dedicated session-sim entrypoint is
   `npm run test:dcp-session-sim`.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"f77eb9b0ca23bad16a4af3b849fd92955713a0b14a14662ead40adcdb2528466","checkedAt":"2026-10-30T23:16:17.365Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":48,"reportLanguage":"ru"} -->

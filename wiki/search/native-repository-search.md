@@ -20,6 +20,14 @@ building on [0065](../decisions/0065-native-repository-search.md). Global author
 [0068](../decisions/0068-global-semantic-configuration.md). Source ownership and
 uncertain-work recovery: [0070](../decisions/0070-search-source-work-recovery.md).
 
+Desktop [Wiki contradiction checks](../desktop/workbench/desktop-project-wiki.md#contradiction-checks)
+reuse this engine in hybrid mode, scoped to Knowledge and the selected project's
+configured Wiki. Their separate sessionless contradiction judge uses verified
+source passages after retrieval and independent `knowledgeCheck.modelRef` /
+`knowledgeCheck.thinking` settings, not Search RAG preferences. The Wiki spec defines the save/report flow,
+completion rules and budgets; ordinary native retrieval keeps its existing
+source/provider configuration and performs no answer generation.
+
 ## Canonical behavior
 
 - The shared engine lives in the default-enabled bundled tools-suite module and works
@@ -28,6 +36,12 @@ uncertain-work recovery: [0070](../decisions/0070-search-source-work-recovery.md
   kind, id, title, snippet, score, project-relative path, inclusive 1-based start/end lines,
   and optional bounded content. Desktop retains normal navigation, ranking and RAG evidence
   revalidation. The agent retains its federated source/result caps.
+  The optional `status.completeForSelection` distinguishes successful snapshot
+  and configured retrieval-stage completion from ordinary candidate/output caps;
+  existing `status.complete` retains its conservative meaning. `limitNotices`
+  identifies benign selection-limit messages while retaining them in `notices`
+  for existing clients. Stale scans, generation changes, incomplete semantics and
+  configured-reranker failures cannot produce a true selection-completion flag.
   Release payloads include the engine source and its `ignore` parser as a locked root
   production dependency: the standalone CLI must not rely on the checkout's suite-local
   node_modules or a dependency nested inside the SDK.
@@ -334,3 +348,5 @@ blocked/incomplete legs. Real Desktop evidence is separate from unit-test succes
 Semantic regressions use deterministic injected embeddings/HTTP responses, never paid
 requests: no-token-overlap matches, incrementality, model isolation, scope/privacy,
 bounded progression, revocation, stale publication, leases and malformed responses.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"7b0d9f64edc15fdf85fd113b9ac48b8a5306590ebea6af6c9117c30d63aa9e4d","checkedAt":"2026-10-31T00:04:09.578Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":61,"reportLanguage":"ru"} -->

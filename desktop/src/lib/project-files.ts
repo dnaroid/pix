@@ -5,6 +5,12 @@ export interface ProjectFilePreview {
   virtualWikiDirectory?: string;
 }
 
+/** Strict baseline and live ownership for a queued write of reviewed content. */
+export interface ProjectFileSaveGuard {
+  readonly expectedContent: string;
+  readonly isCurrent: () => boolean;
+}
+
 export interface ProjectFileLineRange {
   readonly startLine: number;
   readonly endLine: number;

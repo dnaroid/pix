@@ -71,3 +71,5 @@ sandbox against external editing of manifests or target documents.
 Live evaluations show misrouting, unnecessary clarification, invented findings,
 lost source lineage or recurring source-version drift; consider measured routing
 evals and source snapshots before adding more judges or automatic extra rounds.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"e1027a8b15ae4a53d972977680c64f02e28a8839af5bc41ebf88c7fbfa683cd9","checkedAt":"2026-10-30T23:40:21.367Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":54,"reportLanguage":"ru"} -->

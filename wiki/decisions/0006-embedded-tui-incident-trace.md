@@ -51,3 +51,5 @@ remain; bounds are per run, not global. This is instrumentation, not a leak fix.
 Captured growth identifies a reproducible retention path, profiling measurably
 changes the incident, bounds prove insufficient, or resolution permits removing
 temporary tooling.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"52c1e3a477f2efa8899f653c0c295443adfcf2b22e7ae3dc6740906f11906e76","checkedAt":"2026-10-30T23:42:09.477Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":45,"reportLanguage":"ru"} -->

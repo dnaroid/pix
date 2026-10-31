@@ -3,6 +3,8 @@ kind: spec
 status: active
 ---
 
+<!-- pix:wiki-report {"version":1,"checkedAt":"2026-10-30T23:23:38.134Z","result":{"path":"wiki/tui/tui-session-tabs.md","documentHash":"dbbf9ded3073159eadf9a286e4e3befe7bacac2a7d89e6baaee7d26b392fe740","modelRef":"zai/glm-5.3-flash","reportLanguage":"ru","checkedSources":12,"conflicts":[],"uncertainties":[],"reviewedSources":[],"notices":["Состав Wiki изменился или не удалось проверить его во время поиска; повторите проверку.","Документ, настройки или содержимое Wiki изменились во время проверки. Повторите её."],"coverage":{"scope":"retrieved-passages","checkedPassages":12,"candidateSources":55,"excerptedSources":11,"limits":["query-sampling","candidate-limit","source-limit","context-limit","passage-limit"]},"status":"incomplete"}} -->
+
 # TUI session tabs and UI-only draft conversations
 
 ## Purpose
@@ -185,3 +187,5 @@ user actually sends work to the agent.
 ## Tests
 
 - `tests/tabs-controller.test.ts`
+
+<!-- pix:wiki-check {"version":1,"status":"attempted","runId":"be10804d-802a-4a0d-81f8-ba18fd60f930","contentHash":"dbbf9ded3073159eadf9a286e4e3befe7bacac2a7d89e6baaee7d26b392fe740","checkedAt":"2026-10-30T23:23:38.139Z","maxDocumentChars":128000} -->

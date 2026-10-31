@@ -40,3 +40,5 @@ Recovery needs no extra session file format and preserves original IDs. Partial 
 ## Revisit when
 
 The SDK adds a supported pending-tool resume API, lifecycle compatibility tests fail on upgrade, users require persisted drafts, or mixed-tool recovery becomes a product requirement.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"23a2ae4dae911a0aae96e075335533bb0acfee6dda9688db3a191fd5b6f2733d","checkedAt":"2026-10-30T23:43:22.988Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":70,"reportLanguage":"ru"} -->

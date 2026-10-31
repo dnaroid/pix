@@ -37,3 +37,5 @@ fresh review; see [local provider](claude-code-provider.md).
 Run `bun test external/pi-tools-suite/test/claude-code-provider/image-count.test.ts`.
 Tests exercise the real serializer without contacting Claude, including 21 and
 100 images, deduplication/metrics and retained byte/MIME/base64/transcript guards.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"b0938c44b806570ebd5fabce17656ec3145af9d6976202c2278473afbb50ab97","checkedAt":"2026-10-30T23:27:53.230Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":42,"reportLanguage":"ru"} -->

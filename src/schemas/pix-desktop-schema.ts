@@ -173,6 +173,16 @@ const DesktopAppConfig = Type.Object(
 export const PixDesktopConfigSchema = Type.Object(
 	{
 		$schema: Type.Optional(Type.String({ description: "JSON Schema URL used by editors for validation and autocomplete." })),
+		knowledgeCheck: Type.Optional(Type.Object({
+			modelRef: Type.Optional(Type.String({ default: "", maxLength: 256, pattern: "^(?:[^\\s/:]+/[^\\s:]+)?$",
+				description: "User-global Wiki contradiction judge, in provider/model format without a thinking suffix. Empty or omitted inherits Tools Suite knowledgeCheck.modelRef. Never uses the Search or session model; a judge must be configured explicitly." })),
+			thinking: Type.Optional(Type.Union([Type.Literal(""), ThinkingLevel], { default: "",
+				description: "Wiki contradiction judge reasoning override. Empty or omitted inherits Tools Suite knowledgeCheck.thinking (low when unset). Independent of Search RAG thinking." })),
+			reportLanguage: Type.Optional(Type.Union([Type.Literal(""), Type.Literal("en"), Type.Literal("ru")], {
+				default: "",
+				description: "User-global language override for Wiki contradiction reports. Empty or omitted inherits the Tools Suite setting (English by default); source quotations are preserved.",
+			})),
+		}, { description: "Wiki contradiction judge and report preferences, read from the user-global configuration." })),
 		ignoreContextFiles: Type.Optional(Type.Boolean({
 			description: "Disable AGENTS.md / CLAUDE.md discovery for Desktop sessions. A project .pi/pix-desktop.jsonc value overrides the user default.",
 		})),

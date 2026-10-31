@@ -117,3 +117,5 @@ workbench tab.
   pause/install wiring, dedicated installer tab, and no-auto-continue copy.
 - Native Rust tests pin the trusted installer catalog and reject arbitrary
   installer identifiers.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"bb9edba09aae8235f80d94c4b84ea6b5a26f55b56034da6a42369dc98ed5faee","checkedAt":"2026-10-31T00:03:20.666Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":66,"reportLanguage":"ru"} -->

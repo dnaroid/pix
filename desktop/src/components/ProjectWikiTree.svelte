@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
+  import { invoke, isTauri } from "@tauri-apps/api/core";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import File from "@lucide/svelte/icons/file";
   import FileText from "@lucide/svelte/icons/file-text";
   import Folder from "@lucide/svelte/icons/folder";
   import ImageIcon from "@lucide/svelte/icons/image";
-  import { onDestroy, onMount, untrack } from "svelte";
+  import CirclePause from "@lucide/svelte/icons/circle-pause";
+  import { getContext, onDestroy, onMount, untrack } from "svelte";
   import { createDiagnosticLogger } from "../lib/diagnostic-logging";
   import { iconButtonClass } from "../lib/icon-button";
   import { createProjectFilesRefresh } from "../lib/project-files-refresh";
@@ -13,10 +14,16 @@
   import type { ProjectWikiConfig } from "../lib/project-wiki";
   import { createProjectWikiNavigation, wikiIndexOwner } from "../lib/project-wiki-navigation";
   import { emptyStateClass } from "../lib/status-text";
+  import { wikiConsistencyDescription } from "../lib/wiki-consistency-tree";
   import ProjectExplorerNameInput from "./ProjectExplorerNameInput.svelte";
   import { createProjectExplorerNameEditor } from "./project-explorer-name-editor.svelte";
   import { createProjectExplorerOperations } from "./project-explorer-operations.svelte";
   import { createProjectExplorerTreeController } from "./project-explorer-tree-controller.svelte";
+  import { createWikiConsistencyTreeState } from "./wiki-consistency-tree-state.svelte";
+  import { WIKI_CONSISTENCY_CONTEXT, type WikiConsistencyOwner } from "../app/wiki-consistency-owner.svelte";
+  import { WIKI_CONFLICTS_NAVIGATION_CONTEXT, type WikiConflictsNavigation } from "../app/workbench-wiki-conflicts.svelte";
+  import { createProjectExplorerNativeMenu } from "../lib/project-explorer-native-menu";
+  import { wikiBranchReportLanguage, wikiTreeConflictMenuActions } from "../lib/wiki-tree-menu";
 
   let { workspace, config, activePath, onOpenFile, onOpenFiles, onOpenExternal, onBeforeMutation, onRefreshConfig }: {
     workspace: string;
@@ -34,8 +41,38 @@
   let disposed = false;
   let exporting = $state(false);
   const diagnostics = createDiagnosticLogger(() => ({ workspace }));
+  // The project-level owner keeps scanning while the panel is closed; an
+  // isolated tree (tests, previews) owns a private scan for its lifetime.
+  const shared = getContext<WikiConsistencyOwner | undefined>(WIKI_CONSISTENCY_CONTEXT);
+  const consistency = shared ?? createWikiConsistencyTreeState({
+    workspace: () => workspace,
+    wikiPath: () => config.path,
+    reportError: (cause) => diagnostics.report(cause, "wiki:consistency-status-failed"),
+  });
   const operations = createProjectExplorerOperations();
   const projectPath = (path: string) => path ? `${config.path}/${path}` : config.path;
+  // Red rows get a native context menu that opens Wiki Conflicts for that branch.
+  // Other rows keep the window-wide desktop context menu.
+  const conflictsNavigation = getContext<WikiConflictsNavigation | undefined>(WIKI_CONFLICTS_NAVIGATION_CONTEXT);
+  const conflictMenu = conflictsNavigation && isTauri() ? createProjectExplorerNativeMenu({
+    prepare: async () => {},
+    items: (entry) => {
+      const branch = projectPath(entry.path);
+      return wikiTreeConflictMenuActions(branch, wikiBranchReportLanguage(consistency.findings().findings, branch), (input) => conflictsNavigation.open(input));
+    },
+    reportError: (cause) => diagnostics.report(cause, "wiki:tree-menu-failed"),
+  }) : null;
+  function openConflictMenu(event: MouseEvent, entry: ProjectTreeEntry): void {
+    if (!conflictMenu) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const row = event.currentTarget as HTMLElement;
+    treeState.focusedPath = entry.path;
+    row.focus({ preventScroll: true });
+    const rect = row.getBoundingClientRect();
+    const keyboard = event.clientX === 0 && event.clientY === 0;
+    void conflictMenu.show(entry, keyboard ? { x: rect.left + 12, y: rect.bottom } : { x: event.clientX, y: event.clientY }, () => !disposed && row.isConnected);
+  }
   const navigation = createProjectWikiNavigation({
     workspace: () => workspace,
     config: () => config,
@@ -64,6 +101,7 @@
       const directory = config.path;
       const entries = await invoke<ProjectTreeEntry[]>("list_project_directory", { workspace, path: projectPath(path) });
       return entries.map((entry) => relativeEntry(entry, directory))
+      .filter((entry) => !entry.name.startsWith("."))
       .filter((entry) => entry.kind !== "file" || wikiIndexOwner(entry.path, config) === null)
       .sort((left, right) => {
         if (left.kind !== right.kind) return left.kind === "directory" ? -1 : 1;
@@ -116,6 +154,11 @@
   const nameState = nameEditor.state;
 
   $effect(() => {
+    const target = workspace, path = config.path;
+    untrack(() => shared ? shared.observeConfig(target, path) : consistency.refresh());
+  });
+
+  $effect(() => {
     let path: string | null = null;
     if (activePath === config.path) path = "";
     else if (activePath?.startsWith(`${config.path}/`)) path = activePath.slice(config.path.length + 1);
@@ -143,7 +186,7 @@
     } finally { exporting = false; }
   }
   export function showInFiles(): void { onOpenFiles(config.path); }
-  export function refresh(): void { void tree.refreshVisibleDirectories(); onRefreshConfig(); }
+  export function refresh(): void { consistency.refresh(); void tree.refreshVisibleDirectories(); onRefreshConfig(); }
   export function cancelNavigation(): void { navigation.cancel(); }
   function activate(entry: ProjectTreeEntry): void {
     error = null;
@@ -176,8 +219,12 @@
     if (!entry.path) return "Contents";
     return entry.kind === "file" ? entry.name.replace(/\.(?:md|markdown)$/iu, "") : entry.name;
   }
-  onMount(() => createProjectFilesRefresh(() => tree.refreshVisibleDirectories()).dispose);
-  onDestroy(() => { disposed = true; navigation.dispose(); nameEditor.dispose(); operations.invalidate(); tree.dispose(); });
+  onMount(() => createProjectFilesRefresh(() => {
+    // The shared owner has its own periodic refresh.
+    if (!shared) consistency.refresh();
+    return tree.refreshVisibleDirectories();
+  }).dispose);
+  onDestroy(() => { disposed = true; conflictMenu?.dispose(); if (!shared) consistency.dispose(); navigation.dispose(); nameEditor.dispose(); operations.invalidate(); tree.dispose(); });
 </script>
 
 <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -185,20 +232,27 @@
     {#each rows as row, index (row.entry.path)}
       {@const entry = row.entry}
       {@const expanded = entry.kind === "directory" && tree.isDirectoryExpanded(entry.path)}
+      {@const checkSummary = entry.kind === "directory" || /\.(?:md|markdown)$/iu.test(entry.path) ? consistency.summary(entry.path) : undefined}
+      {@const indexSummary = entry.kind === "directory" ? consistency.summary(entry.path ? `${entry.path}/${config.index}` : config.index) : undefined}
+      {@const indexDescription = indexSummary?.documents === 1 && indexSummary.status === "unknown" ? ` У страницы раздела ${config.index} нет актуальной успешной проверки.` : ""}
+      {@const checkDescription = checkSummary ? wikiConsistencyDescription(checkSummary, entry.kind) + indexDescription : ""}
+      {@const checkColor = checkSummary?.status === "conflicts" ? "text-tool-error" : checkSummary?.status === "clear" ? "text-tool-success" : ""}
       <div
         role="treeitem"
         class={["flex h-7 w-full min-w-0 items-center gap-1.5 pr-2 text-left text-xs hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring", treeState.selectedPath === entry.path ? "bg-panel-selected text-foreground" : "text-muted-foreground"]}
         style:padding-left={`${4 + row.depth * 14}px`}
-        aria-label={label(entry)}
+        aria-label={checkDescription ? `${label(entry)}. ${checkDescription}` : label(entry)}
         aria-level={row.depth + 1}
         aria-expanded={entry.kind === "directory" ? expanded : undefined}
         aria-selected={treeState.selectedPath === entry.path}
         tabindex={!nameState.edit && tree.tabbablePath === entry.path ? 0 : -1}
         data-project-tree-path={entry.path}
-        title={projectPath(entry.path)}
+        data-wiki-consistency={checkSummary?.status}
+        title={checkDescription ? `${projectPath(entry.path)}\n${checkDescription}` : projectPath(entry.path)}
         onfocus={() => treeState.focusedPath = entry.path}
         onclick={() => activate(entry)}
         onkeydown={(event) => handleKeydown(event, index, entry)}
+        oncontextmenu={checkSummary?.status === "conflicts" && conflictMenu ? (event) => openConflictMenu(event, entry) : undefined}
       >
         {#if entry.kind === "directory"}
           <button type="button" tabindex="-1" class={iconButtonClass("sm", "panel", { extra: "shrink-0" })}
@@ -207,14 +261,18 @@
             onclick={(event) => toggleDirectory(event, entry)}>
             <ChevronRight class={["h-3.5 w-3.5 shrink-0 transition-transform motion-reduce:transition-none", expanded ? "rotate-90" : ""]} aria-hidden="true" />
           </button>
-          <Folder class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <Folder class={["h-3.5 w-3.5 shrink-0", checkColor]} aria-hidden="true" />
         {:else}
           <span class="w-6 shrink-0" aria-hidden="true"></span>
-          {#if /\.(?:md|markdown)$/iu.test(entry.path)}<FileText class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          {#if /\.(?:md|markdown)$/iu.test(entry.path)}<FileText class={["h-3.5 w-3.5 shrink-0", checkColor]} aria-hidden="true" />
           {:else if /\.(?:png|jpe?g|gif|webp|svg|avif)$/iu.test(entry.path)}<ImageIcon class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           {:else}<File class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />{/if}
         {/if}
-        <span class="min-w-0 flex-1 truncate">{label(entry)}</span>
+        <span class={["min-w-0 flex-1 truncate", checkColor]}>{label(entry)}</span>
+        {#if checkSummary && checkSummary.status !== "conflicts" && checkSummary.accepted > 0}
+          <!-- Neutral marker: accepted/deferred conflicts are neither red nor green. -->
+          <CirclePause class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" data-wiki-accepted />
+        {/if}
       </div>
       {#if nameState.edit && nameState.edit.parent === entry.path && expanded}
         {#key nameState.edit}

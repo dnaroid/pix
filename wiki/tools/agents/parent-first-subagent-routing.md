@@ -113,3 +113,5 @@ selection, not model routing.
   built-in roles.
 
 Live semantic results must be reported separately from deterministic tests.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"47861fed3803658ff98c84ddbc4db10a81f3b2ac4c8ea910d13f59993edf1a33","checkedAt":"2026-10-31T00:21:54.857Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":63,"reportLanguage":"ru"} -->

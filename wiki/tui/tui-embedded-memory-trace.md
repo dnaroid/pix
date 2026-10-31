@@ -86,3 +86,5 @@ Run focused tests and `npm run build:pix`. A non-UI blocked Node component can
 verify independent OS collection, but cannot establish TUI leak reproduction or
 elimination. Real typing verification needs retained UI evidence and measured
 RSS over time, not a help/startup smoke.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"be45e68d9dd4ccbcf8f20aed37d9d54b246d909e32c07ccd103ea24b6ab92847","checkedAt":"2026-10-30T23:22:58.726Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":64,"reportLanguage":"ru"} -->

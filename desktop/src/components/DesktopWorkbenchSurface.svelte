@@ -11,6 +11,7 @@
   import TranscriptPane from "./TranscriptPane.svelte";
   import SubagentViewerBanner from "./SubagentViewerBanner.svelte";
   import WorkbenchTerminalPane from "./WorkbenchTerminalPane.svelte";
+  import WikiConflictsTab from "./WikiConflictsTab.svelte";
 
   export type PromptComposerHandle = {
     focus: () => Promise<void>;
@@ -42,6 +43,8 @@
     lspInstallVisible,
     terminal,
     terminalVisible,
+    wikiConflicts = null,
+    wikiConflictsVisible = false,
     transcriptPane = $bindable(null),
     transcriptContent = $bindable(null),
     promptComposer = $bindable(null),
@@ -65,6 +68,8 @@
     lspInstallVisible: boolean;
     terminal: ComponentProps<typeof WorkbenchTerminalPane> | null;
     terminalVisible: boolean;
+    wikiConflicts?: (ComponentProps<typeof WikiConflictsTab> & { workspace: string }) | null;
+    wikiConflictsVisible?: boolean;
     transcriptPane?: HTMLDivElement | null;
     transcriptContent?: HTMLDivElement | null;
     promptComposer?: PromptComposerHandle | null;
@@ -164,6 +169,21 @@
         aria-labelledby="workbench-tab-terminal"
       >
         <WorkbenchTerminalPane bind:this={terminalPane} {...terminal} />
+      </div>
+    {/if}
+
+    {#if wikiConflicts}
+      {@const { workspace: wikiWorkspace, ...wikiConflictsProps } = wikiConflicts}
+      <div
+        id="workbench-panel-wiki-conflicts"
+        class={wikiConflictsVisible ? "col-start-1 row-start-1 flex min-h-0 min-w-0" : "hidden"}
+        role="tabpanel"
+        aria-labelledby="workbench-tab-wiki-conflicts"
+      >
+        <!-- A project switch discards selection, filters and pending reads. -->
+        {#key wikiWorkspace}
+          <WikiConflictsTab {...wikiConflictsProps} />
+        {/key}
       </div>
     {/if}
   </div>

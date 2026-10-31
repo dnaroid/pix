@@ -290,7 +290,7 @@ describe("workbench Git diff props", () => {
         setDirty: vi.fn(),
         close: vi.fn(),
       },
-      projectDocuments: { save: vi.fn() },
+      projectDocuments: { save: vi.fn(), knowledgeJobs: [], enqueueKnowledgeCheck: vi.fn(), cancelKnowledgeCheck: vi.fn() },
       projectWorkspace: { openInEditor: vi.fn() },
       git: { diffPreview: null },
       gitAssist: {},
@@ -299,6 +299,9 @@ describe("workbench Git diff props", () => {
 
     expect(buildWorkbenchEditorProps(options).preview?.editable).toBe(true);
     expect(buildWorkbenchEditorProps(options).preview?.workspace).toBe("/workspace");
+    expect(buildWorkbenchEditorProps(options).preview?.onEnqueueKnowledgeCheck).toBe(options.projectDocuments.enqueueKnowledgeCheck);
+    expect(buildWorkbenchEditorProps(options).preview?.onCancelKnowledgeCheck).toBe(options.projectDocuments.cancelKnowledgeCheck);
+    expect(buildWorkbenchEditorProps(options).preview?.knowledgeJobs).toBe(options.projectDocuments.knowledgeJobs);
     const searchRange = { startLine: 12, endLine: 18 };
     options.preview.active.searchRange = searchRange;
     expect(buildWorkbenchEditorProps(options).preview?.searchRange).toEqual(searchRange);
@@ -312,6 +315,8 @@ describe("workbench Git diff props", () => {
     };
     const settings = buildWorkbenchEditorProps(options).preview;
     expect(settings?.editable).toBe(true);
+    expect(settings?.onEnqueueKnowledgeCheck).toBeUndefined();
+    expect(settings?.knowledgeJobs).toEqual([]);
     await settings?.onSaveProjectFile?.("~/.config/pi/pi-tools-suite.jsonc", "{\n}\n");
     expect(saveUserConfig).toHaveBeenCalledWith(
       "pi-tools-suite",
@@ -331,6 +336,38 @@ describe("workbench Git diff props", () => {
     expect(contents?.externalEditorLabel).toBeUndefined();
     expect(contents?.onOpenExternalEditor).toBeUndefined();
     expect(contents?.onSaveProjectFile).toBeUndefined();
+    expect(contents?.onEnqueueKnowledgeCheck).toBeUndefined();
+    expect(contents?.onCancelKnowledgeCheck).toBeUndefined();
+  });
+
+  it("opens exact citations and launches resolution only from the captured project owner", async () => {
+    let workspace = "/one";
+    const citation = { path: "wiki/rules.md", quote: "A claim", startLine: 4, endLine: 4 };
+    const result = { status: "incomplete", path: "wiki/draft.md", documentHash: "a".repeat(64), modelRef: "test/judge", checkedSources: 1, conflicts: [], notices: [] } as const;
+    const resolution = { start: vi.fn(async () => {}), starting: false };
+    const documents = { generation: 1, wikiPath: "wiki", save: vi.fn(), knowledgeJobs: [] };
+    const preview = { active: { id: 1, kind: "file", file: { path: citation.path, content: citation.quote }, evidenceCitation: citation, evidenceLanguage: "ru" }, openKnowledgeCitation: vi.fn() };
+    const options = { workspace: () => workspace, statusReady: () => true, clientAvailable: () => true,
+      operationRunning: () => false, activeWorkbenchTabId: () => "preview", terminalOpen: () => false,
+      externalEditorLabel: () => "Editor", preview, projectDocuments: documents, projectWorkspace: {},
+      git: { diffPreview: null }, gitAssist: {}, knowledgeResolution: resolution, lspOnboarding: { installer: null } } as any;
+    const props = buildWorkbenchEditorProps(options).preview!;
+    expect(props.evidenceCitation).toBe(citation);
+    expect(props.evidenceLanguage).toBe("ru");
+    await props.onOpenKnowledgeCitation?.(citation, "ru");
+    expect(preview.openKnowledgeCitation).toHaveBeenCalledExactlyOnceWith(citation, "push", "ru");
+    await props.onResolveKnowledge?.(result, "exact checked draft");
+    expect(resolution.start).toHaveBeenCalledExactlyOnceWith({ workspace: "/one", result, content: "exact checked draft" });
+    resolution.start.mockClear();
+    workspace = "/two";
+    await props.onResolveKnowledge?.(result, "exact checked draft");
+    workspace = "/one"; documents.generation++;
+    await props.onResolveKnowledge?.(result, "exact checked draft");
+    expect(resolution.start).not.toHaveBeenCalled();
+    resolution.starting = true;
+    expect(buildWorkbenchEditorProps(options).preview?.knowledgeResolving).toBe(true);
+    options.statusReady = () => false;
+    expect(buildWorkbenchEditorProps(options).preview?.onResolveKnowledge).toBeUndefined();
   });
 
   it("renders the dedicated terminal workbench surface only while its tab is open", () => {

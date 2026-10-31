@@ -71,3 +71,5 @@ Comparable completed tasks establish total cost per accepted verified change,
 including duplicate context, briefing, failures, review, rework and integration,
 or demonstrate recurring needs not covered by the remaining roles. Reconsider
 if explicit Sol handoffs outweigh the savings from keeping ordinary work local.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"32073801c4283c1ef1e20a7d8acbd7f0a7066cd730acb0b0e2ccf6b69c66ef84","checkedAt":"2026-10-30T23:41:48.337Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":56,"reportLanguage":"ru"} -->

@@ -96,3 +96,5 @@ independent-process regression evidence. No measured performance claim is made.
 The host offers a shared project service with equivalent crash ownership;
 incompatible per-session settings require isolation; IPC or document contention
 becomes measurable; or supported servers require process-group escape.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"845c744f1b84c2a23655031b9f6ad166d738623266247fa68b0fc4f91a80f328","checkedAt":"2026-10-30T23:50:09.079Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":57,"reportLanguage":"ru"} -->

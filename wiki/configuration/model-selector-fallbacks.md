@@ -91,3 +91,5 @@ Every persisted or user-facing **singular model selector** has an ordered fallba
 - Desktop settings tests cover fuzzy matching by ref/id/name/provider and source-level wiring of searchable model selectors, fallback add controls, Git selectors, and visible-model filtering.
 - Root Pix, ACP, and pi-tools-suite typechecks must pass.
 - Generated JSON schemas must be up to date.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"39562f3e64b8696b9807adebb6dce1c5de508c5c1dfe5930dc8f762fc3d9f113","checkedAt":"2026-10-30T23:05:16.088Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":53,"reportLanguage":"ru"} -->

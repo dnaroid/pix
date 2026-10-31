@@ -85,3 +85,5 @@ The SDK/native host supplies equivalent portable owned-process primitives;
 supported servers require daemonization; Windows crash ownership becomes a
 product requirement; or measured supervisor overhead/stdio compatibility issues
 justify replacing this design.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"21c1e08600d099a0ca6f0129104de588c897dcace1c097c157bdae4930f55353","checkedAt":"2026-10-31T00:00:24.475Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":68,"reportLanguage":"ru"} -->

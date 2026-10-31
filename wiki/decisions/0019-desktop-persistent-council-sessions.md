@@ -74,3 +74,5 @@ Terminal runs continue to pay fresh-worker setup until a separate migration.
 Real runs demonstrate context growth, latency or ownership problems; restart
 recovery becomes necessary; terminal support is requested; or freeform orchestration
 has explicit acceptance criteria.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"bf7adddf408b48e055b208d77cb3577d9847518b4bddb99c1d06c0682fd972ce","checkedAt":"2026-10-30T23:50:56.156Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":68,"reportLanguage":"ru"} -->

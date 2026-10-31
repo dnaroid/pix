@@ -28,6 +28,7 @@ import { AcpIncomingRequestError, AcpJsonRpcConnection } from "./acp-json-rpc";
 import { AcpPixExtensions, type ModelSetupRoles, type ModelSetupSearch, type SelectionAssistRequest, type SelectionAssistDelta, SELECTION_ASSIST_DELTA_METHOD } from "./acp-pix-extensions";
 import { SEARCH_CONFIG_METHOD, SEARCH_QUERY_METHOD, SEARCH_SYNC_METHOD, SEARCH_COMMITS_METHOD, SEARCH_INTENT_METHOD, SEARCH_TASKS_METHOD, type SearchIntentRequest, type SearchIntentResponse, type SearchConfigRequest, type SearchSyncRequest, type SearchStatus, type SearchQueryRequest, type SearchQueryResponse, type SemanticTasksRequest, type SemanticTasksResponse } from "../../../acp/src/search/contract";
 import { SEARCH_RAG_METHOD, SEARCH_RAG_DELTA_METHOD, type RagRequest, type RagResponse, type RagProgress } from "../../../acp/src/search/rag-contract";
+import { KNOWLEDGE_CHECK_METHOD, isKnowledgeCheckResult, type KnowledgeCheckRequest, type KnowledgeCheckResult } from "../../../acp/src/knowledge/contract";
 import { TASK_TYPE_CLASSIFY_METHOD, isClassifiedTaskType, type TaskTypeClassifyRequest, type TaskTypeClassifyResponse } from "../../../acp/src/tasks/type-classification-contract";
 import type { CommitSearchRequest, CommitSearchResponse } from "../../../acp/src/search/contract";
 import { SEARCH_INDEX_METHOD, type SearchIndexRequest, type SearchIndexResponse } from "../../../acp/src/search/contract";
@@ -421,6 +422,12 @@ export class AcpClient {
       throw new Error("Invalid task classification response");
     }
     return { type: response.type, fallback: response.fallback };
+  }
+
+  async checkKnowledge(request: KnowledgeCheckRequest, signal?: AbortSignal): Promise<KnowledgeCheckResult> {
+    const response = await this.request<unknown>(KNOWLEDGE_CHECK_METHOD, request, null, signal);
+    if (!isKnowledgeCheckResult(response) || response.path !== request.path) throw new Error("Invalid Wiki contradiction-check response");
+    return response;
   }
 
   async searchRag(request: RagRequest, onUpdate: (update: RagProgress) => void, signal?: AbortSignal): Promise<RagResponse> {

@@ -66,3 +66,5 @@ Keep syntax highlighting continuous when one logical Markdown or fenced-code lin
 ## Tests
 
 - `tests/markdown-format.test.ts`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"57fdfc29afb6178743bd186e98e700f6758fb7e7ff9bed6a679dc14383cd9924","checkedAt":"2026-10-31T00:09:46.670Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":61,"reportLanguage":"ru"} -->

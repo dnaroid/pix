@@ -37,9 +37,13 @@ export interface NativeSearchResponse {
   hits: NativeSearchHit[];
   rerankContext?: NativeRerankContext;
   notices: string[];
+  /** Benign selection limits, also retained in notices for existing callers. */
+  limitNotices?: string[];
   status: {
     backend: "native";
     complete: boolean;
+    /** Snapshot and requested/configured retrieval stages completed, regardless of selection caps. */
+    completeForSelection?: boolean;
     stale: boolean;
     mode?: "lexical" | "hybrid" | "semantic";
     semanticEnabled?: boolean;

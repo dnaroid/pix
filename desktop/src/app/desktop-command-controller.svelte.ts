@@ -13,6 +13,7 @@ import {
   workbenchTabCloseFallback,
   type WorkbenchTab,
   type WorkbenchTabId,
+  type WorkbenchTabKind,
 } from "../lib/workbench-tabs";
 
 type DesktopCommandControllerOptions = {
@@ -24,7 +25,7 @@ type DesktopCommandControllerOptions = {
   taskActionId: () => string | null;
   activeConversationWorkbenchTabId: () => WorkbenchTabId | null;
   activeWorkbenchTabId: () => WorkbenchTabId | null;
-  activeWorkbenchTabKind: () => "session" | "preview" | "diff" | "lsp-install" | "terminal" | undefined;
+  activeWorkbenchTabKind: () => WorkbenchTabKind | undefined;
   workbenchTabs: () => readonly WorkbenchTab[];
   previewOpen: () => boolean;
   gitDiffOpen: () => boolean;
@@ -82,7 +83,8 @@ export function createDesktopCommandController(options: DesktopCommandController
         return options.activeWorkbenchTabKind() === "preview"
           || options.activeWorkbenchTabKind() === "diff"
           || options.activeWorkbenchTabKind() === "lsp-install"
-          || options.activeWorkbenchTabKind() === "terminal";
+          || options.activeWorkbenchTabKind() === "terminal"
+          || options.activeWorkbenchTabKind() === "wiki-conflicts";
       case "session.new":
         return options.statusReady() && !!options.workspace() && !options.sessionMutationRunning();
       case "session.open":

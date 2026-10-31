@@ -15,3 +15,5 @@ The native macOS workbench: conversations, project navigation and tools. Read th
 
 - [Pix Desktop Design Contract](design.md)
 - [Pix Desktop](guide.md)
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"8c0f03c1608e171c16cd53e74c8a5142af5cb52e446a613ae9d0287d3c022649","checkedAt":"2026-10-30T23:28:27.045Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":51,"reportLanguage":"ru"} -->

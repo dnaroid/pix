@@ -1,4 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { KnowledgeCitation, KnowledgeReportLanguage } from "../../../acp/src/knowledge/contract";
+import { isNavigableKnowledgeCitation, knowledgeEvidenceText } from "../lib/knowledge-citation";
 import { frontierBadges } from "../lib/frontier-model-badges";
 import {
   attachmentFromFile,
@@ -97,6 +99,7 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
     autoplay = false,
     markdownLinkBase?: "document",
     searchRange?: ProjectFileLineRange,
+    evidence?: { readonly citation: KnowledgeCitation; readonly language?: KnowledgeReportLanguage },
   ): Promise<void> {
     const workspace = options.workspace();
     if (!workspace) {
@@ -107,7 +110,7 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
     const generation = state.beginFileLoad();
     const isCurrent = () => state.fileLoadIsCurrent(generation) && options.workspace() === workspace;
     try {
-      if (options.revealProjectEntry || markdownLinkBase === "document") {
+      if (!evidence && (options.revealProjectEntry || markdownLinkBase === "document")) {
         const directory = await invoke<boolean>("project_directory_exists", { workspace, path });
         if (!isCurrent()) return;
         if (directory) {
@@ -135,6 +138,12 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
       const result = await invoke<PreviewRead>("read_preview_file", { workspace, path });
       if (!isCurrent()) return;
       if (result.kind === "external") {
+        if (evidence) {
+          options.setErrorMessage(evidence.language === "ru"
+            ? "Файл слишком большой для предпросмотра доказательства. Откройте его во внешнем редакторе."
+            : "This file is too large for evidence Preview. Open it in an external editor.");
+          return;
+        }
         await openLargeFile(path, workspace, isCurrent);
         return;
       }
@@ -143,10 +152,27 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
         ...(lineRange ? { lineRange } : {}),
         ...(markdownLinkBase ? { markdownLinkBase } : {}),
         ...(searchRange ? { searchRange } : {}),
+        ...(evidence ? { evidenceCitation: evidence.citation, evidenceLanguage: evidence.language } : {}),
       }, navigation);
     } catch (error) {
       if (isCurrent()) options.reportError(error);
     }
+  }
+
+  async function openKnowledgeCitation(
+    citation: KnowledgeCitation,
+    navigation: PreviewNavigation = "push",
+    language?: KnowledgeReportLanguage,
+  ): Promise<void> {
+    if (!isNavigableKnowledgeCitation(citation)) {
+      options.setErrorMessage(knowledgeEvidenceText("invalid", language));
+      return;
+    }
+    // Snapshot report-owned data before any asynchronous read; normal Preview
+    // ownership fences still protect navigation, workspace switches and drafts.
+    await openProjectFile(citation.path, navigation, undefined, false, "document", undefined, {
+      citation: { ...citation }, language,
+    });
   }
 
   async function resolveProjectMedia(path: string): Promise<Attachment | undefined> {
@@ -261,6 +287,7 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
     validateProjectFile,
     validateLocalFile,
     openProjectFile,
+    openKnowledgeCitation,
     resolveProjectMedia,
     openLocalFile,
     openUserConfig,

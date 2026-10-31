@@ -1,5 +1,5 @@
 import type { DesktopShortcutPlatform } from "../lib/desktop-commands";
-import type { WorkbenchTab, WorkbenchTabId } from "../lib/workbench-tabs";
+import type { WorkbenchTab, WorkbenchTabId, WorkbenchTabKind } from "../lib/workbench-tabs";
 import type { ActiveSessionState } from "./active-session-state.svelte";
 import { createDesktopCommandController } from "./desktop-command-controller.svelte";
 import type { DesktopConversationServices } from "./desktop-conversation-services";
@@ -28,7 +28,7 @@ type DesktopCommandServicesOptions = {
   taskActionId: () => string | null;
   activeConversationWorkbenchTabId: () => WorkbenchTabId | null;
   activeWorkbenchTabId: () => WorkbenchTabId | null;
-  activeWorkbenchTabKind: () => "session" | "preview" | "diff" | "lsp-install" | "terminal" | undefined;
+  activeWorkbenchTabKind: () => WorkbenchTabKind | undefined;
   workbenchTabs: () => readonly WorkbenchTab[];
   previewOpen: () => boolean;
   gitDiffOpen: () => boolean;

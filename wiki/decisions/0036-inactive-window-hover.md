@@ -60,3 +60,5 @@ for HTML title tooltips and another application's frontmost/key status.
 
 Native QA fails, macOS/WebKit changes tracking metadata or callbacks, title
 tooltip behavior differs from DOM hover, or resize/teardown exposes stale hover.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"afdc133c4092ee2fe5061bbccb20ab39e51896621591e34f0a9cd5d4b6032fc6","checkedAt":"2026-10-30T23:59:01.983Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":50,"reportLanguage":"ru"} -->

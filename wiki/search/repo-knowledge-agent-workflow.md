@@ -33,16 +33,18 @@ maintenance, without treating generated answers as semantic proof.
   there is no external-backend fallback, setup/update command, panel, provider migration or
   repository-search gate. See [Project-wide agent search](project-search-agent-tool.md).
 - Native lexical retrieval needs no embedding credentials. Opt-in repository and
-  commit embeddings use the project `.pi/search/semantic.json` `embedding` object
-  and `OPENROUTER_API_KEY`; chunks/queries may be transmitted externally.
+  commit embeddings use the global `search.embedding` object in
+  `~/.config/pi/pi-tools-suite.jsonc` (legacy `.pi/search/semantic.json` is
+  ignored); chunks/queries may be transmitted externally.
 - The primary bundled extension exposes `project_search` with its full schema to
   ordinary Pi, ACP, and every async child/provider child/council. Every caller has
   the same sources (`sessions`, `tasks`, `commits`, `code`, `knowledge`), options,
   and `patch:<literal>` behavior; there is no child restriction or reduced facade.
   Children still omit suite setup commands and parent orchestration/delegation
   guidance, and retain their normal work-tool restrictions. `project_search` does
-  not initialize or update external search services. External repository embeddings retain independent
-  consent and saved-provider safeguards. See [decision 0060](../decisions/0060-subagent-read-only-repo-tools.md)
+  not initialize or update external search services. Repository embeddings are
+  authorized only by that saved global configuration, with no separate consent
+  step, and keep the same provider safeguards. See [decision 0060](../decisions/0060-subagent-read-only-repo-tools.md)
   and [project search](project-search-agent-tool.md).
 - `project_search` is the single project retrieval tool. It defaults to all five
   sources for every caller; choose sources explicitly to narrow scope. Code and

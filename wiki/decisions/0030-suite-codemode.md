@@ -52,3 +52,5 @@ CLI definitions retain their own mode, and settings need reload/restart.
 
 SDK changes runtime registration/exposure, child permission policy changes, or
 measurements justify a different default or dedicated codemode tuning UI.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"bb6e5c8715157ff7319186c3399c786018633bdc99e341f9277430f5544a82ee","checkedAt":"2026-10-30T23:58:43.242Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":56,"reportLanguage":"ru"} -->

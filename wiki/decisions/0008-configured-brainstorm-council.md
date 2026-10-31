@@ -62,3 +62,5 @@ models. Parent synthesis is explicit and does not authorize implementation.
 Live evidence shows missing diversity, repeated availability failures, excessive
 cost/latency, weak critique, or demand for resumable rounds. Update the explicit
 roster deliberately, and benchmark before adding automatic judges or more rounds.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"b653e042cbc2cb8fc214600d00637366625672f8154b0005fc3930e62f0e859c","checkedAt":"2026-10-30T23:44:34.684Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":44,"reportLanguage":"ru"} -->

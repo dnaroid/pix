@@ -95,3 +95,5 @@ upgrade scrutiny, including prompt preparation and queued-input storage.
 - Pi provides a public transactional workspace/session continuation API.
 - SDK finish-turn, loadout, settlement or queue contracts change.
 - Real UI evidence shows premature completion, lost input or stale resources.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"334b96e24f04f326dbab65fdcfd111f91bd623dafa3ac70a5d26f7d2261949d7","checkedAt":"2026-10-30T23:37:43.551Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":73,"reportLanguage":"ru"} -->

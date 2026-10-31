@@ -116,3 +116,5 @@ status: active
 - Native UI verification should exercise repeat activation, outside interaction,
   Escape, keyboard selection and narrow-window scrolling. Unit/source checks do
   not constitute native UI verification.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"8994305378f6a32c2f3909a6e2666b0c3a6b4e0541ea3c334a28460d93e76d2f","checkedAt":"2026-10-30T23:07:27.092Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":63,"reportLanguage":"ru"} -->

@@ -84,3 +84,5 @@ resources are temporarily retained during preparation/binding.
 - SDK runtime/persistence hooks change, or upgrade regressions fail.
 - Extension external side effects require a stronger lifecycle contract.
 - Real UI evidence reveals confusion around pending/committed workspace state.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"81c835b57d5ff8b863740140c57bf291e6b72a8512b12b1e839ec7a35ad32505","checkedAt":"2026-10-30T23:39:17.982Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":64,"reportLanguage":"ru"} -->

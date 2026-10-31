@@ -18,3 +18,5 @@ The suite guide describes installed tools and configuration. API contracts, exec
 - [Suite codemode](suite-codemode.md) — active
 - [pi-tools-suite](suite.md)
 - [Tavily fallback for web tools](web-search-tavily-fallback.md)
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"30da2eb5a72ad59b564fe9279f187bd8b1cb960002b7ee997b01dd49cdead89c","checkedAt":"2026-10-30T23:13:36.261Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":55,"reportLanguage":"ru"} -->

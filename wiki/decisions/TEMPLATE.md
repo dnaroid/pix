@@ -35,3 +35,5 @@ Expected benefits, costs, risks and uncertainties, not assumed proven outcomes.
 ## Revisit when
 
 Concrete signals or evidence that would justify reconsideration.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"634238452b1f0b18ce777216ef30ece3aa0faef3bbfa46eaa41ad4ea97ee3d15","checkedAt":"2026-10-30T23:34:52.558Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":65,"reportLanguage":"ru"} -->

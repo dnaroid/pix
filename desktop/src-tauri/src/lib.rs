@@ -78,6 +78,9 @@ mod project_file_search;
 mod project_icon;
 mod project_storage;
 mod project_tasks_sqlite;
+mod wiki_check_inventory;
+mod wiki_consistency;
+mod wiki_file_dates;
 mod wiki_html_export;
 mod workspace_config_lock;
 #[cfg(test)]
@@ -610,6 +613,8 @@ struct ProjectTreeEntry {
     name: String,
     path: String,
     kind: ProjectTreeEntryKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    wiki_checked: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -1184,6 +1189,79 @@ async fn read_project_file(workspace: String, path: String) -> Result<ProjectFil
 }
 
 #[tauri::command]
+async fn list_wiki_check_directory(
+    workspace: String,
+    wiki_path: String,
+    path: String,
+    cursor: Option<String>,
+) -> Result<wiki_check_inventory::WikiCheckDirectoryPage, String> {
+    run_blocking(move || {
+        wiki_check_inventory::list_directory(
+            Path::new(&workspace),
+            Path::new(&wiki_path),
+            Path::new(&path),
+            cursor.as_deref(),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn list_wiki_status_directory(
+    workspace: String,
+    wiki_path: String,
+    path: String,
+    cursor: Option<String>,
+) -> Result<wiki_check_inventory::WikiCheckDirectoryPage, String> {
+    run_blocking(move || {
+        wiki_check_inventory::list_status_directory(
+            Path::new(&workspace),
+            Path::new(&wiki_path),
+            Path::new(&path),
+            cursor.as_deref(),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn release_wiki_check_inventory(workspace: String, cursor: String) -> Result<(), String> {
+    run_blocking(move || wiki_check_inventory::release(Path::new(&workspace), &cursor)).await
+}
+
+#[tauri::command]
+async fn read_wiki_check_document(
+    workspace: String,
+    wiki_path: String,
+    path: String,
+) -> Result<wiki_check_inventory::WikiCheckDocument, String> {
+    run_blocking(move || {
+        wiki_check_inventory::read_document(
+            Path::new(&workspace),
+            Path::new(&wiki_path),
+            Path::new(&path),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn read_wiki_status_document(
+    workspace: String,
+    wiki_path: String,
+    path: String,
+) -> Result<wiki_check_inventory::WikiCheckDocument, String> {
+    run_blocking(move || {
+        wiki_check_inventory::read_status_document(
+            Path::new(&workspace),
+            Path::new(&wiki_path),
+            Path::new(&path),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
 async fn write_project_file(
     workspace: String,
     path: String,
@@ -1238,9 +1316,15 @@ async fn project_file_exists(workspace: String, path: String) -> Result<bool, St
 async fn list_project_directory(
     workspace: String,
     path: Option<String>,
+    include_wiki_checks: Option<bool>,
 ) -> Result<Vec<ProjectTreeEntry>, String> {
     run_blocking(move || {
-        list_project_directory_from(Path::new(&workspace), path.as_deref().map(Path::new))
+        let mut entries =
+            list_project_directory_from(Path::new(&workspace), path.as_deref().map(Path::new))?;
+        if include_wiki_checks.unwrap_or(false) {
+            wiki_consistency::annotate_project_entries(Path::new(&workspace), &mut entries);
+        }
+        Ok(entries)
     })
     .await
 }
@@ -2332,7 +2416,12 @@ fn list_project_directory_from(
             .map_err(|_| "project tree entry resolves outside the workspace".to_owned())?
             .to_string_lossy()
             .replace('\\', "/");
-        entries.push(ProjectTreeEntry { name, path, kind });
+        entries.push(ProjectTreeEntry {
+            name,
+            path,
+            kind,
+            wiki_checked: None,
+        });
         if entries.len() > 2_000 {
             return Err(format!(
                 "{} contains too many entries to display (maximum 2000)",
@@ -2410,6 +2499,7 @@ fn project_tree_entry_from_path(root: &Path, path: &Path) -> Result<ProjectTreeE
         name,
         path: relative,
         kind,
+        wiki_checked: None,
     })
 }
 
@@ -8609,6 +8699,11 @@ pub fn run() {
             preview_file::read_preview_file,
             preview_file::open_preview_file_in_editor,
             read_project_file,
+            list_wiki_check_directory,
+            list_wiki_status_directory,
+            release_wiki_check_inventory,
+            read_wiki_check_document,
+            read_wiki_status_document,
             write_project_file,
             write_project_workspace_config_if_unchanged,
             project_file_exists,
@@ -8658,6 +8753,7 @@ pub fn run() {
             git_operations::git_discard_file,
             git_ignore::git_can_ignore,
             git_ignore::git_ignore_entry,
+            wiki_file_dates::wiki_file_dates,
             git_remote_link::git_remote_entry_link,
             git_switch_branch,
             git_create_branch,

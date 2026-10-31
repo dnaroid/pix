@@ -33,6 +33,28 @@ describe("project tree", () => {
     expect(reconcileProjectTreeEntries(undefined, previous)).toBe(previous);
   });
 
+  it("reconciles persisted Wiki status in both directions while retaining unchanged rows", () => {
+    const previous: ProjectTreeEntry[] = [
+      { name: "policy.md", path: "wiki/policy.md", kind: "file", wikiChecked: true },
+      { name: "other.md", path: "wiki/other.md", kind: "file" },
+    ];
+    expect(reconcileProjectTreeEntries(previous, structuredClone(previous))).toBe(previous);
+    for (const changed of [
+      { name: "policy.md", path: "wiki/policy.md", kind: "file" as const, wikiChecked: false },
+      { name: "policy.md", path: "wiki/policy.md", kind: "file" as const },
+    ]) {
+      const next = [changed, { ...previous[1]! }];
+      const invalidated = reconcileProjectTreeEntries(previous, next);
+      expect(invalidated).not.toBe(previous);
+      expect(invalidated[0]).toBe(changed);
+      expect(invalidated[1]).toBe(previous[1]);
+      const checked = [{ ...changed, wikiChecked: true }, { ...previous[1]! }];
+      const restored = reconcileProjectTreeEntries(invalidated, checked);
+      expect(restored[0]).toBe(checked[0]);
+      expect(restored[1]).toBe(previous[1]);
+    }
+  });
+
   it("names the workspace root independently of its empty relative path", () => {
     expect(projectTreeRootEntry("/projects/my-app/")).toEqual({ name: "my-app", path: "", kind: "directory" });
     expect(projectTreeRootEntry("/").name).toBe("Project");

@@ -60,3 +60,5 @@ and must reconnect/reload for the new monitor. Native close consent is unchanged
 
 Measured idle resource use motivates an explicitly approved retention policy,
 or the user requests separate configuration management rather than monitoring.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"e86eda8115d45c1fc9ebfc3717a9f312731a18da507addc85b013bc282774dcb","checkedAt":"2026-10-30T23:33:00.460Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":51,"reportLanguage":"ru"} -->

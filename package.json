@@ -78,6 +78,8 @@
     "test": "npm run test:inner",
     "test:inner": "node --import tsx --test \"tests/**/*.test.ts\"",
     "eval:heads-up": "node --import tsx scripts/heads-up-eval/run.ts",
+    "eval:knowledge": "node --import tsx scripts/knowledge-check-eval/run.ts",
+    "test:knowledge-eval": "tsc -p scripts/knowledge-check-eval/tsconfig.json && node --import tsx --test tests/knowledge-check-eval*.test.ts tests/knowledge-check-retrieval.test.ts",
     "eval:session-revisions": "node --import tsx scripts/session-revision-eval/run.mjs",
     "test:session-revisions": "node --test scripts/session-revision-eval/test.mjs",
     "test:heads-up-eval": "tsc -p scripts/heads-up-eval/tsconfig.json && node --import tsx --test tests/heads-up-*.test.ts",

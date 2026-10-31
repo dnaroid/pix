@@ -133,3 +133,5 @@ not evidence that the streaming-thinking issue explains every TUI recurrence.
 ## Tests
 
 - `tests/session-event-controller.test.ts`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"6695861e8dbd2c3d0d4490c0cd0687a5d672239555b4977c70c00d4c05fd08da","checkedAt":"2026-10-30T23:22:43.478Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":66,"reportLanguage":"ru"} -->

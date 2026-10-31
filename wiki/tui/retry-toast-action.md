@@ -90,3 +90,5 @@ Let the user resume a transiently failed turn directly from its error toast inst
 - Confirmed by SDK types: `AgentSession.sendCustomMessage` accepts `display: false` and `triggerTurn: true`.
 - Confirmed by code: failed automatic retries currently end in a persistent error toast.
 - Confirmed by tests: compact error-toast body clicks currently copy the error text.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"76b31dd03ce65a9bea6493133b17efab47c9379e616c064c2a60269dc4b35936","checkedAt":"2026-10-30T23:22:28.502Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":63,"reportLanguage":"ru"} -->

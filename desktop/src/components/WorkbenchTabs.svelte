@@ -6,6 +6,7 @@
   import CodeXml from "@lucide/svelte/icons/code-xml";
   import Plus from "@lucide/svelte/icons/plus";
   import SquareTerminal from "@lucide/svelte/icons/square-terminal";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import X from "@lucide/svelte/icons/x";
   import { onDestroy, tick } from "svelte";
   import { createWorkbenchTabMove, workbenchTabMove, type WorkbenchTabMoveState } from "../lib/workbench-tab-move";
@@ -201,6 +202,8 @@
               <GitCompareArrows class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
             {:else if tab.kind === "terminal"}
               <SquareTerminal class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            {:else if tab.kind === "wiki-conflicts"}
+              <TriangleAlert class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
             {:else}
               <CodeXml class="h-3.5 w-3.5 shrink-0 text-tool-info" aria-hidden="true" />
             {/if}
@@ -211,6 +214,8 @@
               <span class="h-2 w-2 shrink-0 rounded-full bg-foreground/70" title="Unsaved changes" aria-label="Unsaved changes"></span>
             {:else if tab.kind === "diff" && tab.busy}
               <span class="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-tool-info motion-reduce:animate-none" aria-label="Working"></span>
+            {:else if tab.kind === "wiki-conflicts" && tab.openCount > 0}
+              <span class="shrink-0 rounded-full bg-destructive/15 px-1.5 text-xs leading-4 tabular-nums text-destructive" aria-label={`${tab.openCount} open`}>{tab.openCount}</span>
             {/if}
           </button>
 

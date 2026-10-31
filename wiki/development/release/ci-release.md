@@ -214,3 +214,5 @@ remain true when CI or UI-QA tests change.
 - `external/pi-tools-suite/test/async-subagents/ui-qa-runner.test.ts`
 - `external/pi-tools-suite/test/async-subagents/browser-qa-runner.test.ts`
 - `acp/test/registry.test.ts`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"ec6f497e2d6a7796cf64c88ceee96b6e1cf7b9af3211e7d240b4c59f272c0078","checkedAt":"2026-10-31T00:24:28.126Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":50,"reportLanguage":"ru"} -->

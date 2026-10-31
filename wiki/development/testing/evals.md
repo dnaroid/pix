@@ -23,6 +23,11 @@ proved by deterministic tests alone.
 The implementation lives under `test/evals/` and complements the existing unit,
 integration, prompt-eval, browser-QA, and locate-benchmark suites.
 
+The separate [Wiki contradiction evaluation](wiki-contradiction-evaluation.md)
+exercises the production consistency judge with fixed evidence and the actual
+native hybrid retrieval pipeline. It retains raw model output and rejected-quote
+diagnostics; run it from the repository root with `npm run eval:knowledge`.
+
 ## Design principles
 
 ### Deterministic facts are deterministic tests

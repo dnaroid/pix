@@ -8,6 +8,7 @@ import { getAgentDir, ModelRuntime } from "@earendil-works/pi-coding-agent";
 
 import {
 	applyModelRolesToPixConfig,
+	applyModelRolesToDesktopConfig,
 	applyModelRolesToSuiteConfig,
 	applySearchToSuiteConfig,
 	MODEL_SLOTS,
@@ -91,7 +92,8 @@ async function askSlots(io: WizardIo, models: readonly CandidateModel[], roles: 
 	let group = "";
 	for (const slot of orderedSlots()) {
 		if (slot.group !== group) { group = slot.group; io.print(`\n${group}`); }
-		const pool = models.filter((m) => (!slot.vision || m.vision) && (!slot.openrouter || m.provider === "openrouter"));
+		const pool = models.filter((m) => (!slot.vision || m.vision) && (!slot.openrouter || m.provider === "openrouter")
+			&& (!slot.id.startsWith("knowledge-judge") || (modelRefOf(m).length <= 256 && /^[^\s/:]+\/[^\s:]+$/u.test(modelRefOf(m)))));
 		if (slot.list) {
 			const primary = (slot.parent && chosen[slot.parent]) || "";
 			for (;;) {
@@ -107,7 +109,7 @@ async function askSlots(io: WizardIo, models: readonly CandidateModel[], roles: 
 			}
 			continue;
 		}
-		const base = slot.optional ? "none" : roles[slot.role];
+		const base = slot.optional ? slot.emptyLabel ?? "none" : roles[slot.role];
 		chosen[slot.id] = slot.optional ? "" : base;
 		for (;;) {
 			const hint = slot.optional ? "Enter keeps current, '-' clears" : "Enter keeps";
@@ -210,7 +212,7 @@ export function writeModelRoles(roles: ModelRoles, homeDir = homedir(), override
 	const written: string[] = [];
 	if (update(paths.pix, (s) => applyModelRolesToPixConfig(s, roles, overrides), true)) written.push(paths.pix);
 	// A partial desktop file would stop Desktop from creating its full template, so only update an existing one.
-	if (update(paths.desktop, (s) => applyModelRolesToPixConfig(s, roles, overrides), false)) written.push(paths.desktop);
+	if (update(paths.desktop, (s) => applyModelRolesToDesktopConfig(s, roles, overrides), false)) written.push(paths.desktop);
 	if (update(paths.suite, (s) => search ? applySearchToSuiteConfig(applyModelRolesToSuiteConfig(s, roles, overrides), search) : applyModelRolesToSuiteConfig(s, roles, overrides), true)) written.push(paths.suite);
 	return written;
 }

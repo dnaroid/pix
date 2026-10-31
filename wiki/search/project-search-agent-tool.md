@@ -464,3 +464,5 @@ slash commands below retain their existing lifetime and parallel behavior.
 - `external/pi-tools-suite/test/module-loader.test.ts`
 - `external/pi-tools-suite/test/evals/extension-contracts.test.ts`
 - `external/pi-tools-suite/test/async-subagents/repo-tools.test.ts`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"f15d90817c3d8c713e827516d5a71d2edae9b8d32e6201296f04e54c1bd4897a","checkedAt":"2026-10-31T00:04:30.629Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":54,"reportLanguage":"ru"} -->

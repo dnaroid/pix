@@ -69,3 +69,5 @@ Native QA shows the physical key bypasses HID F5 on a supported macOS/keyboard,
 permission cannot reliably enable the tap, or a narrower supported API becomes
 available. Revisit key identity filtering if ordinary function-key use conflicts
 with this shortcut.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"fd67fac9f43298c47c001d2845bfbe47aac8e701fb76ff46b4be4be146290109","checkedAt":"2026-10-30T23:35:08.014Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":63,"reportLanguage":"ru"} -->

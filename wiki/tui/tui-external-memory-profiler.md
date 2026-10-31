@@ -97,3 +97,5 @@ monitor-only signal forwarding, ignored/delayed termination, and listener cleanu
 A real TUI soak must separately measure RSS while typing after the answer has
 finished, and retain stack/maps for a recurrence. Short typing smoke tests or
 offline editor loops do not establish that the leak/freeze is eliminated.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"e5c16a3f884236ad813cc2ea2e8ce98f3a1066184007bad077f69a9e77cf5bea","checkedAt":"2026-10-30T23:23:18.733Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":56,"reportLanguage":"ru"} -->

@@ -250,3 +250,5 @@ Fixed-path documents and fixture/upstream exclusions are accounted for in the [m
 | [Todo initial status and blocked-work handoff](../work-management/todos/todo-initial-status.md) | `work-management/todos` | metadata status: active; implementation coverage not inferred from metadata alone |
 | [Todo completion without knowledge-state reminders](../work-management/todos/todo-repo-knowledge-finalization.md) | `work-management/todos` | Active implemented contract. |
 | [Todo thinking model overrides](../work-management/todos/todo-thinking-model-overrides.md) | `work-management/todos` | Active implemented contract. |
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"3ccf6d4ac3f22e901a649e86ea6b25b82d2bfbc2624c3fbbd803e3c3a1c7a448","checkedAt":"2026-10-31T00:11:48.834Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":79,"reportLanguage":"ru"} -->

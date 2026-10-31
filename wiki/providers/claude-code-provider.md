@@ -174,6 +174,12 @@ host provider/extension error rows identifying Claude Code and expired OAuth,
 failed authentication or a missing login qualify; unrelated provider errors,
 quota warnings and ordinary transcript text do not.
 
+Historical authentication error cards and their text remain in the transcript,
+but the complete sign-in recovery block (profile selection, login action,
+Continue action and guidance) is shown only for the final transcript item when
+no prompt is running. Starting a retry hides stale recovery controls without
+removing the error; a later final authentication error offers recovery again.
+
 The action reads only the user-level Tools Suite configuration. With no named
 profiles it opens Pix's existing Terminal workbench and runs Claude's
 `auth login --claudeai`; with named profiles it first offers a Pix-styled
@@ -371,3 +377,5 @@ Response-observer rejection regressions cover both a still-live child requiring
 forced cleanup and a child whose close is observed before rejection. Both must
 publish only an error and finish private cleanup; the fixture must not race a
 short natural-exit timer against Windows process-tree termination.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"c8ec58d441bc8d9c541468fef6c850929a309f103a80ec02f00d94471d7ee41f","checkedAt":"2026-10-30T23:27:21.394Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":61,"reportLanguage":"ru"} -->

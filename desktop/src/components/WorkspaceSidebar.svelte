@@ -75,6 +75,10 @@
   import GitPanel from "./GitPanel.svelte";
   import ProjectExplorer from "./ProjectExplorer.svelte";
   import ProjectWikiPanel from "./ProjectWikiPanel.svelte";
+  import WikiAutoCheckControl from "./WikiAutoCheckControl.svelte";
+  import type { WikiAutoCheckView } from "../lib/wiki-auto-check-config";
+  import type { KnowledgeCitation, KnowledgeReportLanguage } from "../../../acp/src/knowledge/contract";
+  import type { ProjectKnowledgeJob } from "../app/project-knowledge-queue.svelte";
   import PackageScriptsPanel from "./PackageScriptsPanel.svelte";
   import { createPackageScriptsController } from "./package-scripts-controller.svelte";
   import type { TerminalSurfaceHandle } from "./TerminalSessionsPane.svelte";
@@ -171,6 +175,15 @@
     gitCi,
     gitWorkflow,
     projectDocuments,
+    knowledgeJobs = [],
+    wikiAutoCheck,
+    onSetWikiAutoCheck,
+    onCancelKnowledgeCheck,
+    onDismissKnowledgeCheck,
+    onOpenKnowledgeCitation,
+    onResolveKnowledgeJob,
+    knowledgeSourcesEnabled = true,
+    knowledgeResolving = false,
     activeProjectDocumentPath = null,
     planActionsDisabled = false,
     planRunDisabled = false,
@@ -284,6 +297,15 @@
     gitCi: GitCiPanelState;
     gitWorkflow: GitPanelWorkflow;
     projectDocuments: ProjectDocumentsSnapshot;
+    knowledgeJobs?: readonly ProjectKnowledgeJob[];
+    wikiAutoCheck?: WikiAutoCheckView;
+    onSetWikiAutoCheck?: (enabled: boolean) => void | Promise<void>;
+    onCancelKnowledgeCheck?: (id: number) => void;
+    onDismissKnowledgeCheck?: (id: number) => void;
+    onOpenKnowledgeCitation?: (citation: KnowledgeCitation, language?: KnowledgeReportLanguage) => void | Promise<void>;
+    onResolveKnowledgeJob?: (job: ProjectKnowledgeJob) => void | Promise<void>;
+    knowledgeSourcesEnabled?: boolean;
+    knowledgeResolving?: boolean;
     activeProjectDocumentPath?: string | null;
     planActionsDisabled?: boolean;
     planRunDisabled?: boolean;
@@ -558,7 +580,18 @@
     if (activeTab !== tab || layoutController.collapsed) selectTab(tab);
   }
 
-  let wikiPanel = $state<{ create: (kind: "new-file" | "new-directory") => void; exportHtml: () => void; showInFiles: () => void; refresh: () => void } | null>(null);
+  let wikiPanel = $state<{ create: (kind: "new-file" | "new-directory") => void; exportHtml: () => void; showInFiles: () => void; refresh: () => void; openChecks: () => void } | null>(null);
+  export async function openWikiChecks(): Promise<void> {
+    const target = workspace;
+    revealIndicatorTab("wiki");
+    await tick();
+    if (workspace === target) wikiPanel?.openChecks();
+  }
+  /** Wiki Conflicts entry points: the panel reads its Pages/Conflicts view from shared state. */
+  export async function openWikiConflicts(): Promise<void> {
+    revealIndicatorTab("wiki");
+    await tick();
+  }
   let wikiReady = $state(false);
   const activeTabTitle = $derived(SIDEBAR_LABELS[activeTab]);
   const draggedTask = $derived(taskDragController.taskId ? tasks.find((task) => task.id === taskDragController.taskId) : undefined);
@@ -984,7 +1017,7 @@
   <SidebarIndicatorMenu controller={indicatorMenuController} groups={indicatorMenuGroups} onAction={indicatorActions.run} />
 
   {#if !layoutController.collapsed}
-    <div class="grid min-w-0 flex-1 grid-rows-[36px_minmax(0,1fr)] overflow-hidden border-r border-sidebar-border bg-sidebar">
+    <div class={["grid min-w-0 flex-1 overflow-hidden border-r border-sidebar-border bg-sidebar", activeTab === "wiki" ? "grid-rows-[36px_auto_minmax(0,1fr)]" : "grid-rows-[36px_minmax(0,1fr)]"]}>
       <div class="flex min-w-0 items-center gap-2 border-b border-sidebar-border bg-sidebar pl-3 pr-1">
         <strong class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold tracking-wide text-muted-foreground uppercase">{activeTabTitle}</strong>
         {#if activeTab === "tasks"}
@@ -1051,6 +1084,7 @@
           <button class={iconButtonClass("sm", "chrome")} type="button" title="Show Wiki folder in Files" aria-label="Show Wiki folder in Files" disabled={!wikiReady} onclick={() => wikiPanel?.showInFiles()}><FolderOpen class="h-3.5 w-3.5" aria-hidden="true" /></button>
           <button class={iconButtonClass("sm", "chrome")} type="button" title="Open as HTML in browser" aria-label="Open as HTML in browser" disabled={!wikiReady} onclick={() => wikiPanel?.exportHtml()}><Globe class="h-3.5 w-3.5" aria-hidden="true" /></button>
           <button class={iconButtonClass("sm", "chrome")} type="button" title="Refresh Wiki" aria-label="Refresh Wiki" disabled={!wikiReady} onclick={() => wikiPanel?.refresh()}><RefreshCw class="h-3.5 w-3.5" aria-hidden="true" /></button>
+          <WikiAutoCheckControl state={wikiAutoCheck} disabled={!workspace} onChange={onSetWikiAutoCheck} />
           </div>
         {/if}
         <button
@@ -1061,6 +1095,10 @@
           onclick={closeActivePanel}
         ><X class="h-3.5 w-3.5" aria-hidden="true" /></button>
       </div>
+
+      {#if activeTab === "wiki"}
+        <WikiAutoCheckControl part="notice" state={wikiAutoCheck} />
+      {/if}
 
       {#if activeTab === "tasks"}
         <div class="flex min-h-0 min-w-0 flex-col overflow-hidden" data-work-sections>
@@ -1200,6 +1238,13 @@
             bind:ready={wikiReady}
             {workspace}
             activePath={activeProjectDocumentPath}
+            {knowledgeJobs}
+            {onCancelKnowledgeCheck}
+            {onDismissKnowledgeCheck}
+            {onOpenKnowledgeCitation}
+            {onResolveKnowledgeJob}
+            {knowledgeSourcesEnabled}
+            {knowledgeResolving}
             onOpenFile={onOpenWikiFile ?? onOpenProjectFile}
             onOpenFiles={onOpenProjectFile}
             onBeforeMutation={onBeforeFilesMutation}

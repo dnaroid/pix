@@ -63,3 +63,5 @@ Network filesystem compatibility and non-macOS native validation remain limits.
 
 Native packaging/support failures appear, a supported filesystem cannot provide
 compatible locks, or a shared write service becomes a product requirement.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"49f463403ebaaeebcc1690a1522bd6a946f25847c2f8c7ee6d19710ce005a930","checkedAt":"2026-10-30T23:36:04.186Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":65,"reportLanguage":"ru"} -->

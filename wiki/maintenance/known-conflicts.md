@@ -74,3 +74,5 @@ records without renumbering them.
 The complete original [contract overview](../reference/contracts.md) contains
 additional known unknowns and historical consolidation notes. Preserve those
 caveats when editing the corresponding feature contracts.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"48c60883b11ff19fec4d79deaa323e7bb3e2eb8cd9684c8900890f9c96046604","checkedAt":"2026-10-31T00:11:26.958Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":57,"reportLanguage":"ru"} -->

@@ -42,6 +42,11 @@ export function createDesktopLifecycleServices(options: DesktopLifecycleServices
     activeSessionRuntimeReady: () => options.state.runtimeReady,
     refreshRuntimeStatus: options.sessionServices.runtime.refreshStatus,
     disposeGitCi: options.projectServices.gitCi.dispose,
+    disposeProjectDocuments: () => {
+      options.projectServices.wikiConflictsRecheck.dispose();
+      options.projectServices.wikiConsistency.dispose();
+      options.projectServices.documents.dispose();
+    },
     restoreProjects: () => {
       const restored = options.projectServices.workspace.restore();
       options.setWorkspace(restored.workspace);
@@ -53,7 +58,7 @@ export function createDesktopLifecycleServices(options: DesktopLifecycleServices
     workspace: options.workspace,
     loadWorkspaceData: (workspace) => {
       void options.projectServices.tasks.load(workspace);
-      void options.projectServices.documents.load(workspace);
+      void options.projectServices.loadDocuments(workspace);
       void options.projectServices.workspace.loadPreferences(workspace);
       void options.projectServices.registry.refreshProjectInitialization();
       void options.projectServices.registry.autoCleanProject(workspace);

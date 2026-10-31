@@ -55,3 +55,5 @@ Agents repeatedly omit significant records, stale statuses/links cause mistaken
 changes, or decision volume makes ordinary retrieval insufficient. Consider
 structural validation or stronger workflow gates then, without claiming that
 syntax checks can validate the truth of a rationale.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"298f08d3a254a3764d8f4420d044788f47e3c2120e91c0d74dd17440ca63f06c","checkedAt":"2026-10-30T23:54:43.348Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":51,"reportLanguage":"ru"} -->

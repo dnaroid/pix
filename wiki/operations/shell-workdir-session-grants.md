@@ -34,3 +34,5 @@ In Pix Desktop, submit the slash command from the composer. Its `ctx.ui.notify` 
 ## Verification
 
 Run suite typecheck, suite tests and smoke, plus the Pix root check and suite integration test. The deterministic shell alias tests exercise grant/revoke, canonical descendant and link behavior, denied paths, missing directories, and session/runtime boundaries.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"3c287c7dff24947ef963fa091423455b86f4b554714a491c375e3e9b60b47ae0","checkedAt":"2026-10-31T00:02:28.982Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":69,"reportLanguage":"ru"} -->

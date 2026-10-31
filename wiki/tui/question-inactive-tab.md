@@ -78,3 +78,5 @@ Matches upstream Pi 1.4.0 interactive-mode semantics.
 ## Tests
 
 - `tests/extension-ui-controller.test.ts`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"33d8e9699c276b16324711ea6cd833325a18893b3f6f8daf5328aa60a7903fd0","checkedAt":"2026-10-30T23:24:32.648Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":63,"reportLanguage":"ru"} -->

@@ -54,3 +54,5 @@ ownership guards remain authoritative.
 
 Native keyboard or narrow-window testing reveals unreachable actions or clipped
 details, or new status controls introduce a different activation policy.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"c3136409474cb04225fa7a62da47929447c9246b0ff10b7421df98936a0f6aff","checkedAt":"2026-10-30T23:36:23.008Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":55,"reportLanguage":"ru"} -->

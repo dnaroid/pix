@@ -54,7 +54,7 @@ function orderedHits(hits, results) {
 
 /** The caller owns freshness/source checks. Errors retain the entire original list. */
 export async function rerankNativeHits(query, hits, settings, dependencies, checkCurrent) {
-  if (!settings || !hits.length) return { hits, notices: [] };
+  if (!settings || !hits.length) return { hits, notices: [], limitNotices: [], completeForSelection: true };
   const caller = dependencies.signal ?? new AbortController().signal;
   const owner = new AbortController();
   const signal = AbortSignal.any([caller, owner.signal, AbortSignal.timeout(4000)]);
@@ -82,10 +82,11 @@ export async function rerankNativeHits(query, hits, settings, dependencies, chec
       return (dependencies.rerank ?? rerankRepository)(query, documents, settings.model, key, signal);
     });
     await current(true);
-    return { hits: orderedHits(candidates, results), notices: hits.length > candidates.length
-      ? ["Native reranking candidate limit reached; results are partial."] : [] };
+    const limitNotices = hits.length > candidates.length
+      ? ["Native reranking candidate limit reached; results are partial."] : [];
+    return { hits: orderedHits(candidates, results), notices: limitNotices, limitNotices, completeForSelection: true };
   } catch {
     caller.throwIfAborted();
-    return { hits, notices: ["Native reranking unavailable or its context changed; original ranking retained."] };
+    return { hits, notices: ["Native reranking unavailable or its context changed; original ranking retained."], limitNotices: [], completeForSelection: false };
   } finally { closed = true; clearInterval(timer); }
 }

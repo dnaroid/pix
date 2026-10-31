@@ -341,3 +341,5 @@ not a second project handbook. General project documentation belongs in Wiki.
 | [skills/skill-creator/agents/comparator.md](../../skills/skill-creator/agents/comparator.md) | Package/runtime companion; retained at owning subsystem path |
 | [skills/skill-creator/agents/grader.md](../../skills/skill-creator/agents/grader.md) | Package/runtime companion; retained at owning subsystem path |
 | [skills/skill-creator/references/schemas.md](../../skills/skill-creator/references/schemas.md) | Package/runtime companion; retained at owning subsystem path |
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"cd0e4fc28aea2b91c1ce971d2ddc63db425e176fe4cee555bcd844da34940fcd","checkedAt":"2026-10-31T00:13:52.076Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":22,"candidateSources":117,"reportLanguage":"ru"} -->

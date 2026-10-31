@@ -69,3 +69,5 @@ model behavior when the user has not configured `enabledModels`.
   `enabledModels` was missing or empty.
 - Confirmed by current verification: schema generation and SDK pin checks pass,
   TypeScript is clean, and the full root test suite passes.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"78ba5ffe5fb940dd4eea470199783d8234ec3fbace901574f79318bd106c81a9","checkedAt":"2026-10-30T23:04:54.580Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":62,"reportLanguage":"ru"} -->

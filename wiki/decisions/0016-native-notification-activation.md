@@ -42,3 +42,5 @@ The native bridge adds platform-specific code, but makes notification ownership 
 ## Revisit when
 
 Tauri provides a verified Desktop activation API with per-notification ownership, macOS changes notification delegate behavior, or Desktop officially gains another supported platform.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"5c44a156ba91e05cc1a264124127de1d42b4ee337fd0d1b1f553263dc577f94e","checkedAt":"2026-10-30T23:40:51.798Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":61,"reportLanguage":"ru"} -->

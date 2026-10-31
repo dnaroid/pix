@@ -21,6 +21,8 @@ import { DRAFT_SESSION_TAB_ID, type createDraftSession } from "./draft-session.s
 import type { SessionTabAttentionStore } from "./session-tab-attention.svelte";
 import type { LspOnboardingStore } from "./lsp-onboarding.svelte";
 import type { WorkbenchTerminalState } from "./workbench-terminal.svelte";
+import type { WorkbenchWikiConflictsState } from "./workbench-wiki-conflicts.svelte";
+import { summarizeWikiFindings } from "../lib/wiki-conflicts-index";
 import {
   buildDesktopWorkbenchTabs,
   buildSessionWorkbenchTabs,
@@ -42,6 +44,7 @@ type DesktopPresentationStateOptions = {
   tabAttention: SessionTabAttentionStore;
   lspOnboarding: LspOnboardingStore;
   workbenchTerminal: WorkbenchTerminalState;
+  workbenchWikiConflicts: WorkbenchWikiConflictsState;
 };
 
 export function createDesktopPresentationState(options: DesktopPresentationStateOptions) {
@@ -114,6 +117,11 @@ export function createDesktopPresentationState(options: DesktopPresentationState
     selectionDisabled: options.operationRunning(),
     realSessionCount: tabSessions.length,
   }));
+  /** Current conflicts and uncertainties; stale findings are not counted as open. */
+  const wikiConflictsOpenCount = $derived.by(() => {
+    const summary = summarizeWikiFindings(options.project.wikiConsistency.findings().findings);
+    return summary.conflicts + summary.uncertainties;
+  });
   let customTabOrder = $state<{ workspace: string; ids: WorkbenchTabId[] } | null>(null);
   const canonicalWorkbenchTabs = $derived.by(() => buildDesktopWorkbenchTabs({
     sessionTabs: workbenchSessionTabs,
@@ -136,6 +144,11 @@ export function createDesktopPresentationState(options: DesktopPresentationState
     terminal: options.workbenchTerminal.open ? {
       insertAfterId: options.workbenchTerminal.insertAfterId,
       openedOrder: options.workbenchTerminal.openedOrder,
+    } : null,
+    wikiConflicts: options.workbenchWikiConflicts.open ? {
+      openCount: wikiConflictsOpenCount,
+      insertAfterId: options.workbenchWikiConflicts.insertAfterId,
+      openedOrder: options.workbenchWikiConflicts.openedOrder,
     } : null,
   }));
   const workbenchTabs = $derived(orderedWorkbenchTabs(
@@ -198,6 +211,7 @@ export function createDesktopPresentationState(options: DesktopPresentationState
     get questionImageOperationIds() { return options.interactions.questionImageOperationIds; },
     get workbenchSessionTabs() { return workbenchSessionTabs; },
     get workbenchTabs() { return workbenchTabs; },
+    get wikiConflictsOpenCount() { return wikiConflictsOpenCount; },
     get activeWorkbenchTab() { return activeWorkbenchTab; },
     get activeTodoSnapshot() { return activeTodoSnapshot; },
     get activeSubagentSnapshot() { return activeSubagentSnapshot; },

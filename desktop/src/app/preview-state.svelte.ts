@@ -1,4 +1,5 @@
 import type { Attachment } from "../lib/attachments";
+import type { KnowledgeCitation, KnowledgeReportLanguage } from "../../../acp/src/knowledge/contract";
 import type { ProjectFileLineRange, ProjectFilePreview } from "../lib/project-files";
 import type { SettingsConfigKind } from "../lib/settings";
 import {
@@ -22,6 +23,9 @@ export type PreviewTarget =
       lineRange?: ProjectFileLineRange;
       /** Knowledge result location, revealed in rendered Markdown rather than source. */
       searchRange?: ProjectFileLineRange;
+      /** Evidence must be located again in the loaded file, not by saved line numbers. */
+      evidenceCitation?: KnowledgeCitation;
+      evidenceLanguage?: KnowledgeReportLanguage;
       userConfigKind?: SettingsConfigKind;
       markdownLinkBase?: "document";
     }

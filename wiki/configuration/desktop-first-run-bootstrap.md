@@ -69,3 +69,5 @@ Make a packaged Pix Desktop usable on a clean computer without requiring a syste
 
 - `desktop/src-tauri/src/desktop_bootstrap.rs`
 - `scripts/release/test/bootstrap.test.mjs`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"38194677253e5872b7dff24b090fddf90b620bf88af8ad5b1b4408e4e972c5c2","checkedAt":"2026-10-30T23:07:51.152Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":56,"reportLanguage":"ru"} -->

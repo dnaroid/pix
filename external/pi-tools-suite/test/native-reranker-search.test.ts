@@ -52,6 +52,8 @@ describe("optional native repository reranker", () => {
     expect(result.hits[0].score).toBe(0.99);
     expect(result.hits[0]).not.toHaveProperty("content");
     expect(result.status).toMatchObject({ rerankerEnabled: true, semanticEnabled: false });
+    expect(result.status.completeForSelection).toBe(true);
+    expect(result.limitNotices).toEqual([]);
   });
   test("lexical, empty results, disabled sources and empty/malformed settings do not call the provider", async () => {
     const root = await fixture(), p = provider();
@@ -64,6 +66,11 @@ describe("optional native repository reranker", () => {
       expect(await repositoryRerankerSettings()).toBeUndefined();
       expect((await searchNative(root, request(), p)).hits).toHaveLength(3);
     }
+    await configure();
+    await writeSourcePolicy(root, "knowledge", false);
+    const disabled = await searchNative(root, request({ sources: ["knowledge"] }), p);
+    expect(disabled.hits).toEqual([]);
+    expect(disabled.status).toMatchObject({ complete: true, completeForSelection: true, stale: false });
     expect(p.calls).toEqual([]);
   });
   test("project-local configuration and redirected global settings never authorize reranking", async () => {
@@ -87,12 +94,16 @@ describe("optional native repository reranker", () => {
       const result = await searchNative(root, request(), { rerankerKey: async () => "key", rerank: async () => invalid });
       expect(result.hits).toEqual(original.hits);
       expect(result.notices.join(" ")).toContain("original ranking retained");
+      expect(result.status.complete).toBe(original.status.complete);
+      expect(result.status.completeForSelection).toBe(false);
+      expect(result.limitNotices).toEqual([]);
     }
     for (const dependencies of [{ rerankerKey: async () => undefined },
       { rerankerKey: async () => "key", rerank: async () => { throw new Error("secret-provider-body"); } }]) {
       const result = await searchNative(root, request(), dependencies);
       expect(result.hits).toEqual(original.hits);
       expect(JSON.stringify(result)).not.toContain("secret-provider-body");
+      expect(result.status.completeForSelection).toBe(false);
     }
   });
   test("configuration revocation aborts in-flight transport and drops late ranking", async () => {
@@ -106,6 +117,7 @@ describe("optional native repository reranker", () => {
     expect(aborted).toBe(true);
     expect(result.hits).toHaveLength(3);
     expect(result.notices.join(" ")).toContain("original ranking retained");
+    expect(result.status.completeForSelection).toBe(false);
   });
   test("caller cancellation rejects instead of publishing late hits", async () => {
     const root = await fixture(), caller = new AbortController();
@@ -120,6 +132,7 @@ describe("optional native repository reranker", () => {
     } });
     expect(result.notices.join(" ")).toContain("original ranking retained");
     expect(result.hits.map((hit: any) => hit.score)).not.toContain(0.99);
+    expect(result.status.completeForSelection).toBe(false);
   });
   test("unchanged concurrent retrieval preserves generation and accepts ranking", async () => {
     const root = await fixture(), p = provider();
@@ -129,6 +142,7 @@ describe("optional native repository reranker", () => {
     } });
     expect(result.notices.join(" ")).not.toContain("original ranking retained");
     expect(result.hits[0].score).toBe(0.99);
+    expect(result.status.completeForSelection).toBe(true);
   });
   test("changed concurrent retrieval still rejects the old generation", async () => {
     const root = await fixture(), p = provider();
@@ -139,6 +153,7 @@ describe("optional native repository reranker", () => {
     } });
     expect(result.notices.join(" ")).toContain("original ranking retained");
     expect(result.hits.map((hit: any) => hit.score)).not.toContain(0.99);
+    expect(result.status.completeForSelection).toBe(false);
   });
   test("source-policy revocation cancels and never publishes a remote result", async () => {
     const root = await fixture(), p = provider();
@@ -169,6 +184,9 @@ describe("optional native repository reranker", () => {
     expect(p.calls[0].documents.every(text => text.length <= 8192)).toBe(true);
     expect(p.calls[0].documents.reduce((total, text) => total + Buffer.byteLength(text), Buffer.byteLength("needle"))).toBeLessThanOrEqual(32000);
     expect(result.notices.join(" ")).toContain("candidate limit");
+    expect(result.limitNotices).toEqual(["Native reranking candidate limit reached; results are partial."]);
+    expect(result.limitNotices.every(notice => result.notices.includes(notice))).toBe(true);
+    expect(result.completeForSelection).toBe(true);
     expect(result.hits).toHaveLength(100);
   });
   test("dedupe chooses the best chunk after reranking and excluded paths/tests never upload", async () => {

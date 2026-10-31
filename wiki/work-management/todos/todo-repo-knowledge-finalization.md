@@ -64,3 +64,5 @@ maintenance belongs to the parent/subagent workflow, not todo result hooks.
 - `bun test test/todo.test.ts test/tool-descriptions.test.ts`
 - `npm run typecheck -- --pretty false`
 - `git diff --check`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"88768a1691527376181b66839facec535996c165e33ffa70734945ef19e8ddd9","checkedAt":"2026-10-31T00:18:33.412Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":61,"reportLanguage":"ru"} -->
