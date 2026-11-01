@@ -481,22 +481,43 @@ export class TelegramBridgeBroker {
 		this.closeTimers.delete(sessionId);
 	}
 
+	/**
+	 * A finished session's topic is deleted with its history. Without the
+	 * "Delete messages" admin right the topic is closed instead (reopened and
+	 * reused if the session comes back).
+	 */
 	private async closeTopic(sessionId: string): Promise<void> {
 		const chatId = this.deps.chatId;
 		const record = this.deps.state.topics[sessionId];
 		// A re-registration may have raced in behind the timer.
-		if (chatId === undefined || !record || record.closed || this.sessions.has(sessionId)) return;
+		if (chatId === undefined || !record || this.sessions.has(sessionId)) return;
+		try {
+			await this.deps.send("deleteForumTopic", { chat_id: chatId, message_thread_id: record.threadId });
+			this.forgetTopic(sessionId);
+			return;
+		} catch (error) {
+			if (error instanceof TelegramApiError && error.threadMissing) {
+				this.forgetTopic(sessionId);
+				return;
+			}
+			this.report("warn", "topic-delete-failed", { errorType: errorType(error) });
+		}
+		if (record.closed) return;
 		try {
 			await this.deps.send("sendMessage", { chat_id: chatId, message_thread_id: record.threadId, text: "⚪️ Session closed in Pix." });
 			await this.ignoreNotModified(this.deps.send("closeForumTopic", { chat_id: chatId, message_thread_id: record.threadId }));
 		} catch (error) {
 			if (!(error instanceof TelegramApiError && error.threadMissing)) throw error;
-			delete this.deps.state.topics[sessionId];
-			this.deps.saveState();
+			this.forgetTopic(sessionId);
 			return;
 		}
 		record.closed = true;
 		record.updatedAt = this.now();
+		this.deps.saveState();
+	}
+
+	private forgetTopic(sessionId: string): void {
+		delete this.deps.state.topics[sessionId];
 		this.deps.saveState();
 	}
 
