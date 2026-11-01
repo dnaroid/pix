@@ -1027,6 +1027,8 @@ function subagentEnvironment(env: NodeJS.ProcessEnv, agentDir?: string): NodeJS.
 			"async-subagents",
 			"coding-discipline",
 			"question",
+			// Only user sessions own Telegram topics.
+			"telegram-bridge",
 		]),
 	};
 	delete result[SUBAGENT_AGENT_DIR_ENV];

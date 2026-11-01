@@ -1,0 +1,517 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { TelegramBridgeBroker, type BrokerConnection, type BrokerState } from "../src/telegram-bridge/broker.js";
+import { acquireLock, TelegramBridgeBrokerHost } from "../src/telegram-bridge/broker-host.js";
+import { TelegramBridgeClient } from "../src/telegram-bridge/client.js";
+import { loadTelegramBridgeConfig, type TelegramBridgeConfig } from "../src/telegram-bridge/config.js";
+import { parseCommand, projectIconColor, splitMessage, topicLink, topicName } from "../src/telegram-bridge/format.js";
+import { assistantText, createTelegramBridgeExtension, isBridgeEligible, TELEGRAM_INBOUND_CHANNEL } from "../src/telegram-bridge/index.js";
+import { LineDecoder, parseClientMessage, type BrokerMessage, type ClientMessage } from "../src/telegram-bridge/protocol.js";
+import { TelegramApiError, TelegramSendQueue, TOPIC_ICON_COLORS, type TelegramUpdate } from "../src/telegram-bridge/telegram-api.js";
+
+const TOKEN = "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ_abc";
+const CHAT = -1001234567890;
+const USER = 4242;
+
+const tempDirs: string[] = [];
+function tempDir(): string {
+	// Short prefix: unix socket paths are length-limited on macOS.
+	const dir = mkdtempSync(join(tmpdir(), "tgb-"));
+	tempDirs.push(dir);
+	return dir;
+}
+const hosts: TelegramBridgeBrokerHost[] = [];
+const clients: TelegramBridgeClient[] = [];
+afterEach(async () => {
+	for (const client of clients.splice(0)) client.dispose();
+	for (const host of hosts.splice(0)) await host.dispose();
+	for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+async function until(condition: () => boolean, label = "condition"): Promise<void> {
+	for (let i = 0; i < 400; i++) {
+		if (condition()) return;
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
+	throw new Error(`timed out waiting for ${label}`);
+}
+
+type Call = { method: string; params: Record<string, unknown> };
+
+function fakeTelegram() {
+	const calls: Call[] = [];
+	let nextThread = 100;
+	const failures: Array<{ method: string; error: Error }> = [];
+	const send = async <T>(method: string, params: Record<string, unknown>): Promise<T> => {
+		calls.push({ method, params });
+		const index = failures.findIndex((failure) => failure.method === method);
+		if (index >= 0) throw failures.splice(index, 1)[0]!.error;
+		if (method === "createForumTopic") return { message_thread_id: nextThread++, name: params.name } as T;
+		return true as T;
+	};
+	return { calls, send, failNext: (method: string, error: Error) => failures.push({ method, error }) };
+}
+
+function fakeTimers() {
+	const timers = new Map<number, () => void>();
+	let id = 0;
+	return {
+		setTimer: (callback: () => void) => { timers.set(++id, callback); return id; },
+		clearTimer: (handle: unknown) => { timers.delete(handle as number); },
+		fireAll: () => { const pending = [...timers.values()]; timers.clear(); for (const callback of pending) callback(); },
+		get size() { return timers.size; },
+	};
+}
+
+function connection(): BrokerConnection & { messages: BrokerMessage[] } {
+	const messages: BrokerMessage[] = [];
+	return { messages, send: (message) => { messages.push(message); } };
+}
+
+function makeBroker(overrides: { chatId?: number | undefined } = {}) {
+	const telegram = fakeTelegram();
+	const timers = fakeTimers();
+	const state: BrokerState = { offset: 0, topics: {} };
+	let saves = 0;
+	const broker = new TelegramBridgeBroker({
+		...("chatId" in overrides ? (overrides.chatId === undefined ? {} : { chatId: overrides.chatId }) : { chatId: CHAT }),
+		allowedUserIds: [USER],
+		send: telegram.send,
+		state,
+		saveState: () => { saves++; },
+		setTimer: timers.setTimer,
+		clearTimer: timers.clearTimer,
+		now: () => 1000,
+	});
+	return { broker, telegram, timers, state, saves: () => saves };
+}
+
+function register(sessionId: string, cwd: string, title?: string): ClientMessage {
+	return { t: "register", sessionId, project: cwd.split("/").pop()!, cwd, ...(title ? { title } : {}) };
+}
+
+let updateId = 1;
+function topicMessage(threadId: number | undefined, text: string, from = USER, chatId = CHAT): TelegramUpdate {
+	return {
+		update_id: updateId++,
+		message: {
+			message_id: updateId,
+			chat: { id: chatId, type: "supergroup", is_forum: true },
+			from: { id: from },
+			text,
+			...(threadId !== undefined ? { message_thread_id: threadId, is_topic_message: true } : {}),
+		},
+	};
+}
+
+describe("telegram-bridge config", () => {
+	const read = (content: string | undefined) => (path: string) => {
+		if (content === undefined) throw Object.assign(new Error(`missing ${path}`), { code: "ENOENT" });
+		return content;
+	};
+
+	test("is missing without a token and reports the file path", () => {
+		const result = loadTelegramBridgeConfig({ env: {}, homeDir: "/home/me", readFile: read(undefined) });
+		expect(result).toMatchObject({ ok: false, reason: "missing", path: "/home/me/.config/pi/telegram-bridge.jsonc" });
+	});
+
+	test("reads JSONC credentials and lets the environment override them", () => {
+		const file = `{ // comment\n "botToken": "${TOKEN}", "chatId": ${CHAT}, "allowedUserIds": [${USER}] }`;
+		const result = loadTelegramBridgeConfig({ env: {}, homeDir: "/home/me", readFile: read(file) });
+		expect(result).toEqual({ ok: true, config: { botToken: TOKEN, chatId: CHAT, allowedUserIds: [USER], stateDir: "/home/me/.pi/agent/telegram-bridge" } });
+		const overridden = loadTelegramBridgeConfig({
+			env: { PIX_TELEGRAM_CHAT_ID: "-1009", PIX_TELEGRAM_ALLOWED_USER_IDS: "1, 2", PIX_TELEGRAM_BRIDGE_DIR: "/state" },
+			homeDir: "/home/me", readFile: read(file),
+		});
+		expect(overridden.ok && overridden.config).toMatchObject({ chatId: -1009, allowedUserIds: [1, 2], stateDir: "/state" });
+	});
+
+	test("rejects malformed values and honors enabled:false", () => {
+		const base = { env: {}, homeDir: "/h" };
+		expect(loadTelegramBridgeConfig({ ...base, readFile: read(`{"botToken":"nope"}`) })).toMatchObject({ ok: false, reason: "invalid" });
+		expect(loadTelegramBridgeConfig({ ...base, readFile: read(`{"botToken":"${TOKEN}","chatId":5}`) })).toMatchObject({ ok: false, reason: "invalid" });
+		expect(loadTelegramBridgeConfig({ ...base, readFile: read(`{"botToken":"${TOKEN}","allowedUserIds":["x"]}`) })).toMatchObject({ ok: false, reason: "invalid" });
+		expect(loadTelegramBridgeConfig({ ...base, readFile: read(`{"enabled":false,"botToken":"${TOKEN}"}`) })).toMatchObject({ ok: false, reason: "missing" });
+		// Setup mode: token only, no chat yet.
+		expect(loadTelegramBridgeConfig({ ...base, readFile: read(`{"botToken":"${TOKEN}"}`) })).toMatchObject({ ok: true, config: { allowedUserIds: [] } });
+	});
+});
+
+describe("telegram-bridge protocol and formatting", () => {
+	test("decodes split, multiple and oversized NDJSON lines", () => {
+		const seen: unknown[] = [];
+		const decoder = new LineDecoder((value) => seen.push(value), 32);
+		decoder.push('{"a":');
+		decoder.push('1}\n{"b":2}\nnot json\n');
+		decoder.push(`{"big":"${"x".repeat(64)}`);
+		decoder.push('"}\n{"c":3}\n');
+		expect(seen).toEqual([{ a: 1 }, { b: 2 }, { c: 3 }]);
+	});
+
+	test("validates client messages", () => {
+		expect(parseClientMessage({ t: "register", sessionId: "s-1", project: "p", cwd: "/p" })).toEqual({ t: "register", sessionId: "s-1", project: "p", cwd: "/p" });
+		expect(parseClientMessage({ t: "register", sessionId: "../x", project: "p", cwd: "/p" })).toBeUndefined();
+		expect(parseClientMessage({ t: "notify", sessionId: "s", kind: "boom", text: "x" })).toBeUndefined();
+		expect(parseClientMessage({ t: "ack", sessionId: "s", requestId: "r", ok: "yes" })).toBeUndefined();
+	});
+
+	test("splits long text on line boundaries within the Telegram limit", () => {
+		const text = Array.from({ length: 300 }, (_, i) => `line ${i} ${"word ".repeat(10)}`).join("\n");
+		const chunks = splitMessage(text, 1000);
+		expect(chunks.length).toBeGreaterThan(1);
+		expect(chunks.every((chunk) => chunk.length <= 1000)).toBe(true);
+		expect(chunks.join("\n").replace(/\s+/g, " ")).toBe(text.replace(/\s+/g, " "));
+		expect(splitMessage("")).toEqual([""]);
+		const emoji = "😀".repeat(600);
+		expect(splitMessage(emoji, 999).every((chunk) => !/[\ud800-\udbff]$/.test(chunk))).toBe(true);
+	});
+
+	test("names topics per project and session and colors them per project", () => {
+		expect(topicName("pix", "Fix scrolling")).toBe("pix · Fix scrolling");
+		expect(topicName("pix", undefined)).toBe("pix · new session");
+		expect(topicName("p", "x".repeat(300)).length).toBe(128);
+		expect(projectIconColor("/work/pix")).toBe(projectIconColor("/work/pix"));
+		expect(TOPIC_ICON_COLORS).toContain(projectIconColor("/work/api") as never);
+		expect(topicLink(CHAT, 7)).toBe("https://t.me/c/1234567890/7");
+		expect(parseCommand("/stop@PixBot")).toEqual({ command: "stop", args: "" });
+		expect(parseCommand("hello /stop")).toBeUndefined();
+	});
+
+	test("send queue serializes calls and honors 429 retry_after", async () => {
+		const log: string[] = [];
+		const sleeps: number[] = [];
+		let first = true;
+		const queue = new TelegramSendQueue(async <T>(method: string) => {
+			log.push(`start ${method}`);
+			if (method === "a" && first) { first = false; throw new TelegramApiError("a", 429, "Too Many Requests", 3); }
+			await new Promise((resolve) => setTimeout(resolve, 1));
+			log.push(`end ${method}`);
+			return method as T;
+		}, async (ms) => { sleeps.push(ms); });
+		const results = await Promise.all([queue.run("a", {}), queue.run("b", {})]);
+		expect(results).toEqual(["a", "b"]);
+		expect(sleeps).toEqual([3000]);
+		expect(log).toEqual(["start a", "start a", "end a", "start b", "end b"]);
+	});
+});
+
+describe("telegram-bridge broker", () => {
+	test("creates one topic per session, colored by project, across projects", async () => {
+		const { broker, telegram, state } = makeBroker();
+		const a = connection();
+		const b = connection();
+		broker.handleClientMessage(a, register("s1", "/work/pix", "Refactor auth"));
+		broker.handleClientMessage(a, register("s2", "/work/pix"));
+		broker.handleClientMessage(b, register("s3", "/work/api", "Fix tests"));
+		await broker.idle();
+		const created = telegram.calls.filter((call) => call.method === "createForumTopic");
+		expect(created.map((call) => call.params.name)).toEqual(["pix · Refactor auth", "pix · new session", "api · Fix tests"]);
+		expect(created[0]!.params.icon_color).toBe(created[1]!.params.icon_color);
+		expect(created[2]!.params.icon_color).toBe(projectIconColor("/work/api"));
+		expect(Object.keys(state.topics).sort()).toEqual(["s1", "s2", "s3"]);
+		expect(broker.liveSessionIds.sort()).toEqual(["s1", "s2", "s3"]);
+	});
+
+	test("orders a notify behind the topic creation it depends on", async () => {
+		const { broker, telegram } = makeBroker();
+		const a = connection();
+		broker.handleClientMessage(a, register("s1", "/work/pix"));
+		broker.handleClientMessage(a, { t: "notify", sessionId: "s1", kind: "final", text: "Done" });
+		await broker.idle();
+		expect(telegram.calls.map((call) => call.method)).toEqual(["createForumTopic", "sendMessage"]);
+		expect(telegram.calls[1]!.params).toMatchObject({ chat_id: CHAT, message_thread_id: 100, text: "✅ Done" });
+	});
+
+	test("renames, closes after a grace period, and reopens the same topic", async () => {
+		const { broker, telegram, timers, state } = makeBroker();
+		const a = connection();
+		broker.handleClientMessage(a, register("s1", "/work/pix"));
+		await broker.idle();
+		broker.handleClientMessage(a, { t: "rename", sessionId: "s1", title: "Better name" });
+		await broker.idle();
+		expect(telegram.calls.at(-1)).toMatchObject({ method: "editForumTopic", params: { message_thread_id: 100, name: "pix · Better name" } });
+
+		// Reload: unregister then register again inside the grace period → no churn.
+		broker.handleClientMessage(a, { t: "unregister", sessionId: "s1" });
+		broker.handleClientMessage(a, register("s1", "/work/pix", "Better name"));
+		expect(timers.size).toBe(0);
+		timers.fireAll();
+		await broker.idle();
+		expect(telegram.calls.some((call) => call.method === "closeForumTopic")).toBe(false);
+
+		broker.handleClientMessage(a, { t: "unregister", sessionId: "s1" });
+		timers.fireAll();
+		await broker.idle();
+		expect(telegram.calls.slice(-2).map((call) => call.method)).toEqual(["sendMessage", "closeForumTopic"]);
+		expect(state.topics.s1!.closed).toBe(true);
+
+		const b = connection();
+		broker.handleClientMessage(b, register("s1", "/work/pix", "Better name"));
+		await broker.idle();
+		expect(telegram.calls.at(-1)).toMatchObject({ method: "reopenForumTopic", params: { message_thread_id: 100 } });
+		expect(telegram.calls.filter((call) => call.method === "createForumTopic")).toHaveLength(1);
+		expect(state.topics.s1!.closed).toBe(false);
+	});
+
+	test("a dropped connection only ends the sessions it owned", async () => {
+		const { broker, timers } = makeBroker();
+		const a = connection();
+		const b = connection();
+		broker.handleClientMessage(a, register("s1", "/work/pix"));
+		broker.handleClientMessage(b, register("s2", "/work/api"));
+		broker.detach(a);
+		expect(broker.liveSessionIds).toEqual(["s2"]);
+		expect(timers.size).toBe(1);
+		// A late message from the dead connection cannot touch a session it no longer owns.
+		broker.handleClientMessage(a, { t: "notify", sessionId: "s2", kind: "final", text: "stale" });
+		await broker.idle();
+	});
+
+	test("routes topic messages to the owning session and handles commands", async () => {
+		const { broker, telegram } = makeBroker();
+		const pix = connection();
+		const api = connection();
+		broker.handleClientMessage(pix, register("s1", "/work/pix", "Auth"));
+		broker.handleClientMessage(api, register("s2", "/work/api", "Tests"));
+		await broker.idle();
+
+		broker.handleUpdate(topicMessage(101, "run the api tests"));
+		expect(api.messages).toEqual([expect.objectContaining({ t: "prompt", sessionId: "s2", text: "run the api tests" })]);
+		expect(pix.messages).toEqual([]);
+
+		broker.handleUpdate(topicMessage(100, "/stop@PixBot"));
+		expect(pix.messages).toEqual([expect.objectContaining({ t: "stop", sessionId: "s1" })]);
+
+		broker.handleUpdate(topicMessage(undefined, "/sessions"));
+		await broker.idle();
+		const overview = String(telegram.calls.at(-1)!.params.text);
+		expect(overview).toContain("📁 api (/work/api)");
+		expect(overview).toContain("📁 pix (/work/pix)");
+		expect(overview).toContain("• Auth – https://t.me/c/1234567890/100");
+	});
+
+	test("ignores strangers and other chats, but answers /id for setup", async () => {
+		const { broker, telegram } = makeBroker();
+		const a = connection();
+		broker.handleClientMessage(a, register("s1", "/work/pix"));
+		await broker.idle();
+		const before = telegram.calls.length;
+		broker.handleUpdate(topicMessage(100, "rm -rf /", 999));
+		broker.handleUpdate(topicMessage(100, "hello", USER, -100777));
+		await new Promise((resolve) => setTimeout(resolve, 1));
+		expect(a.messages).toEqual([]);
+		expect(telegram.calls.length).toBe(before);
+
+		const setup = makeBroker({ chatId: undefined });
+		setup.broker.handleUpdate(topicMessage(undefined, "/id", 999, -100555));
+		await new Promise((resolve) => setTimeout(resolve, 1));
+		expect(String(setup.telegram.calls[0]!.params.text)).toContain("chat id: -100555 (forum)\nyour user id: 999");
+	});
+
+	test("tells the user when a session is not running and acknowledges deliveries", async () => {
+		const { broker, telegram, timers } = makeBroker();
+		const a = connection();
+		broker.handleClientMessage(a, register("s1", "/work/pix"));
+		await broker.idle();
+		broker.handleUpdate(topicMessage(100, "hi"));
+		const prompt = a.messages[0] as Extract<BrokerMessage, { t: "prompt" }>;
+		broker.handleClientMessage(a, { t: "ack", sessionId: "s1", requestId: prompt.requestId, ok: true });
+		await new Promise((resolve) => setTimeout(resolve, 1));
+		expect(telegram.calls.at(-1)).toMatchObject({ method: "setMessageReaction" });
+
+		broker.handleUpdate(topicMessage(100, "again"));
+		const second = a.messages[1] as Extract<BrokerMessage, { t: "prompt" }>;
+		broker.handleClientMessage(a, { t: "ack", sessionId: "s1", requestId: second.requestId, ok: false, error: "busy" });
+		await new Promise((resolve) => setTimeout(resolve, 1));
+		expect(telegram.calls.at(-1)!.params.text).toBe("⚠️ busy");
+
+		broker.handleClientMessage(a, { t: "unregister", sessionId: "s1" });
+		timers.fireAll();
+		await broker.idle();
+		broker.handleUpdate(topicMessage(100, "are you there?"));
+		await new Promise((resolve) => setTimeout(resolve, 1));
+		expect(String(telegram.calls.at(-1)!.params.text)).toContain("not running");
+		expect(a.messages).toHaveLength(2);
+	});
+
+	test("sends very long answers as a document and recreates a deleted topic", async () => {
+		const { broker, telegram, state } = makeBroker();
+		const a = connection();
+		broker.handleClientMessage(a, register("s1", "/work/pix"));
+		broker.handleClientMessage(a, { t: "notify", sessionId: "s1", kind: "final", text: "x ".repeat(10_000) });
+		await broker.idle();
+		expect(telegram.calls.slice(-2).map((call) => call.method)).toEqual(["sendMessage", "sendDocument"]);
+		expect(telegram.calls.at(-1)!.params.document).toBeInstanceOf(Blob);
+
+		telegram.failNext("sendMessage", new TelegramApiError("sendMessage", 400, "Bad Request: message thread not found"));
+		broker.handleClientMessage(a, { t: "notify", sessionId: "s1", kind: "final", text: "after delete" });
+		await broker.idle();
+		expect(telegram.calls.slice(-3).map((call) => call.method)).toEqual(["sendMessage", "createForumTopic", "sendMessage"]);
+		expect(state.topics.s1!.threadId).toBe(101);
+	});
+});
+
+describe("telegram-bridge host and client", () => {
+	function hostConfig(stateDir: string): TelegramBridgeConfig {
+		return { botToken: TOKEN, chatId: CHAT, allowedUserIds: [USER], stateDir };
+	}
+	const silentCall = async <T>(method: string, params: Record<string, unknown>): Promise<T> =>
+		(method === "createForumTopic" ? { message_thread_id: 7, name: params.name } : true) as T;
+
+	test("the lock admits one live owner and reclaims a dead one", () => {
+		const dir = tempDir();
+		const file = join(dir, "broker.lock");
+		expect(acquireLock(file, 111, () => true)).toBe(true);
+		expect(acquireLock(file, 222, () => true)).toBe(false);
+		expect(acquireLock(file, 222, (pid) => pid !== 111)).toBe(true);
+		expect(readFileSync(file, "utf8")).toBe("222");
+	});
+
+	test.skipIf(process.platform === "win32")("a surviving session takes over when the broker process goes away", async () => {
+		const dir = tempDir();
+		const config = hostConfig(dir);
+		const first = await TelegramBridgeBrokerHost.tryAcquire(config, { call: silentCall, poll: false, pid: 1001, closeGraceMs: 10_000 });
+		expect(first).toBeDefined();
+		hosts.push(first!);
+		const received: BrokerMessage[] = [];
+		let takeovers = 0;
+		const client = new TelegramBridgeClient({
+			socketPath: first!.socketPath,
+			onMessage: (message) => received.push(message),
+			tryBecomeBroker: async () => {
+				takeovers++;
+				const host = await TelegramBridgeBrokerHost.tryAcquire(config, { call: silentCall, poll: false, pid: 1002, isProcessAlive: () => false });
+				if (host) hosts.push(host);
+				return Boolean(host);
+			},
+		});
+		clients.push(client);
+		client.send({ t: "register", sessionId: "s1", project: "pix", cwd: "/work/pix", title: "Auth" });
+		await until(() => first!.broker.liveSessionIds.includes("s1"), "registration on first broker");
+		await first!.broker.idle();
+		await first!.dispose();
+		expect(existsSync(join(dir, "broker.lock"))).toBe(false);
+
+		await until(() => TelegramBridgeBrokerHost.current() !== undefined
+			&& TelegramBridgeBrokerHost.current()!.broker.liveSessionIds.includes("s1"), "re-registration after takeover");
+		expect(takeovers).toBe(1);
+		const second = TelegramBridgeBrokerHost.current()!;
+		expect(readFileSync(join(dir, "broker.lock"), "utf8")).toBe("1002");
+		// The persisted topic map survives the takeover: no duplicate topic.
+		expect(JSON.parse(readFileSync(join(dir, "state.json"), "utf8")).topics.s1.threadId).toBe(7);
+
+		second.broker.handleUpdate(topicMessage(7, "from phone"));
+		await until(() => received.length === 1, "prompt over the socket");
+		expect(received[0]).toMatchObject({ t: "prompt", sessionId: "s1", text: "from phone" });
+	});
+
+	test("a second process defers to a live broker", async () => {
+		const dir = tempDir();
+		writeFileSync(join(dir, "broker.lock"), "424242");
+		const host = await TelegramBridgeBrokerHost.tryAcquire(hostConfig(dir), { call: silentCall, poll: false, pid: 1, isProcessAlive: () => true });
+		expect(host).toBeUndefined();
+	});
+});
+
+describe("telegram-bridge extension", () => {
+	test("only user sessions are eligible", () => {
+		expect(isBridgeEligible({ mode: "tui", hasUI: true }, {})).toBe(true);
+		expect(isBridgeEligible({ mode: "rpc", hasUI: true }, { PIX_ACP_SESSION_STATE_BRIDGE: "1" })).toBe(true);
+		expect(isBridgeEligible({ mode: "rpc", hasUI: true }, {})).toBe(false);
+		expect(isBridgeEligible({ mode: "rpc", hasUI: true }, { PIX_ACP_SESSION_STATE_BRIDGE: "1", PI_SUBAGENT_META: "{}" })).toBe(false);
+		expect(isBridgeEligible({ mode: "print", hasUI: false } as never, {})).toBe(false);
+	});
+
+	test("extracts final assistant text and provider errors", () => {
+		expect(assistantText({ role: "user", content: "x" })).toBeUndefined();
+		expect(assistantText({ role: "assistant", content: [{ type: "thinking", thinking: "t" }, { type: "text", text: "A" }, { type: "text", text: "B" }] }))
+			.toEqual({ text: "A\n\nB" });
+		expect(assistantText({ role: "assistant", content: [], stopReason: "error", errorMessage: "429" })).toEqual({ text: "", error: "429" });
+	});
+
+	function harness(options: { idle?: boolean } = {}) {
+		const handlers = new Map<string, (event: any, ctx: any) => unknown>();
+		const userMessages: Array<{ text: unknown; options: unknown }> = [];
+		const widgets: unknown[] = [];
+		let aborted = 0;
+		let idle = options.idle ?? true;
+		const pi = {
+			on: (name: string, handler: (event: any, ctx: any) => unknown) => { handlers.set(name, handler); },
+			registerCommand: () => {},
+			getSessionName: () => "Auth",
+			sendUserMessage: (text: unknown, opts?: unknown) => { userMessages.push({ text, options: opts }); },
+		};
+		const sent: ClientMessage[] = [];
+		let onMessage: ((message: BrokerMessage) => void) | undefined;
+		const ctx = {
+			mode: "rpc", hasUI: true, cwd: "/work/pix",
+			sessionManager: { getSessionId: () => "s1" },
+			isIdle: () => idle,
+			abort: () => { aborted++; },
+			ui: { setWidget: (_key: string, lines: unknown) => widgets.push(lines) },
+		};
+		createTelegramBridgeExtension({
+			env: { PIX_ACP_SESSION_STATE_BRIDGE: "1" },
+			loadConfig: () => ({ ok: true, config: { botToken: TOKEN, chatId: CHAT, allowedUserIds: [USER], stateDir: "/unused" } }),
+			createClient: (clientOptions) => {
+				onMessage = clientOptions.onMessage;
+				return { send: (message: ClientMessage) => { sent.push(message); }, dispose: () => {}, isConnected: true };
+			},
+		})(pi as never);
+		const emit = (name: string, event: unknown = {}) => handlers.get(name)?.({ type: name, ...(event as object) }, ctx);
+		return {
+			emit, sent, userMessages, widgets,
+			deliver: (message: BrokerMessage) => onMessage!(message),
+			setIdle: (value: boolean) => { idle = value; },
+			get aborted() { return aborted; },
+		};
+	}
+
+	test("registers, forwards the final answer and redacts secrets", () => {
+		const h = harness();
+		h.emit("session_start", { reason: "startup" });
+		expect(h.sent[0]).toEqual({ t: "register", sessionId: "s1", project: "pix", cwd: "/work/pix", title: "Auth" });
+		h.emit("agent_start");
+		h.emit("message_end", { message: { role: "assistant", content: [{ type: "text", text: "interim" }] } });
+		h.emit("message_end", { message: { role: "assistant", content: [{ type: "text", text: "token=ghp_abcdefghijklmnopqrstuvwxyz0123456789 done" }] } });
+		h.emit("agent_settled", { aborted: false });
+		const notify = h.sent.at(-1) as Extract<ClientMessage, { t: "notify" }>;
+		expect(notify.kind).toBe("final");
+		expect(notify.text).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
+		expect(notify.text).toContain("done");
+		h.emit("agent_settled", { aborted: false });
+		expect(h.sent.filter((message) => message.t === "notify")).toHaveLength(1);
+	});
+
+	test("delivers Telegram prompts as user messages, queued while busy", () => {
+		const previous = process.env.PIX_ACP_SESSION_STATE_BRIDGE;
+		process.env.PIX_ACP_SESSION_STATE_BRIDGE = "1";
+		try {
+			const h = harness();
+			h.emit("session_start", { reason: "startup" });
+			h.deliver({ t: "prompt", sessionId: "other", requestId: "r0", text: "wrong session" });
+			expect(h.sent.at(-1)).toMatchObject({ t: "ack", requestId: "r0", ok: false });
+			h.deliver({ t: "prompt", sessionId: "s1", requestId: "r1", text: "hello" });
+			expect(h.userMessages.at(-1)).toEqual({ text: "hello", options: undefined });
+			expect(h.widgets.at(-1)).toEqual([TELEGRAM_INBOUND_CHANNEL, JSON.stringify({ text: "hello" })]);
+			expect(h.sent.at(-1)).toMatchObject({ t: "ack", requestId: "r1", ok: true });
+
+			h.setIdle(false);
+			h.deliver({ t: "prompt", sessionId: "s1", requestId: "r2", text: "next" });
+			expect(h.userMessages.at(-1)).toEqual({ text: "next", options: { deliverAs: "followUp" } });
+			h.deliver({ t: "stop", sessionId: "s1", requestId: "r3" });
+			expect(h.aborted).toBe(1);
+
+			h.emit("session_shutdown", { reason: "quit" });
+			expect(h.sent.some((message) => message.t === "unregister")).toBe(true);
+			h.deliver({ t: "prompt", sessionId: "s1", requestId: "r4", text: "late" });
+			expect(h.userMessages.at(-1)!.text).toBe("next");
+		} finally {
+			if (previous === undefined) delete process.env.PIX_ACP_SESSION_STATE_BRIDGE;
+			else process.env.PIX_ACP_SESSION_STATE_BRIDGE = previous;
+		}
+	});
+});

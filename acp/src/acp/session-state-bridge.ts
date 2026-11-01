@@ -8,6 +8,19 @@ export const PIX_DCP_CONTEXT_MAP_CHANNEL = "dcp-context-map";
 /** Pushed Anthropic API-key response-header usage (parsed, no network refresh). */
 export const PIX_MODEL_USAGE_CHANNEL = "model-usage";
 
+/**
+ * A user message that entered the session from outside this ACP client (the
+ * Telegram bridge). Desktop never rendered it, so ACP surfaces it as a live
+ * user row; persisted history replays it normally afterwards.
+ */
+export const PIX_EXTERNAL_USER_MESSAGE_CHANNEL = "telegram-bridge:inbound";
+const EXTERNAL_USER_MESSAGE_LIMIT = 200_000;
+
+export function externalUserMessageText(data: unknown): string | undefined {
+	const text = (data as { text?: unknown } | null | undefined)?.text;
+	return typeof text === "string" && text.trim() && text.length <= EXTERNAL_USER_MESSAGE_LIMIT ? text : undefined;
+}
+
 export interface SessionStateEnvelope {
 	readonly channel: string;
 	readonly data: unknown;

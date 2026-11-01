@@ -38,6 +38,8 @@ export const PI_TOOLS_SUITE_MODULE_CATALOG: readonly PiToolsSuiteModuleCatalogEn
 	{ name: "prompt-commands", defaultEnabled: true, description: "Lets users create and manage saved prompt-backed slash commands from pi-tools-suite config." },
 	// Secret firewall is intentionally opt-in. Keep it after payload-shaping modules.
 	{ name: "credential-firewall", defaultEnabled: false, description: "Redacts high-confidence secrets from outbound payloads and optionally from persisted session content." },
+	// Opt-in remote control: one Telegram forum topic per running Pix session.
+	{ name: "telegram-bridge", defaultEnabled: false, description: "Opt-in Telegram bot bridge: one forum topic per running Pix session across projects; read answers and send messages from your phone." },
 	// Keep this last within the suite, after its other payload modifiers. Other
 	// extensions may register later handlers; this is not a global ordering guarantee.
 	{ name: "codex-reasoning-fix", defaultEnabled: true, description: "Strips legacy null or empty reasoning content fields before OpenAI Responses/Codex provider requests." },

@@ -902,6 +902,36 @@ test("startup and idle extension warnings/errors reach system rows without a pro
 	assert.deepEqual(pi.uiResponses, []);
 });
 
+test("external (Telegram) user messages reach Desktop as live user rows", async () => {
+	const notifications: SessionNotification[] = [];
+	const stateNotifications: unknown[] = [];
+	let pi!: FakePiClient;
+	const harness = createTestAdapter({ createPiClient: () => (pi = new FakePiClient()) });
+	let sessionId = "";
+	await connect(harness.adapter, async (cx) => {
+		sessionId = (await cx.buildSession("/tmp/telegram-inbound").start()).sessionId;
+		const emit = (data: unknown) => pi.emit({ type: "extension_ui_request", id: "tg", method: "setWidget",
+			widgetKey: "pix.session-state", widgetLines: ["telegram-bridge:inbound", JSON.stringify(data)] });
+		emit({ text: "   " });
+		emit({ text: 42 });
+		emit({ text: "run the tests from my phone" });
+		await waitFor(() => notifications.some((item) => item.update.sessionUpdate === "user_message_chunk"));
+		await new Promise<void>((resolve) => setImmediate(resolve));
+	}, (app) => {
+		app.onNotification("session/update", (ctx) => { notifications.push(ctx.params); });
+		const custom = app as unknown as { onNotification(method: string, parser: (params: unknown) => unknown,
+			handler: (ctx: { params: unknown }) => void): void };
+		custom.onNotification(PIX_SESSION_STATE_METHOD, (params) => params, (ctx) => { stateNotifications.push(ctx.params); });
+	});
+	const rows = notifications.filter((item) => item.update.sessionUpdate === "user_message_chunk");
+	assert.equal(rows.length, 1, "invalid payloads are dropped");
+	assert.equal(rows[0]!.sessionId, sessionId);
+	assert.deepEqual((rows[0]!.update as { content: unknown }).content, { type: "text", text: "run the tests from my phone" });
+	assert.match((rows[0]!.update as { messageId: string }).messageId, /^external-user:/);
+	assert.deepEqual(stateNotifications, [], "the private channel is not forwarded as generic session state");
+	assert.deepEqual(pi.uiResponses, []);
+});
+
 test("desktop activity attachment rebinds a reused lazy runtime and replays its cached snapshot", async () => {
 	const notifications: Array<{ sessionId: string; channel: string; data: unknown; activityOwner?: string }> = [];
 	const harness = createTestAdapter({

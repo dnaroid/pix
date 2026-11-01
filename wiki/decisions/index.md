@@ -80,6 +80,7 @@ Why consequential choices were made. Status and replacement metadata govern each
 - [0070 — Source-isolated search indexes and bounded uncertain recovery](0070-search-source-work-recovery.md) — accepted
 - [0071 — Brainstorm council as a skill on ordinary sub-agents](0071-brainstorm-skill-on-subagents.md) — accepted
 - [0072 — Session-native sub-agents without run directories](0072-session-native-subagents.md) — accepted
+- [0073 — Telegram bridge as an in-session extension with an elected broker](0073-telegram-session-bridge.md) — accepted
 - [Decision log](README.md)
 - [NNNN — Decision title](TEMPLATE.md) — template, not a decision
 

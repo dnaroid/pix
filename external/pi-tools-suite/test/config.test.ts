@@ -26,7 +26,7 @@ describe("pi-tools-suite config", () => {
 		expect(REGISTERED_MODULES.map((module) => module.name)).not.toContain("session-name");
 		expect(REGISTERED_MODULES.map((module) => module.name)).not.toContain("session-recovery");
 		expect(PI_TOOLS_SUITE_MODULE_CATALOG.filter((module) => !module.defaultEnabled).map((module) => module.name).sort())
-			.toEqual(["credential-firewall"]);
+			.toEqual(["credential-firewall", "telegram-bridge"]);
 	});
 	test("resolves the user config path from a supplied home directory", () => {
 		const homeDir = tempDir();

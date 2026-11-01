@@ -354,7 +354,9 @@ import {
 	PIX_DCP_CONTEXT_MAP_CHANNEL,
 	PIX_DCP_TOKENS_SAVED_CHANNEL,
 	PIX_MODEL_USAGE_CHANNEL,
+	PIX_EXTERNAL_USER_MESSAGE_CHANNEL,
 	PIX_SESSION_STATE_METHOD,
+	externalUserMessageText,
 	sessionStateEnvelopeFromUiRequest,
 	type PixSessionStateNotification,
 } from "./session-state-bridge.js";
@@ -3003,6 +3005,17 @@ export class PixAcpAgent {
 		if (state) {
 			if (state.channel === CLAUDE_CODE_RATE_LIMIT_EVENT) {
 				await this.observeClaudeCodeRateLimit(session, state.data);
+				return;
+			}
+			if (state.channel === PIX_EXTERNAL_USER_MESSAGE_CHANNEL) {
+				const text = externalUserMessageText(state.data);
+				if (!text) return;
+				// Ordered with streamed updates so the row precedes the agent's reply.
+				session.updates.push({
+					sessionId: session.acpSessionId,
+					update: { sessionUpdate: "user_message_chunk", messageId: `external-user:${randomUUID()}`, content: { type: "text", text } },
+				});
+				session.updates.flush();
 				return;
 			}
 			if (state.channel === WORKSPACE_UNDO_RESULT_CHANNEL) {
