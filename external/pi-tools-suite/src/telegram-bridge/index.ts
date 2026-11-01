@@ -192,6 +192,14 @@ function registerTelegramBridge(pi: ExtensionAPI, deps: TelegramBridgeExtensionD
 		lastError = undefined;
 	});
 
+	// Received now, not when a queued follow-up is eventually consumed: it must
+	// not mark an answer produced later as already discussed. Extension-generated
+	// prompts do not imply user acknowledgment; Telegram is handled by its ack.
+	pi.on("input", (event) => {
+		if (event.source === "extension" || (!event.text.trim() && !event.images?.length)) return;
+		if (runtime && sessionId) runtime.client.send({ t: "resolve", sessionId, scope: "answer" });
+	});
+
 	pi.on("message_end", (event) => {
 		const result = assistantText(event.message);
 		if (!result) return;
@@ -210,7 +218,12 @@ function registerTelegramBridge(pi: ExtensionAPI, deps: TelegramBridgeExtensionD
 	});
 
 	pi.on("ui_prompt_start", (event) => {
-		notify("waiting", `Waiting for your answer in Pix${event.title ? `: ${event.title}` : "."}`);
+		notify("waiting", `Нужен ответ в Pix${event.title ? `: ${event.title}` : "."}`);
+	});
+
+	pi.on("ui_prompt_end", () => {
+		// SDK reports closure, not whether it was answered, cancelled or timed out.
+		if (runtime && sessionId) runtime.client.send({ t: "resolve", sessionId, scope: "waiting" });
 	});
 
 	pi.on("session_shutdown", async (event) => {

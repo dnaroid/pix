@@ -36,6 +36,7 @@ export async function runEvalCase(evalCase: EvalCase, model: string, options: Ru
 		const recorder = writeRecorder(
 			projectDir,
 			evalCase.blockTools ?? [],
+			evalCase.stopAtTools ?? [],
 		);
 		const args = [
 			"--model", model,
@@ -62,6 +63,7 @@ export async function runEvalCase(evalCase: EvalCase, model: string, options: Ru
 				PI_OFFLINE: "1",
 				NO_COLOR: "1",
 				CI: "1",
+				...isolatedGitEnvironment(projectDir),
 			},
 			stdio: ["ignore", "pipe", "pipe"],
 		});
@@ -153,6 +155,7 @@ function makeFixtureProject(fixture: EvalCase["fixture"]): string {
 export function writeRecorder(
 	projectDir: string,
 	blockTools: string[],
+	stopAtTools: string[] = [],
 ): { extensionPath: string; logPath: string } {
 	const extensionPath = path.join(projectDir, ".pi", "eval-recorder.ts");
 	const logPath = path.join(projectDir, ".pi", "eval-events.jsonl");
@@ -161,6 +164,8 @@ export function writeRecorder(
 import fs from "node:fs";
 const LOG_PATH = ${JSON.stringify(logPath)};
 const BLOCKED = new Set(${JSON.stringify(blockTools)});
+const STOP_AT = new Set(${JSON.stringify(stopAtTools)});
+let checkpoint = false;
 function safe(value) { try { JSON.stringify(value); return value ?? null; } catch { return String(value); } }
 function jsonBytes(value) {
   try { const text = JSON.stringify(value); return text === undefined ? 0 : Buffer.byteLength(text, "utf8"); }
@@ -184,7 +189,23 @@ function nativePolicy(toolName, details) {
 }
 function append(value) { fs.appendFileSync(LOG_PATH, JSON.stringify(value) + "\\n", "utf8"); }
 export default function recorder(pi) {
+  pi.on("message_end", async (event) => {
+    const message = event.message;
+    if (checkpoint || message?.role !== "assistant" || !Array.isArray(message.content)) return;
+    const calls = message.content.filter((part) => part.type === "toolCall");
+    if (!calls.some((call) => STOP_AT.has(call.name))) return;
+    checkpoint = true;
+    append({
+      type: "selection_checkpoint",
+      text: message.content.filter((part) => part.type === "text").map((part) => part.text).join("\\n"),
+      stopReason: message.stopReason,
+    });
+    // Preserve the entire selected batch: extra calls must still fail budgets,
+    // including calls whose arguments never reach the SDK tool_call hook.
+    for (const call of calls) append({ type: "tool_call", toolCallId: call.id, toolName: call.name, input: safe(call.arguments) });
+  });
   pi.on("tool_call", async (event) => {
+    if (checkpoint) return { block: true, terminate: true, reason: "Eval tool-selection boundary reached; no user answer was simulated" };
     append({ type: "tool_call", toolCallId: event.toolCallId, toolName: event.toolName, input: safe(event.input) });
     if (BLOCKED.has(event.toolName)) return { block: true, reason: event.toolName + " execution blocked by eval recorder after selection was captured; do not retry it" };
   });
@@ -223,6 +244,17 @@ export default function recorder(pi) {
 function readEvents(file: string): EvalEvent[] {
 	if (!fs.existsSync(file)) return [];
 	return fs.readFileSync(file, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as EvalEvent);
+}
+
+/** Fixtures live below the checkout; Git must never discover its parent repo. */
+export function isolatedGitEnvironment(projectDir: string): Record<string, string | undefined> {
+	return {
+		GIT_CEILING_DIRECTORIES: path.dirname(projectDir),
+		GIT_DIR: undefined,
+		GIT_WORK_TREE: undefined,
+		GIT_COMMON_DIR: undefined,
+		GIT_INDEX_FILE: undefined,
+	};
 }
 
 function snapshotFiles(root: string): Map<string, string> {

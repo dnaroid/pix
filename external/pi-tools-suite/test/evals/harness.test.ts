@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { spawnSync } from "node:child_process";
 
 import { evaluateAssertions } from "./harness/assertions.js";
 import { deriveMetrics } from "./harness/metrics.js";
 import { renderEvalReportMarkdown } from "./harness/report.js";
-import { writeRecorder } from "./harness/runner.js";
+import { isolatedGitEnvironment, writeRecorder } from "./harness/runner.js";
 import { EVAL_CASES } from "./cases.js";
 import type { EvalCase, EvalEvent, EvalReport } from "./harness/types.js";
 
@@ -43,6 +44,67 @@ describe("eval harness", () => {
 			expect(events[2].usage).toMatchObject({ totalTokens: 12, cost: 0.01 });
 		} finally {
 			fs.rmSync(projectDir, { recursive: true, force: true });
+		}
+	});
+
+	test("selection checkpoint blocks the entire batch, preserves text and counts every selected call once", async () => {
+		const artifactRoot = path.resolve(import.meta.dir, "../../../../.pi/artifacts");
+		fs.mkdirSync(artifactRoot, { recursive: true });
+		const projectDir = fs.mkdtempSync(path.join(artifactRoot, "eval-selection-"));
+		try {
+			const { extensionPath, logPath } = writeRecorder(projectDir, [], ["question"]);
+			const handlers = new Map<string, (event: Record<string, unknown>) => Promise<unknown>>();
+			const { default: recorder } = await import(extensionPath);
+			recorder({ on: (name: string, handler: (event: Record<string, unknown>) => Promise<unknown>) => handlers.set(name, handler) });
+			const calls = [
+				{ type: "toolCall", id: "c1", name: "question", arguments: { questions: [] } },
+				{ type: "toolCall", id: "c2", name: "shell", arguments: { command: "touch forbidden" } },
+			];
+			await handlers.get("message_end")!({ message: { role: "user", content: "Hello" } });
+			await handlers.get("message_end")!({ message: { role: "assistant", content: [{ type: "text", text: "Earlier" }] } });
+			expect(fs.existsSync(logPath)).toBe(false);
+			await handlers.get("message_end")!({ message: {
+				role: "assistant", stopReason: "toolUse",
+				content: [{ type: "text", text: "Choose." }, ...calls, { type: "text", text: "```pix-actions\n- Wrong duplicate\n```" }],
+			} });
+			for (const call of calls) {
+				expect(await handlers.get("tool_call")!({ toolCallId: call.id, toolName: call.name, input: call.arguments }))
+					.toMatchObject({ block: true, terminate: true });
+			}
+			await handlers.get("agent_end")!({ messages: [{ role: "assistant", usage: { totalTokens: 12 } }] });
+			const events = fs.readFileSync(logPath, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+			expect(events.map((event) => event.type)).toEqual(["selection_checkpoint", "tool_call", "tool_call", "agent_end"]);
+			expect(events[0]).toMatchObject({ text: "Choose.\n```pix-actions\n- Wrong duplicate\n```", stopReason: "toolUse" });
+			expect(events[1].input).toEqual(calls[0]!.arguments);
+			expect(events[2].toolName).toBe("shell");
+			expect(events[3].usage.totalTokens).toBe(12);
+		} finally {
+			fs.rmSync(projectDir, { recursive: true, force: true });
+		}
+	});
+
+	test("Git cannot discover the enclosing repository or inherit an explicit parent Git directory", () => {
+		const artifactRoot = path.resolve(import.meta.dir, "../../../../.pi/artifacts");
+		fs.mkdirSync(artifactRoot, { recursive: true });
+		const parent = fs.mkdtempSync(path.join(artifactRoot, "eval-git-"));
+		const projectDir = path.join(parent, "nested", "fixture");
+		fs.mkdirSync(projectDir, { recursive: true });
+		const cleanEnv = { ...process.env, ...isolatedGitEnvironment(parent) };
+		try {
+			expect(spawnSync("git", ["init", "--quiet", parent], { env: cleanEnv }).status).toBe(0);
+			const inherited = { ...process.env, GIT_DIR: path.join(parent, ".git"), GIT_WORK_TREE: parent };
+			expect(spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd: projectDir, env: inherited }).status).toBe(0);
+			const env = { ...inherited, ...isolatedGitEnvironment(projectDir) };
+			const blocked = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd: projectDir, env, encoding: "utf8" });
+			expect(blocked.status).not.toBe(0);
+			expect(blocked.stdout).toBe("");
+			// A fixture-local repository remains usable.
+			expect(spawnSync("git", ["init", "--quiet", projectDir], { env }).status).toBe(0);
+			const local = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd: projectDir, env, encoding: "utf8" });
+			expect(local.status).toBe(0);
+			expect(fs.realpathSync(local.stdout.trim())).toBe(fs.realpathSync(projectDir));
+		} finally {
+			fs.rmSync(parent, { recursive: true, force: true });
 		}
 	});
 

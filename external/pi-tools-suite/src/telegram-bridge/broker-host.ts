@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { TelegramBridgeBroker, type BrokerConnection, type BrokerState } from "./broker.js";
 import type { TelegramBridgeConfig } from "./config.js";
+import { loadNotifications } from "./notifications.js";
 import { encodeLine, LineDecoder, parseClientMessage, type BrokerMessage } from "./protocol.js";
 import { createTelegramCall, TelegramApiError, TelegramSendQueue, type TelegramCall, type TelegramUpdate } from "./telegram-api.js";
 
@@ -61,7 +62,8 @@ function loadState(file: string): BrokerState {
 			for (const [sessionId, record] of Object.entries(raw.topics)) {
 				if (record && Number.isSafeInteger(record.threadId) && typeof record.name === "string") {
 					topics[sessionId] = { threadId: record.threadId, name: record.name, closed: record.closed === true,
-						updatedAt: Number.isFinite(record.updatedAt) ? record.updatedAt : 0 };
+						updatedAt: Number.isFinite(record.updatedAt) ? record.updatedAt : 0,
+						...(record.notifications ? { notifications: loadNotifications(record.notifications) } : {}) };
 				}
 			}
 		}
@@ -224,7 +226,7 @@ export class TelegramBridgeBrokerHost {
 				const updates = await this.call<TelegramUpdate[]>("getUpdates", {
 					offset: this.state.offset,
 					timeout: this.options.pollTimeoutSeconds ?? 30,
-					allowed_updates: ["message"],
+					allowed_updates: ["message", "callback_query"],
 				}, signal);
 				failures = 0;
 				for (const update of updates) {

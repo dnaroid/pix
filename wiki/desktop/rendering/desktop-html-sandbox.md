@@ -139,11 +139,19 @@ across actual component destruction/remount or tab switching.
 
 ### Quick-choice actions
 
-Choice rule: `pix-actions` offers optional next steps after the turn's work is
-finished; the checklist is the last content of the final message, with no tool
-calls or further work after it, and the selection arrives as a new user prompt. When the
-agent needs the user's answer before it can continue, it calls the blocking
-`question` tool instead. The same choice is never offered both ways.
+Choice rule: when the assistant needs the user's answer before it can continue,
+it calls the blocking `question` tool; `pix-actions` is for optional follow-ups
+after the task is finished, not pending decisions. A `pix-actions` selection
+sends the assembled phrase into chat as a user instruction, rather than directly
+executing an operation. When asked only for a summary and optional next steps
+from supplied completed-work context, treat the request as conversational, not
+lost-context recovery or task execution: summarize only the supplied facts,
+without inspecting session history, todo state or the repository, and without
+extra tools or re-checking the work. Offering a next step is not authorization
+to start it. The same choice is never offered both ways.
+Before promising that buttons are available, verify the response actually ends
+with the complete closed `pix-actions` fence; text such as “click below” alone
+does not create buttons.
 Ending a turn with a closed `pix-actions` checklist counts as waiting on the
 user: the todo extension (`external/pi-tools-suite/src/todo/`) does not send its
 unfinished-todo auto-nudge after such a reply, just as it waits on a pending
@@ -164,8 +172,14 @@ Choose what I should do next:
 ```
 ~~~~
 
-The shared prompt explicitly forbids JSON/`label`/`prompt` output: each item
-is the complete instruction to send and its prerequisites must already hold.
+The shared prompt forbids replacing `question` with JSON action menus or adding
+a `risk` field; every question choice must include both `value` and `label`.
+Put per-choice explanations, including risks and tradeoffs, in
+`choices[].description`. For optional follow-ups, each checklist item is the
+complete instruction to send and its prerequisites must already hold. Models
+must use the fenced list syntax described here; JSON action envelopes are not
+supported.
+
 Desktop additionally tolerates legacy JSON menus as a compatibility fallback,
 not an advertised generation format: a standalone trailing array (at message
 start or after a blank line), a trailing closed `json` fence, or JSON inside a

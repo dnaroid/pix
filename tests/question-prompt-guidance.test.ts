@@ -27,3 +27,13 @@ test("question schemas keep the prompt required and describe it concisely", () =
 		assert.match(promptSchema, /background explanation in the preceding assistant message, not here/u);
 	}
 });
+
+test("choice explanations use descriptions without inventing action formats", () => {
+	for (const tool of [pix, cleanPi]) {
+		const guidance = tool.promptGuidelines.join("\n");
+		assert.match(guidance, /Put per-choice explanations, including risks and tradeoffs, in choices\[\]\.description/u);
+		assert.match(guidance, /Every choice must include both value and label/u);
+		assert.match(guidance, /do not replace question with JSON action menus or add a risk field/u);
+		assert.match(guidance, /Do not use question merely to offer optional follow-ups/u);
+	}
+});

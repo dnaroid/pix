@@ -11,7 +11,13 @@ export interface TelegramMessage {
 	text?: string;
 	caption?: string;
 }
-export interface TelegramUpdate { update_id: number; message?: TelegramMessage }
+export interface TelegramCallbackQuery {
+	id: string;
+	from: TelegramUser;
+	message?: TelegramMessage;
+	data?: string;
+}
+export interface TelegramUpdate { update_id: number; message?: TelegramMessage; callback_query?: TelegramCallbackQuery }
 export interface ForumTopic { message_thread_id: number; name: string }
 
 export class TelegramApiError extends Error {
@@ -30,6 +36,9 @@ export class TelegramApiError extends Error {
 	}
 	get topicNotModified(): boolean {
 		return this.code === 400 && /TOPIC_NOT_MODIFIED|not modified/i.test(this.description);
+	}
+	get messageNotEditable(): boolean {
+		return this.code === 400 && /message to edit not found|message can't be edited|MESSAGE_ID_INVALID/i.test(this.description);
 	}
 }
 

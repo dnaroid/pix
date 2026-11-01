@@ -177,6 +177,50 @@ or rename persistence across restarts. Raw pre-compaction history and pagination
 are covered separately by deterministic session tests; this slice does not
 certify restart persistence. One live run is not a reliability guarantee.
 
+### Choice routing
+
+`choice-routing.ts` adds seven live `choice.*` cases using the current shared
+choice prompt and question-tool schema: three questions that need per-choice
+risk/tradeoff explanations, a mutually exclusive direction, optional
+follow-ups (including an optional commit), and a user-performed manual step.
+The summary-only case treats supplied completed-work context as conversational,
+not lost-context recovery or task execution: use only supplied facts, without
+inspecting session history, todo state or the repository.
+When promising buttons, the response must end with a complete closed
+`pix-actions` fence; prose such as “click below” does not create buttons.
+The question cases call `question`; optional follow-ups use a terminal
+`pix-actions` checklist; manual completion uses plain-reply buttons. A
+question choice must include both `value` and `label`.
+`pix-actions` choice sends an assembled phrase into chat as a user message and
+does not directly execute an operation. Deterministic controls validate the
+actual question arguments, require both `value` and `label` on each choice, and
+require at least two nonempty choice descriptions in the first three cases; all
+question cases reject added `risk` fields. They
+also reject JSON action envelopes, narration-only answers, duplicate/extra tool
+work, malformed or nonterminal lists, and wrong interaction modes. Description
+semantic accuracy is a manual-review question, not a deterministic assertion.
+
+Run the focused deterministic controls and filtered live slice from the suite
+package (`external/pi-tools-suite`):
+
+```bash
+npm run test:evals:choices
+PI_TOOLS_SUITE_EVAL_MODELS=zai/glm-5.3-flash \
+PI_TOOLS_SUITE_EVAL_CASES=choice.mixed-risk-report,choice.risk-descriptions,choice.tradeoff-descriptions,choice.exclusive-direction,choice.optional-followups,choice.optional-commit,choice.manual-step \
+PI_TOOLS_SUITE_EVAL_KEEP=1 npm run evals:report
+```
+
+The runner stops at the assistant message containing a selected `question`,
+records its text/stop reason and every tool call in that message batch, then
+blocks execution and terminates the run. These cases check selection and
+argument validity without exercising the real UI, simulating a question error,
+or supplying user answers. Validators reject truncated selection checkpoints
+and still enforce tool-call budgets across the full batch. This
+does not establish normal pending-question behavior in a real host.
+Renderer/parser behavior is not changed by this routing guidance and
+does not support JSON action envelopes. A live model result is an observation,
+not a statistical reliability guarantee.
+
 ## Framework responsibilities
 
 Live cases define behavioral scenarios and machine-checkable assertions. A
@@ -443,6 +487,9 @@ For each `(case, model)` pair the runner:
 
 The subprocess disables unrelated extension/skill/template/theme discovery so
 the case measures this suite rather than ambient user configuration.
+Its Git environment sets `GIT_CEILING_DIRECTORIES` to the fixture parent and
+clears inherited `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, and `GIT_INDEX_FILE`.
+Git cannot discover the enclosing checkout; fixture-local repositories still work.
 
 ### Recorded-but-blocked tools
 
@@ -457,6 +504,12 @@ Examples:
 
 This keeps selection evals focused and prevents nested model calls from making a
 simple routing case unnecessarily expensive.
+
+For terminal tool-selection checkpoints, opt into `stopAtTools` instead. The
+recorder captures assistant text, stop reason, and the entire selected tool
+batch at `message_end`, then blocks execution with `terminate: true`. Extra calls
+remain visible to budgets; no synthetic error is returned to the model for a
+recovery turn. Existing `blockTools` cases retain their continuation behavior.
 
 ## Assertions
 

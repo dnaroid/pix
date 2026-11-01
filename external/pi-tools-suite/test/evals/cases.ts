@@ -4,6 +4,7 @@ import { SESSION_EVAL_CASES } from "./session-cases.js";
 import { TODO_CONCISENESS_CASES } from "./todo-conciseness.js";
 import { DELEGATION_POLICY_CASES } from "./delegation-policy.js";
 import { PLAN_GUIDANCE_CASES } from "./plan-guidance.js";
+import { CHOICE_ROUTING_CASES } from "./choice-routing.js";
 
 const DIRECT_TOOLS = ["read", "Read", "grep", "Grep", "find", "Glob", "bash", "Bash", "shell", "shell_command"];
 const MUTATION_TOOLS = ["edit", "Edit", "write", "Write", "apply_patch", "ast_apply"];
@@ -11,6 +12,7 @@ const NO_ORCHESTRATION = ["subagents", "async_subagents_spawn"];
 const REPO_SEMANTIC_TOOLS = ["project_search"];
 
 export const EVAL_CASES: EvalCase[] = [
+	...CHOICE_ROUTING_CASES,
 	...DECISION_POLICY_CASES,
 	...SESSION_EVAL_CASES,
 	...TODO_CONCISENESS_CASES,

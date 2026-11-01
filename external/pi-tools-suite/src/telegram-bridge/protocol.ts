@@ -8,12 +8,14 @@ export const MAX_LINE_BYTES = 1024 * 1024;
 export const MAX_NOTIFY_TEXT = 200_000;
 
 export type NotifyKind = "final" | "waiting" | "aborted" | "error";
+export type ResolveScope = "answer" | "waiting";
 
 export type ClientMessage =
 	| { t: "register"; sessionId: string; project: string; cwd: string; title?: string }
 	| { t: "rename"; sessionId: string; title: string }
 	| { t: "unregister"; sessionId: string }
 	| { t: "notify"; sessionId: string; kind: NotifyKind; text: string }
+	| { t: "resolve"; sessionId: string; scope: ResolveScope }
 	| { t: "ack"; sessionId: string; requestId: string; ok: boolean; error?: string };
 
 export type BrokerMessage =
@@ -43,6 +45,8 @@ export function parseClientMessage(value: unknown): ClientMessage | undefined {
 		case "notify":
 			return NOTIFY_KINDS.has(m.kind as NotifyKind) && str(m.text, MAX_NOTIFY_TEXT)
 				? { t: "notify", sessionId, kind: m.kind as NotifyKind, text: m.text } : undefined;
+		case "resolve":
+			return m.scope === "answer" || m.scope === "waiting" ? { t: "resolve", sessionId, scope: m.scope } : undefined;
 		case "ack":
 			if (!str(m.requestId, 128) || typeof m.ok !== "boolean" || (m.error !== undefined && !str(m.error, 2000))) return undefined;
 			return { t: "ack", sessionId, requestId: m.requestId, ok: m.ok, ...(m.error !== undefined ? { error: m.error } : {}) };

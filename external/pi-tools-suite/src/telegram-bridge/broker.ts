@@ -1,5 +1,7 @@
-import { MAX_INLINE_CHUNKS, notifyPrefix, parseCommand, projectIconColor, splitMessage, topicLink, topicName } from "./format.js";
-import type { BrokerMessage, ClientMessage } from "./protocol.js";
+import { parseCommand, projectIconColor, splitMessage, topicLink, topicName } from "./format.js";
+import { menuCommand, menuKeyboard, type InlineKeyboard } from "./menu.js";
+import { deliverNotification, resolveNotifications, type NotificationContext, type NotificationRecord } from "./notifications.js";
+import type { BrokerMessage, ClientMessage, NotifyKind, ResolveScope } from "./protocol.js";
 import { TelegramApiError, type ForumTopic, type TelegramMessage, type TelegramUpdate } from "./telegram-api.js";
 
 export interface BrokerConnection {
@@ -11,6 +13,7 @@ export interface TopicRecord {
 	name: string;
 	closed: boolean;
 	updatedAt: number;
+	notifications?: NotificationRecord[];
 }
 
 export interface BrokerState {
@@ -47,6 +50,10 @@ interface LiveSession {
 }
 
 interface PendingRequest {
+	sessionId: string;
+	connection: BrokerConnection;
+	responds: boolean;
+	through: number;
 	chatId: number;
 	threadId: number;
 	messageId: number;
@@ -63,7 +70,7 @@ const HELP = [
 	"/stop – stop the current run",
 	"/status – session state",
 	"",
-	"Anywhere: /sessions – running sessions by project, /id – chat and user ids.",
+	"Anywhere: /menu – control buttons, /sessions – running sessions by project, /id – chat and user ids.",
 ].join("\n");
 
 function errorType(error: unknown): string {
@@ -93,6 +100,10 @@ export class TelegramBridgeBroker {
 		this.clearTimer = deps.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
 		this.report = deps.report ?? (() => {});
 		this.adoptChat();
+		// Preserve ordering of persisted notices across broker takeovers.
+		for (const topic of Object.values(deps.state.topics)) {
+			for (const notice of topic.notifications ?? []) this.sequence = Math.max(this.sequence, notice.generation);
+		}
 	}
 
 	/**
@@ -165,15 +176,28 @@ export class TelegramBridgeBroker {
 			case "notify": {
 				const session = this.sessions.get(message.sessionId);
 				if (!session || session.connection !== connection) return;
-				const text = `${notifyPrefix(message.kind)}${message.text}`;
-				this.serial(message.sessionId, () => this.deliver(message.sessionId, text));
+				const generation = ++this.sequence;
+				const chatId = this.deps.chatId;
+				const topics = this.deps.state.topics;
+				this.serial(message.sessionId, async () => {
+					if (this.deps.chatId !== chatId || this.deps.state.topics !== topics) return;
+					await this.deliver(message.sessionId, message.kind, message.text, generation);
+				});
+				return;
+			}
+			case "resolve": {
+				const session = this.sessions.get(message.sessionId);
+				if (!session || session.connection !== connection) return;
+				this.resolve(message.sessionId, message.scope, this.sequence);
 				return;
 			}
 			case "ack": {
 				const request = this.pending.get(message.requestId);
-				if (!request) return;
+				if (!request || request.sessionId !== message.sessionId || request.connection !== connection
+					|| this.sessions.get(message.sessionId)?.connection !== connection) return;
 				this.pending.delete(message.requestId);
 				if (message.ok) {
+					if (request.responds) this.resolve(message.sessionId, "answer", request.through);
 					void this.deps.send("setMessageReaction", {
 						chat_id: request.chatId,
 						message_id: request.messageId,
@@ -198,6 +222,22 @@ export class TelegramBridgeBroker {
 
 	handleUpdate(update: TelegramUpdate): void {
 		if (this.disposed) return;
+		if (update.callback_query) {
+			const query = update.callback_query;
+			// Always dismiss the spinner, including for stale/unsupported buttons.
+			void this.deps.send("answerCallbackQuery", { callback_query_id: query.id }).catch((error: unknown) => {
+				this.report("warn", "telegram-call-failed", { errorType: errorType(error) });
+			});
+			const command = menuCommand(query.data);
+			if (!command || !query.message || query.message.message_id === 0) return;
+			// Reuse the message authorization and current topic→session routing.
+			// The actor is the clicking user, never the bot that authored the menu.
+			this.handleUpdate({
+				update_id: update.update_id,
+				message: { ...query.message, from: query.from, text: `/${command}` },
+			});
+			return;
+		}
 		const message = update.message;
 		if (!message?.from || message.from.is_bot) return;
 		const text = (message.text ?? message.caption ?? "").trim();
@@ -233,6 +273,12 @@ export class TelegramBridgeBroker {
 	): void {
 		const chatId = message.chat.id;
 		const sessionId = threadId === undefined ? undefined : this.sessionForThread(threadId);
+		if (command?.command === "menu") {
+			void this.reply(chatId, threadId, message.message_id,
+				sessionId ? "Pix session controls" : "Pix menu — open a session topic to check its status or stop its run.",
+				menuKeyboard(sessionId !== undefined));
+			return;
+		}
 		if (command?.command === "sessions") {
 			void this.reply(chatId, threadId, message.message_id, this.sessionsOverview());
 			return;
@@ -261,7 +307,8 @@ export class TelegramBridgeBroker {
 			return;
 		}
 		const requestId = `${this.now().toString(36)}-${(++this.sequence).toString(36)}${this.deps.randomId?.() ?? ""}`;
-		this.pending.set(requestId, { chatId, threadId: threadId!, messageId: message.message_id });
+		this.pending.set(requestId, { sessionId, connection: live.connection, responds: command?.command !== "stop",
+			through: this.sequence, chatId, threadId: threadId!, messageId: message.message_id });
 		while (this.pending.size > MAX_PENDING) this.pending.delete(this.pending.keys().next().value!);
 		try {
 			live.connection.send(command?.command === "stop"
@@ -319,6 +366,8 @@ export class TelegramBridgeBroker {
 
 	private async ensureTopic(sessionId: string): Promise<number | undefined> {
 		const chatId = this.deps.chatId;
+		const topics = this.deps.state.topics;
+		const isCurrent = () => !this.disposed && this.deps.chatId === chatId && this.deps.state.topics === topics;
 		const session = this.sessions.get(sessionId);
 		if (chatId === undefined || !session) return this.deps.state.topics[sessionId]?.threadId;
 		const name = topicName(session.project, session.title);
@@ -327,21 +376,25 @@ export class TelegramBridgeBroker {
 			try {
 				if (record.closed) {
 					await this.ignoreNotModified(this.deps.send("reopenForumTopic", { chat_id: chatId, message_thread_id: record.threadId }));
+					if (!isCurrent()) return undefined;
 					record.closed = false;
 				}
 				if (record.name !== name) {
 					await this.ignoreNotModified(this.deps.send("editForumTopic", { chat_id: chatId, message_thread_id: record.threadId, name }));
+					if (!isCurrent()) return undefined;
 					record.name = name;
 				}
 				record.updatedAt = this.now();
 				this.deps.saveState();
 				return record.threadId;
 			} catch (error) {
+				if (!isCurrent()) return undefined;
 				if (!(error instanceof TelegramApiError && error.threadMissing)) throw error;
 				delete this.deps.state.topics[sessionId];
 			}
 		}
 		const topic = await this.deps.send<ForumTopic>("createForumTopic", { chat_id: chatId, name, icon_color: projectIconColor(session.cwd) });
+		if (!isCurrent()) return undefined;
 		this.deps.state.topics[sessionId] = { threadId: topic.message_thread_id, name, closed: false, updatedAt: this.now() };
 		this.pruneTopics();
 		this.deps.saveState();
@@ -356,44 +409,55 @@ export class TelegramBridgeBroker {
 		}
 	}
 
-	private async deliver(sessionId: string, text: string): Promise<void> {
+	private async deliver(sessionId: string, kind: NotifyKind, text: string, generation: number): Promise<void> {
 		const chatId = this.deps.chatId;
 		if (chatId === undefined) return;
 		for (let attempt = 0; attempt < 2; attempt++) {
 			const threadId = await this.ensureTopic(sessionId);
-			if (threadId === undefined) return;
+			if (threadId === undefined || this.disposed || this.deps.chatId !== chatId) return;
+			const context = this.notificationContext(sessionId);
+			if (!context) return;
 			try {
-				await this.sendText(chatId, threadId, text);
+				await deliverNotification(context, kind, text, generation);
 				return;
 			} catch (error) {
 				// The topic was deleted by hand: forget it and recreate once.
+				if (!context.isCurrent()) return;
 				if (attempt > 0 || !(error instanceof TelegramApiError && error.threadMissing)) throw error;
 				delete this.deps.state.topics[sessionId];
 			}
 		}
 	}
 
-	private async sendText(chatId: number, threadId: number, text: string): Promise<void> {
-		const chunks = splitMessage(text);
-		if (chunks.length <= MAX_INLINE_CHUNKS) {
-			for (const chunk of chunks) await this.deps.send("sendMessage", { chat_id: chatId, message_thread_id: threadId, text: chunk });
-			return;
-		}
-		await this.deps.send("sendMessage", { chat_id: chatId, message_thread_id: threadId, text: `${chunks[0]}\n\n… (full answer attached)` });
-		await this.deps.send("sendDocument", {
-			chat_id: chatId,
-			message_thread_id: threadId,
-			document: new Blob([text], { type: "text/markdown" }),
+	private notificationContext(sessionId: string): NotificationContext | undefined {
+		const chatId = this.deps.chatId;
+		const topic = this.deps.state.topics[sessionId];
+		if (chatId === undefined || !topic) return undefined;
+		return {
+			chatId, topic, send: this.deps.send, save: this.deps.saveState,
+			isCurrent: () => !this.disposed && this.deps.chatId === chatId && this.deps.state.topics[sessionId] === topic,
+			warn: (event, error) => this.report("warn", event, { errorType: errorType(error) }),
+		};
+	}
+
+	private resolve(sessionId: string, scope: ResolveScope, through: number): void {
+		// Capture chat identity now, and the notices only after prior sends finish.
+		const chatId = this.deps.chatId;
+		this.serial(sessionId, async () => {
+			if (chatId !== this.deps.chatId) return;
+			const context = this.notificationContext(sessionId);
+			if (context) await resolveNotifications(context, scope, through);
 		});
 	}
 
-	private async reply(chatId: number, threadId: number | undefined, messageId: number, text: string): Promise<void> {
+	private async reply(chatId: number, threadId: number | undefined, messageId: number, text: string, keyboard?: InlineKeyboard): Promise<void> {
 		try {
 			await this.deps.send("sendMessage", {
 				chat_id: chatId,
 				...(threadId !== undefined ? { message_thread_id: threadId } : {}),
 				text: splitMessage(text)[0],
 				reply_parameters: { message_id: messageId, allow_sending_without_reply: true },
+				...(keyboard ? { reply_markup: keyboard } : {}),
 			});
 		} catch (error) {
 			this.report("warn", "telegram-call-failed", { errorType: errorType(error) });

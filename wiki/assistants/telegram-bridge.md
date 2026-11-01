@@ -141,8 +141,9 @@ The Mac must be awake and Pix running; nothing is hosted elsewhere.
 
 - One forum topic per session, named `<project folder> · <session title>`
   (`new session` until titled) and renamed when the session title changes.
-  Topics of the same project share an icon color, so several open projects
-  stay visually grouped.
+  Existing topics are renamed to this form on registration/reload or the next
+  topic ensure. Topics of the same project share an icon color, so several open
+  projects stay visually grouped.
 - The session→topic map persists in `state.json`; reopening a session reopens
   and reuses its topic. A topic deleted by hand is recreated on the next
   message.
@@ -155,11 +156,34 @@ The Mac must be awake and Pix running; nothing is hosted elsewhere.
 - After each settled agent run: the final assistant text (`✅`), or the
   provider error (`⚠️`), or `⏹ Stopped.` for an aborted run. Intermediate
   messages, thinking and tool output are not forwarded.
-- `❓ Waiting for your answer in Pix` when the session blocks on a dialog;
-  dialogs themselves are answered in Desktop.
+- A Desktop/TUI user input resolves recent answer, error and abort notices in
+  that session, removing their inline keyboards and preserving their bodies.
+  Final-answer notices become `☑️ Ответ получен · обсуждение продолжено`;
+  error and abort notices become `☑️ Обсуждение продолжено`. Automatic
+  extension-generated input does not resolve notices. An authorized Telegram
+  text prompt resolves only notices that existed when it was submitted, and
+  only after the session accepts it; `/stop`, rejected prompts and menu clicks
+  do not count as answers.
+- A dialog prompt appears as `❓ Ожидает ответа`. When it closes, its notice is
+  edited to `☑️ Диалог закрыт`; the SDK does not distinguish an answer from
+  cancellation or timeout, so this does not claim it was answered or that a
+  task completed. Dialogs themselves are answered in Desktop.
 - Text is redacted with the credential-firewall `SecretRedactor` before it
-  leaves the session process. Answers longer than three messages are sent as
-  the first part plus an `answer.md` document.
+  leaves the session process. Ordinary Markdown is converted to supported
+  Telegram HTML, split into bounded balanced chunks, with a plaintext fallback
+  if Telegram rejects entities. Service `pix-actions` and `pix-html` fences
+  are removed (including from long-answer document attachments); they do not
+  generate action keyboards. Answers longer than three messages are sent as
+  the first part plus a cleaned Markdown `answer.md` document.
+- The broker persists pending notification message IDs and redacted rendered
+  bodies in `state.json` (up to 12 recent messages per topic), allowing edits
+  after broker takeover. Notices sent before this tracking was introduced
+  cannot be edited retroactively.
+- A deleted or otherwise uneditable Telegram message is logged and dropped
+  from pending metadata; transient edit failures retain metadata for a later
+  resolve retry. A send or pending Telegram acknowledgment crossing broker
+  teardown/takeover may leave a notice without an updated status; a disposed
+  broker never saves stale state.
 
 ### From Telegram to Pix
 
@@ -168,9 +192,18 @@ The Mac must be awake and Pix running; nothing is hosted elsewhere.
   running. The bot reacts with 👀 once the session accepted it. In Desktop the
   message appears immediately as a user row (ACP channel
   `telegram-bridge:inbound` → `user_message_chunk`).
-- `/stop` aborts the current run, `/status` shows whether the session runs,
-  `/sessions` (anywhere) lists running sessions grouped by project with topic
-  links, `/help` and `/id` are informational.
+- `/menu` (also `/menu@BotName`) in any authorized chat message in the configured
+  forum replies with inline **Sessions** and **Help** buttons. In a linked
+  session topic it also offers **Status** and **Stop**. `/sessions` (anywhere)
+  lists running sessions grouped by project with topic links; `/stop` aborts
+  the topic's current run, `/status` shows its session state, and `/help` and
+  `/id` are informational.
+- Menu callbacks are polled like messages and use the clicking user's and
+  message's chat authorization, then current topic-to-session routing. Stale
+  or offline topics cannot send prompts; only the fixed menu actions are
+  accepted as callbacks.
+- `/menu` buttons are navigation/control UI, not user text prompts, and do
+  not resolve prior answer notices.
 - Messages from users outside `allowedUserIds`, from other chats, from bots
   and non-text messages are not delivered. A message to a session that is not
   running gets a reply saying so.

@@ -25,7 +25,7 @@ export function projectIconColor(cwd: string): number {
 
 const PREFIX: Record<NotifyKind, string> = {
 	final: "✅ ",
-	waiting: "❓ ",
+	waiting: "❓ Ожидает ответа\n\n",
 	aborted: "⏹ ",
 	error: "⚠️ ",
 };

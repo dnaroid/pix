@@ -69,6 +69,15 @@ describe("pix-actions contract", () => {
 		assert.ok(guidance.split(/\s+/).length <= 22);
 	});
 
+	it("does not re-open supplied completed work merely to offer optional next steps", () => {
+		assert.ok(CHOICE_ACTIONS_CAPABILITY.includes("from supplied completed-work context"));
+		assert.ok(CHOICE_ACTIONS_CAPABILITY.includes("without extra tool calls or re-checking the work"));
+		assert.ok(CHOICE_ACTIONS_CAPABILITY.includes("not lost-context recovery or task execution"));
+		assert.ok(CHOICE_ACTIONS_CAPABILITY.includes("do not inspect session history, todo state, or the repository"));
+		assert.ok(CHOICE_ACTIONS_CAPABILITY.includes("Summarize only supplied facts"));
+		assert.ok(CHOICE_ACTIONS_CAPABILITY.includes("offering a next step is not authorization to start it"));
+	});
+
 	it("rejects a standalone button label in the body instead of treating it as an action", () => {
 		assert.equal(lastChoiceActions("```pix-actions\nУпростить\n- [x] Убрать дублирующую маршрутизацию к скиллам из AGENTS.md\n```"), undefined);
 		assert.equal(lastChoiceActions("```pix-actions Упростить\n- [x] Убрать дублирующую маршрутизацию к скиллам из AGENTS.md\n```")?.submitLabel, "Упростить");
@@ -94,6 +103,7 @@ describe("pix-actions contract", () => {
 		assert.equal(latestRunChoiceActions([{ role: "assistant", content: block }, { role: "user", content: "x" }, { role: "assistant", content: "plain" }]), undefined);
 		assert.ok(CHOICE_ACTIONS_CAPABILITY.includes("no tool calls or further work after it"));
 		assert.ok(CHOICE_ACTIONS_CAPABILITY.includes("one-click reply button"));
+		assert.ok(CHOICE_ACTIONS_CAPABILITY.includes("verify it actually ends with the complete closed pix-actions fence"));
 	});
 });
 

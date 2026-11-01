@@ -1,5 +1,6 @@
 import { SESSION_EVAL_CASES } from "./session-cases.js";
 import { TODO_CONCISENESS_CASES } from "./todo-conciseness.js";
+import { CHOICE_ROUTING_CASES } from "./choice-routing.js";
 
 const SESSION_LIVE_IDS = SESSION_EVAL_CASES.map((evalCase) => evalCase.id);
 const TODO_CONCISE_IDS = TODO_CONCISENESS_CASES.map((evalCase) => evalCase.id);
@@ -22,7 +23,7 @@ export const EXTENSION_EVAL_COVERAGE: Record<string, EvalCoverageEntry> = {
 	"project-tasks": { deterministic: ["test/project-tasks.test.ts"] },
 	"antigravity-auth": { deterministic: ["test/antigravity-auth.test.ts"] },
 	"opencode-import": { deterministic: ["test/opencode-import.test.ts"] },
-	"question": { deterministic: ["test/native-pi-tui.test.ts"] },
+	"question": { deterministic: ["test/native-pi-tui.test.ts", "test/evals/choice-routing.test.ts"], live: CHOICE_ROUTING_CASES.map((evalCase) => evalCase.id) },
 	"todo": { deterministic: ["test/todo.test.ts", "test/todo-persistence-e2e.test.ts", "test/evals/todo-conciseness.test.ts"], live: ["tool.todo-plan", ...TODO_CONCISE_IDS, "negative.trivial-chat-no-tools"] },
 	"model-tools": { deterministic: ["test/model-tools.test.ts"], live: ["tool.exact-literal-direct", "negative.small-known-edit-no-plan"] },
 	"usage": { deterministic: ["test/evals/extension-contracts.test.ts"] },

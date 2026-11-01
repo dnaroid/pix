@@ -183,6 +183,8 @@ describe("telegram-bridge protocol and formatting", () => {
 	test("names topics per project and session and colors them per project", () => {
 		expect(topicName("pix", "Fix scrolling")).toBe("pix · Fix scrolling");
 		expect(topicName("pix", undefined)).toBe("pix · new session");
+		expect(topicName("pix", " \n ")).toBe("pix · new session");
+		expect(topicName("pix", " Fix\n scrolling ")).toBe("pix · Fix scrolling");
 		expect(topicName("p", "x".repeat(300)).length).toBe(128);
 		expect(projectIconColor("/work/pix")).toBe(projectIconColor("/work/pix"));
 		expect(TOPIC_ICON_COLORS).toContain(projectIconColor("/work/api") as never);
@@ -415,6 +417,35 @@ describe("telegram-bridge host and client", () => {
 	const silentCall = async <T>(method: string, params: Record<string, unknown>): Promise<T> =>
 		(method === "createForumTopic" ? { message_thread_id: 7, name: params.name } : true) as T;
 
+	test("polling subscribes to menu callbacks and dispatches them", async () => {
+		const calls: Call[] = [];
+		let delivered = false;
+		const host = await TelegramBridgeBrokerHost.tryAcquire(hostConfig(tempDir()), {
+			call: async <T>(method: string, params: Record<string, unknown>, signal?: AbortSignal): Promise<T> => {
+				calls.push({ method, params });
+				if (method !== "getUpdates") return true as T;
+				if (!delivered) {
+					delivered = true;
+					return [{ update_id: 1, callback_query: {
+						id: "menu-click", from: { id: USER }, data: "pix:menu:sessions",
+						message: topicMessage(undefined, "Pix menu").message!,
+					} }] as T;
+				}
+				await new Promise<void>((resolve) => {
+					if (signal?.aborted) resolve();
+					else signal?.addEventListener("abort", () => resolve(), { once: true });
+				});
+				return [] as T;
+			},
+		});
+		expect(host).toBeDefined();
+		hosts.push(host!);
+		await until(() => calls.some((call) => call.method === "sendMessage"), "menu callback reply");
+		expect(calls.find((call) => call.method === "getUpdates")!.params.allowed_updates).toEqual(["message", "callback_query"]);
+		expect(calls.find((call) => call.method === "answerCallbackQuery")!.params).toEqual({ callback_query_id: "menu-click" });
+		expect(calls.find((call) => call.method === "sendMessage")!.params.text).toBe("No Pix sessions are running.");
+	});
+
 	test("the lock admits one live owner and reclaims a dead one", () => {
 		const dir = tempDir();
 		const file = join(dir, "broker.lock");
@@ -422,6 +453,34 @@ describe("telegram-bridge host and client", () => {
 		expect(acquireLock(file, 222, () => true)).toBe(false);
 		expect(acquireLock(file, 222, (pid) => pid !== 111)).toBe(true);
 		expect(readFileSync(file, "utf8")).toBe("222");
+	});
+
+	test("reloads pending notification metadata from disk and edits it after takeover", async () => {
+		const dir = tempDir();
+		const config = hostConfig(dir);
+		const telegram = fakeTelegram();
+		const call = async <T>(method: string, params: Record<string, unknown>): Promise<T> => {
+			if (method === "sendMessage") return { message_id: 83 } as T;
+			return telegram.send<T>(method, params);
+		};
+		const first = await TelegramBridgeBrokerHost.tryAcquire(config, { call, poll: false, pid: 7001 });
+		expect(first).toBeDefined();
+		hosts.push(first!);
+		const owner = connection();
+		first!.broker.handleClientMessage(owner, register("s1", "/work/pix"));
+		first!.broker.handleClientMessage(owner, { t: "notify", sessionId: "s1", kind: "final", text: "**Remember**" });
+		await first!.broker.idle();
+		await first!.dispose();
+		expect(JSON.parse(readFileSync(join(dir, "state.json"), "utf8")).topics.s1.notifications[0])
+			.toMatchObject({ messageId: 83, body: "<b>Remember</b>", parseMode: "HTML" });
+		const second = await TelegramBridgeBrokerHost.tryAcquire(config, { call, poll: false, pid: 7002 });
+		expect(second).toBeDefined();
+		hosts.push(second!);
+		second!.broker.handleClientMessage(owner, register("s1", "/work/pix"));
+		second!.broker.handleClientMessage(owner, { t: "resolve", sessionId: "s1", scope: "answer" });
+		await second!.broker.idle();
+		expect(telegram.calls.find((entry) => entry.method === "editMessageText")!.params)
+			.toMatchObject({ chat_id: CHAT, message_id: 83, text: "☑️ Ответ получен · обсуждение продолжено\n\n<b>Remember</b>" });
 	});
 
 	test.skipIf(process.platform === "win32")("a surviving session takes over when the broker process goes away", async () => {
@@ -593,6 +652,32 @@ describe("telegram-bridge extension", () => {
 			if (previous === undefined) delete process.env.PIX_ACP_SESSION_STATE_BRIDGE;
 			else process.env.PIX_ACP_SESSION_STATE_BRIDGE = previous;
 		}
+	});
+
+	test("Desktop input resolves answers immediately, but automatic extension input does not", () => {
+		const h = harness();
+		h.emit("session_start");
+		h.emit("input", { source: "extension", text: "automatic follow-up" });
+		h.emit("input", { source: "rpc", text: " " });
+		expect(h.sent.filter((message) => message.t === "resolve")).toHaveLength(0);
+		h.emit("input", { source: "rpc", text: "Продолжить" });
+		h.emit("input", { source: "interactive", text: "", images: [{}] });
+		expect(h.sent.filter((message) => message.t === "resolve")).toEqual([
+			{ t: "resolve", sessionId: "s1", scope: "answer" },
+			{ t: "resolve", sessionId: "s1", scope: "answer" },
+		]);
+		h.emit("session_shutdown", { reason: "switch" });
+		h.emit("input", { source: "rpc", text: "late" });
+		expect(h.sent.filter((message) => message.t === "resolve")).toHaveLength(2);
+	});
+
+	test("prompt closure resolves only the waiting notice, without claiming an answer", () => {
+		const h = harness();
+		h.emit("session_start");
+		h.emit("ui_prompt_start", { kind: "select", title: "Выбор" });
+		expect(h.sent.at(-1)).toMatchObject({ t: "notify", kind: "waiting", text: "Нужен ответ в Pix: Выбор" });
+		h.emit("ui_prompt_end", { kind: "select", title: "Выбор" });
+		expect(h.sent.at(-1)).toEqual({ t: "resolve", sessionId: "s1", scope: "waiting" });
 	});
 
 	test("/telegram creates the credentials template, then activates without a reload", async () => {

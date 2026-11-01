@@ -1,7 +1,10 @@
 export type EvalCategory = "tool-selection" | "coding-quality" | "orchestration" | "negative";
 
 export type EvalEvent = {
-	type: "tool_call" | "tool_result" | "agent_end";
+	type: "tool_call" | "tool_result" | "agent_end" | "selection_checkpoint";
+	/** Assistant text at a terminal tool-selection boundary, before any simulated response. */
+	text?: string;
+	stopReason?: string;
 	toolCallId?: string;
 	toolName?: string;
 	input?: unknown;
@@ -69,6 +72,8 @@ export type EvalCase = {
 	appendSystemPrompt?: string;
 	fixture: "demo" | "coding-hypotheses" | "coding-regression" | "coding-async" | "decision-policy" | "plan-guidance";
 	blockTools?: string[];
+	/** End at tool selection, without returning a synthetic error to the model. */
+	stopAtTools?: string[];
 	models?: RegExp[];
 	env?: Record<string, string>;
 	assert: EvalAssertionSpec;
