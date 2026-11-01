@@ -36,6 +36,7 @@
     projectPiStorageError,
     actionId,
     remoteBusy,
+    storageBusy = false,
     onInitializeProject,
     onCleanProject,
     onAction,
@@ -51,6 +52,7 @@
     projectPiStorageError: string | null;
     actionId: string | null;
     remoteBusy: boolean;
+    storageBusy?: boolean;
     onInitializeProject: () => void;
     onCleanProject: () => void;
     onAction: (request: RegistryActionRequest, actionId: string) => void;
@@ -114,14 +116,14 @@
 
   async function cleanProjectPi(): Promise<void> {
     menuOpen = false;
-    if (actionId !== null || projectPiStorageLoading || projectPiStorageError || !projectPiCleanupAvailable) return;
+    if (storageBusy || actionId !== null || projectPiStorageLoading || projectPiStorageError || !projectPiCleanupAvailable) return;
     const requestSnapshot = snapshot, requestedBytes = projectPiCleanupBytes;
     const confirmed = await confirmDesktopDeletion(
       `Clean ${formatPiSize(projectPiCleanupBytes)} from .pi? This clears all contents of artifacts/ and subagents/ and removes non-canonical top-level files and directories. Canonical project state, config, agents/, plans/, skills/ and task-attachments/ are preserved.`,
       { title: "Clean project data?", okLabel: "Clean" },
     );
     if (confirmed && snapshot === requestSnapshot && projectPiCleanupBytes === requestedBytes
-      && actionId === null && !projectPiStorageLoading
+      && !storageBusy && actionId === null && !projectPiStorageLoading
       && !projectPiStorageError && projectPiCleanupAvailable) onCleanProject();
   }
 
@@ -148,7 +150,7 @@
       <button
         class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border bg-panel-strong px-2 text-xs font-medium text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
         type="button"
-        disabled={actionId !== null}
+        disabled={storageBusy || actionId !== null}
         onclick={onInitializeProject}
       >
         {#if actionId === "initialize-project"}
@@ -198,7 +200,7 @@
               role="menuitem"
               type="button"
               class="flex min-h-7 w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-xs text-tool-error hover:bg-tool-error/10 disabled:opacity-40"
-              disabled={actionId !== null || projectPiStorageLoading || Boolean(projectPiStorageError) || !projectPiCleanupAvailable}
+              disabled={storageBusy || actionId !== null || projectPiStorageLoading || Boolean(projectPiStorageError) || !projectPiCleanupAvailable}
               onclick={cleanProjectPi}
             >
               {#if actionId === "cleanup-project"}

@@ -40,6 +40,8 @@
     remove: Trash2,
   } satisfies Record<RegistryItemAction, typeof Upload>;
   const busy = $derived(remoteDisabled || actionId !== null);
+  const menuIdentity = $derived(JSON.stringify([item.id, item.name, item.publicationScope,
+    actions.secondary, actions.secondary.map((action) => registryFriendlyActionLabel(item, action)), busy, projectKey]));
   const setupHint = 'Project visibility needs a project key first — set one with "Set project key" in the Project sync section.';
   let open = $state(false);
   let trigger = $state<HTMLButtonElement | null>(null);
@@ -115,8 +117,8 @@
     return { destroy: () => node.remove() };
   }
   $effect(() => {
-    // A refreshed snapshot/changed availability must not leave stale commands open.
-    item; busy; projectKey;
+    // Equivalent poll snapshots keep the menu open; changed commands do not.
+    menuIdentity;
     close();
   });
   $effect(() => {

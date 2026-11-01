@@ -138,9 +138,17 @@ JSONC/task overlay import or fallback.
     ACP executes filesystem/Git operations directly in its Registry service.
     No Pi runtime or conversation session is created, loaded, or required. A
     blocked sync remains pending and retries on a short idle cadence instead of
-    dropping dirty state. While the actual background Registry RPC is in flight,
-    Registry-panel actions are locally disabled so a manual Registry command
-    cannot overlap it; unrelated Desktop UI remains available.
+    dropping dirty state. Background project sync and resource auto-push do not
+    occupy the foreground Registry action slot, so resource-menu commands remain
+    available. Selecting one reserves that slot and waits for the current
+    background RPC to settle (including failure), preventing another automatic
+    batch from starting in the meantime. The queued command proceeds only if its
+    workspace/client generation, publication target/scope and action availability
+    are still current. A stale workspace/client completion is discarded; changed
+    publication targets or unavailable actions report an error requiring reselection.
+    Reset cancels/releases the waiter. Duplicate foreground selections remain
+    blocked. Project initialization and cleanup remain disabled during background
+    sync; unrelated Desktop UI stays available.
 11. Dirty state is removed from the current batch before an RPC starts. If the
     same or another artifact changes while that RPC is in flight, the new dirty
     state survives and starts another debounced pass after the current pass

@@ -36,6 +36,8 @@ export function createRegistryStore(options: RegistryStoreOptions) {
   let diff = $state<RegistryDiffState | undefined>(undefined);
   let diffGeneration = 0;
   let lifecycleGeneration = 0;
+  let releaseWaitingAction: (() => void) | undefined;
+  let waitingForSync = $state(false);
   let backgroundSyncState = $state<RegistryBackgroundSyncState>({
     phase: "idle",
     dirtyScopes: [],
@@ -69,7 +71,7 @@ export function createRegistryStore(options: RegistryStoreOptions) {
         if (next.error) throw new Error(next.error);
       }
     },
-    onChange: (state) => { backgroundSyncState = state; },
+    onChange: (state) => { backgroundSyncState = state; releaseIfIdle(); },
     shouldRetryError: registryActionBusyError,
   });
 
@@ -99,7 +101,7 @@ export function createRegistryStore(options: RegistryStoreOptions) {
         if (next.error) throw new Error(next.error);
       }
     },
-    onChange: (state) => { resourceAutoPushState = state; },
+    onChange: (state) => { resourceAutoPushState = state; releaseIfIdle(); },
     shouldRetryError: registryActionBusyError,
   });
 
@@ -107,7 +109,7 @@ export function createRegistryStore(options: RegistryStoreOptions) {
   // the panel's action mutex so init/clean cannot overlap a registry action.
   const storage = createRegistryProjectStorage({
     workspace: options.workspace,
-    busy: () => options.operationRunning() || actionId !== null || backgroundSyncState.phase === "syncing",
+    busy: () => options.operationRunning() || actionId !== null || syncInFlight(),
     setActionId: (next) => { actionId = next; },
     setErrorMessage: options.setErrorMessage,
     loadProjectTasks: options.loadProjectTasks,
@@ -134,6 +136,33 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     }
   }
 
+  function syncInFlight(): boolean {
+    return backgroundSyncState.phase === "syncing" || resourceAutoPushState.phase === "syncing";
+  }
+
+  function releaseIfIdle(): void {
+    if (syncInFlight()) return;
+    const release = releaseWaitingAction;
+    releaseWaitingAction = undefined;
+    release?.();
+  }
+
+  function publicationTarget(request: RegistryActionRequest): string {
+    const item = "name" in request
+      ? snapshot?.items.find((item) => item.type === request.type && item.name === request.name)
+      : undefined;
+    return JSON.stringify([snapshot?.configured, snapshot?.remote, snapshot?.branch, snapshot?.projectKey,
+      item ? registryPublicationScope(item) : null]);
+  }
+
+  function queuedActionAvailable(request: RegistryActionRequest): boolean {
+    if (!("name" in request)) return true;
+    const item = snapshot?.items.find((item) => item.type === request.type && item.name === request.name);
+    if (!item) return false;
+    if (request.action === "set-agent-model" || request.action === "reset-agent-model") return !!item.agentModel;
+    return item.actions.includes(request.action);
+  }
+
   async function runAction(request: RegistryActionRequest, nextActionId: string): Promise<void> {
     const requestClient = options.client();
     const workspace = options.workspace();
@@ -146,16 +175,26 @@ export function createRegistryStore(options: RegistryStoreOptions) {
       || !workspace
       || options.operationRunning()
       || actionId !== null
-      || backgroundSyncState.phase === "syncing"
-      || resourceAutoPushState.phase === "syncing"
     ) return;
 
     actionId = nextActionId;
+    const target = publicationTarget(request);
     // Registry RPC uses the standalone workspace-scoped ACP service.
     // Keep exclusivity local to Registry; the global Desktop operation lock
     // would unnecessarily disable unrelated workbench UI while Git is running.
     options.setErrorMessage(null);
     try {
+      if (syncInFlight()) {
+        waitingForSync = true;
+        // Reserve the foreground slot before yielding: no new background batch
+        // may overtake the user's selection. Reset also releases this waiter.
+        await new Promise<void>((resolve) => { releaseWaitingAction = resolve; });
+        if (!current()) return;
+        waitingForSync = false;
+        if (options.operationRunning() || target !== publicationTarget(request) || !queuedActionAvailable(request)) {
+          throw new Error("Registry changed while waiting. Review the resource and choose the action again.");
+        }
+      }
       const next = await requestClient.registryAction(workspace, request);
       if (!current()) return;
       snapshot = next;
@@ -168,8 +207,10 @@ export function createRegistryStore(options: RegistryStoreOptions) {
       if (current()) options.reportError(error);
     } finally {
       if (current()) {
+        waitingForSync = false;
         actionId = null;
         backgroundSync.retry();
+        resourceAutoPush.retry();
       }
     }
   }
@@ -234,6 +275,8 @@ export function createRegistryStore(options: RegistryStoreOptions) {
 
   function seedProjectSync(): void {
     if (!snapshot?.configured) {
+      // A poll must not mark an outstanding RPC idle and release its waiter.
+      if (syncInFlight()) return;
       backgroundSync.reset();
       resourceAutoPush.reset();
       return;
@@ -266,6 +309,10 @@ export function createRegistryStore(options: RegistryStoreOptions) {
 
   function reset(): void {
     lifecycleGeneration += 1;
+    const release = releaseWaitingAction;
+    releaseWaitingAction = undefined;
+    release?.();
+    waitingForSync = false;
     diffGeneration += 1;
     snapshot = undefined;
     actionId = null;
@@ -288,6 +335,11 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     get projectPiStorageLoading() { return storage.loading; },
     get projectPiStorageError() { return storage.error; },
     get actionId() { return actionId; },
+    get activity() {
+      if (waitingForSync) return "Action queued — waiting for background registry sync to finish.";
+      if (syncInFlight()) return "Registry is syncing in the background. Selected actions will wait for it to finish.";
+      return null;
+    },
     get backgroundSyncState() { return backgroundSyncState; },
     get resourceAutoPushState() { return resourceAutoPushState; },
     get diff() { return diff; },

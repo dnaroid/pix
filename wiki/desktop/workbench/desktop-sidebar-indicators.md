@@ -228,10 +228,12 @@ Decision: [0027 — Cause-specific sidebar quick actions](../../decisions/0027-s
   above active syncing, active syncing above ordinary pending dirtiness, and
   healthy state last. Activity Bar rendering uses only warning/error icon tones;
   it renders no dots or ping animation.
-- While a background Registry RPC is actively syncing, Registry-panel action
-  controls are disabled even though the Desktop-wide foreground operation lock
-  remains free. This prevents overlapping manual Registry commands without
-  blocking unrelated workspace interaction.
+- While a background Registry RPC is actively syncing, resource-card menu
+  commands remain available; selecting one reserves the Registry foreground
+  action slot and waits for the RPC to settle before proceeding. Project
+  initialization and cleanup remain disabled during sync. The Desktop-wide
+  foreground operation lock remains free, so unrelated workspace interaction
+  is not blocked.
 - Terminal failures are treated as unseen events: they attract attention while another view is active and are acknowledged when their owning view is shown. Search-index failures are not acknowledged by viewing the panel: diagnostics recover on a later successful read, and manual outcomes remain until retry, configuration reset or workspace/client replacement.
 - Failure acknowledgements are scoped to the current Desktop process/window and workspace. They are not persisted to disk.
 

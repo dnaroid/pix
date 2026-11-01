@@ -54,8 +54,13 @@ roles and lifecycle are defined in `wiki/desktop/workbench/desktop-context-menus
 - Registry resource-card overflow menus open from vertical `⋮` or ArrowDown/ArrowUp with
   first/last enabled-command focus. They reuse disabled-skipping, wrap, Home/End,
   type-ahead, Escape and Tab behavior; action execution remains in the Registry
-  panel/store. Menus escape catalog clipping and dismiss on scrolling/resize or
-  changed snapshot/availability.
+  panel/store. Menus escape catalog clipping and dismiss on scrolling/resize.
+  Equivalent Registry poll snapshots leave an open menu undisturbed; changed
+  labels, actions, publication scope or availability dismiss it. Background
+  Registry sync does not disable resource-menu commands; selecting a command
+  reserves the foreground action slot and queues behind an in-flight background
+  RPC, with a visible waiting reason. If the target/scope or action availability
+  changes before execution, the command fails and must be selected again.
 
 ## Non-goals
 

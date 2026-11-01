@@ -29,6 +29,7 @@
     loading,
     remoteDisabled,
     actionId,
+    activity = null,
     diff,
     onRefresh,
     onInitializeProject,
@@ -51,6 +52,7 @@
     loading: boolean;
     remoteDisabled: boolean;
     actionId: string | null;
+    activity?: string | null;
     diff: RegistryDiffState | undefined;
     onRefresh: () => void;
     onInitializeProject: () => void;
@@ -94,6 +96,9 @@
 </script>
 
 <section class="flex min-h-0 min-w-0 w-full flex-col overflow-hidden" aria-label="Resource registry" bind:this={panelRoot}>
+  {#if activity}
+    <p role="status" class="px-3 py-2 text-xs text-muted-foreground">{activity}</p>
+  {/if}
   {#if diff}
     {@const diffState = diff}
     <RegistryDiffPanel
@@ -103,6 +108,7 @@
     />
   {:else}
     <RegistryProjectStatus
+      storageBusy={activity !== null}
       {snapshot}
       {backgroundSync}
       {projectInitialized}

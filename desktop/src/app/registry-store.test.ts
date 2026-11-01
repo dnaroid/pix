@@ -250,10 +250,11 @@ describe("manual bulk project resource sync", () => {
     f.store.reset();
   });
 
-  it("rejects manual sync while automatic resource publication is in flight", async () => {
+  it("queues manual sync behind automatic resource publication", async () => {
     vi.useFakeTimers();
     let finish!: (value: unknown) => void;
-    const registryAction = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+    const registryAction = vi.fn().mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }))
+      .mockImplementation(async () => f.snapshot);
     const f = syncFixture(registryAction);
     f.publish({ ...f.snapshot, items: [{
       id: "skill:draft", type: "skill", name: "draft", status: "local-changes", statusLabel: "Local changes",
@@ -261,10 +262,17 @@ describe("manual bulk project resource sync", () => {
     }] });
     await vi.advanceTimersByTimeAsync(900);
     expect(f.store.resourceAutoPushState.phase).toBe("syncing");
-    await f.store.runAction({ action: "push-project-resources" }, "push-project-resources");
+    expect(f.store.actionId).toBeNull();
+    expect(f.store.activity).toContain("background");
+    const pending = f.store.runAction({ action: "push-project-resources" }, "push-project-resources");
+    expect(f.store.actionId).toBe("push-project-resources");
+    expect(f.store.activity).toContain("queued");
     expect(registryAction).toHaveBeenCalledTimes(1);
     finish(f.snapshot);
-    await vi.advanceTimersByTimeAsync(0);
+    await pending;
+    expect(registryAction).toHaveBeenLastCalledWith("/project", { action: "push-project-resources" });
+    expect(f.store.actionId).toBeNull();
+    expect(f.store.activity).toBeNull();
     f.store.reset();
   });
 });

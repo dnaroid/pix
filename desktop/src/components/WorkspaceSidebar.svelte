@@ -154,6 +154,7 @@
     activeTaskId,
     sessionReady,
     registryReady,
+    registryActivity = null,
     gitAssistantReady,
     registrySnapshot,
     registryContextCommands = [],
@@ -277,6 +278,7 @@
     activeTaskId: string | null;
     sessionReady: boolean;
     registryReady: boolean;
+    registryActivity?: string | null;
     gitAssistantReady: boolean;
     registrySnapshot: RegistrySnapshot | undefined;
     registryContextCommands?: readonly import("@agentclientprotocol/sdk").AvailableCommand[];
@@ -1302,6 +1304,7 @@
             projectPiStorageError={registryProjectPiStorageError}
             loading={registryLoading}
             remoteDisabled={!registryReady}
+            activity={registryActivity}
             actionId={registryActionId}
             diff={registryDiff}
             onRefresh={onRegistryRefresh}

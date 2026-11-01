@@ -164,7 +164,9 @@ describe("WorkspaceSidebar project sizing", () => {
     for (const tab of ["project", "tasks", "git", "registry", "scripts", "search", "usage", "lsp", "settings"]) {
       expect(activityBarSource).toContain(`sidebarIconTone(indicators.${tab})`);
     }
-    expect(sidebarViewModelSource).toContain('backgroundSyncState.phase === "syncing" ? "background-sync" : null');
+    expect(sidebarViewModelSource).toContain('registryActionId: options.registry.actionId,');
+    expect(sidebarViewModelSource).not.toContain('? "background-sync"');
+    expect(sidebarViewModelSource).not.toContain('? "resource-auto-push"');
   });
 
   it("passes the live ACP model catalog through the sidebar into Settings", () => {

@@ -161,9 +161,8 @@ export function createDesktopSidebarViewModel(options: {
     registryProjectPiStorageError: options.registry.projectPiStorageError,
     registryBackgroundSync: options.registry.backgroundSyncState,
     registryLoading: options.registry.actionId === "refresh",
-    registryActionId: options.registry.actionId
-      ?? (options.registry.backgroundSyncState.phase === "syncing" ? "background-sync" : null)
-      ?? (options.registry.resourceAutoPushState.phase === "syncing" ? "resource-auto-push" : null),
+    registryActionId: options.registry.actionId,
+    registryActivity: options.registry.activity,
     registryDiff: options.registry.diff,
     gitSnapshot: options.git.snapshot,
     gitUninitialized: options.git.uninitialized,

@@ -12,6 +12,15 @@ import registrySource from "../lib/registry.ts?raw";
 import modelRowSource from "./RegistryAgentModel.svelte?raw";
 
 describe("RegistryPanel orchestrator", () => {
+  it("shows background waiting reasons without disabling resource menus", () => {
+    expect(sidebarViewModelSource).toContain("registryActivity: options.registry.activity,");
+    expect(sidebarSource).toContain("activity={registryActivity}");
+    expect(panelSource).toContain('role="status"');
+    expect(panelSource).toContain("{activity}</p>");
+    expect(panelSource).toContain("storageBusy={activity !== null}");
+    expect(actionsSource).toContain("menuIdentity;");
+    expect(actionsSource).not.toContain("item; busy; projectKey;");
+  });
   it("offers project-local model selection only for eligible installed agent cards", () => {
     expect(catalogSource).toContain("<RegistryAgentModel {item} models={agentModels}");
     expect(modelRowSource).toContain('item.type === "agent" && item.local && state');
