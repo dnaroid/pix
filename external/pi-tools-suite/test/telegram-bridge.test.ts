@@ -255,18 +255,45 @@ describe("telegram-bridge broker", () => {
 		await broker.idle();
 		expect(telegram.calls.some((call) => call.method === "closeForumTopic")).toBe(false);
 
+		expect(telegram.calls.some((call) => call.method === "deleteForumTopic")).toBe(false);
+
 		broker.handleClientMessage(a, { t: "unregister", sessionId: "s1" });
 		timers.fireAll();
 		await broker.idle();
-		expect(telegram.calls.slice(-2).map((call) => call.method)).toEqual(["sendMessage", "closeForumTopic"]);
-		expect(state.topics.s1!.closed).toBe(true);
+		expect(telegram.calls.at(-1)).toMatchObject({ method: "deleteForumTopic", params: { chat_id: CHAT, message_thread_id: 100 } });
+		expect(state.topics.s1).toBeUndefined();
 
+		// Coming back after deletion gets a fresh topic.
 		const b = connection();
 		broker.handleClientMessage(b, register("s1", "/work/pix", "Better name"));
 		await broker.idle();
+		expect(telegram.calls.at(-1)).toMatchObject({ method: "createForumTopic", params: { name: "pix · Better name" } });
+		expect(state.topics.s1).toMatchObject({ threadId: 101, closed: false });
+	});
+
+	test("without the delete right a finished topic is closed and later reopened", async () => {
+		const { broker, telegram, timers, state } = makeBroker();
+		const a = connection();
+		broker.handleClientMessage(a, register("s1", "/work/pix"));
+		await broker.idle();
+		telegram.failNext("deleteForumTopic", new TelegramApiError("deleteForumTopic", 400, "Bad Request: not enough rights to delete a topic"));
+		broker.handleClientMessage(a, { t: "unregister", sessionId: "s1" });
+		timers.fireAll();
+		await broker.idle();
+		expect(telegram.calls.slice(-3).map((call) => call.method)).toEqual(["deleteForumTopic", "sendMessage", "closeForumTopic"]);
+		expect(state.topics.s1!.closed).toBe(true);
+
+		broker.handleClientMessage(a, register("s1", "/work/pix"));
+		await broker.idle();
 		expect(telegram.calls.at(-1)).toMatchObject({ method: "reopenForumTopic", params: { message_thread_id: 100 } });
-		expect(telegram.calls.filter((call) => call.method === "createForumTopic")).toHaveLength(1);
 		expect(state.topics.s1!.closed).toBe(false);
+
+		// A deleted-by-hand topic is simply forgotten on close.
+		telegram.failNext("deleteForumTopic", new TelegramApiError("deleteForumTopic", 400, "Bad Request: message thread not found"));
+		broker.handleClientMessage(a, { t: "unregister", sessionId: "s1" });
+		timers.fireAll();
+		await broker.idle();
+		expect(state.topics.s1).toBeUndefined();
 	});
 
 	test("a dropped connection only ends the sessions it owned", async () => {
@@ -341,6 +368,8 @@ describe("telegram-bridge broker", () => {
 		await new Promise((resolve) => setTimeout(resolve, 1));
 		expect(telegram.calls.at(-1)!.params.text).toBe("⚠️ busy");
 
+		// Topic kept (no delete right) → a late message gets a "not running" reply.
+		telegram.failNext("deleteForumTopic", new TelegramApiError("deleteForumTopic", 400, "Bad Request: not enough rights"));
 		broker.handleClientMessage(a, { t: "unregister", sessionId: "s1" });
 		timers.fireAll();
 		await broker.idle();

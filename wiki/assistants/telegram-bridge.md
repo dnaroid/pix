@@ -50,10 +50,12 @@ parentheses.
    turns the group into a forum supergroup; the topic list replaces the chat.
    Telegram shows the *Manage topics* admin right only after topics are on.
 3. Add the bot as a member, then **Administrators** (*Администраторы*) → **Add
-   admin** (*Добавить администратора*) → the bot. Required right:
-   **Manage topics** (*Управление темами*). Nothing else is needed: profile
-   changes, deleting/pinning messages, bans, invite links, stories, video
-   chats, tags, anonymity and adding admins can all stay off.
+   admin** (*Добавить администратора*) → the bot. Rights:
+   **Manage topics** (*Управление темами*, required) and **Delete messages**
+   (*Удаление сообщений*, needed to delete the topic of a finished session;
+   without it the topic is only closed). Everything else (profile changes,
+   pinning, bans, invite links, stories, video chats, tags, anonymity, adding
+   admins) can stay off.
 4. Keep the group private and do not invite other people: every member listed
    in `allowedUserIds` can make the agent act in your projects.
 
@@ -144,12 +146,15 @@ The Mac must be awake and Pix running; nothing is hosted elsewhere.
   Existing topics are renamed to this form on registration/reload or the next
   topic ensure. Topics of the same project share an icon color, so several open
   projects stay visually grouped.
-- The session→topic map persists in `state.json`; reopening a session reopens
-  and reuses its topic. A topic deleted by hand is recreated on the next
-  message.
-- When a session ends (tab closed, Desktop quit, process exit), the topic gets
-  "Session closed in Pix." and is closed after a 15 s grace period. A reload
-  or broker takeover inside the grace period causes no topic churn.
+- The session→topic map persists in `state.json`. A topic deleted by hand is
+  recreated on the next message.
+- When a session ends (tab closed, Desktop quit, process exit), its topic is
+  **deleted with its history** after a 15 s grace period, so topics do not
+  accumulate; reopening the session later creates a fresh topic. A reload or
+  broker takeover inside the grace period causes no topic churn.
+- Without the *Delete messages* right, deletion fails (logged as
+  `topic-delete-failed`) and the topic instead gets "Session closed in Pix."
+  and is closed; reopening the session then reopens and reuses it.
 
 ### From Pix to Telegram
 
