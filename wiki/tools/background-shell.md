@@ -18,9 +18,11 @@ Implementation: `external/pi-tools-suite/src/background-shell/` (`manager.ts`,
 | Tool | Behavior |
 |---|---|
 | `Bash` (Claude profile), `bash`, `shell` (Codex profile) with `run_in_background: true` | Starts a job and returns after a 1.5 s startup window with the job id (`bg_…`), pid, log path and any early output. Optional `max_runtime` (seconds) terminates the job when it elapses. No runtime limit applies by default. |
-| `shell_output(job_id, since?, filter?, max_bytes?)` / alias `BashOutput(bash_id, filter?)` | Returns output produced since the previous read. The server keeps a cursor per job. `since` re-reads from an absolute byte offset still in the ring buffer, and `filter` is a line regex. Default `max_bytes` is 32768. The result includes the status (`running`, `exited(code)`, `killed`, `failed`), the next cursor, a truncation flag and the log path. |
+| `shell_output(job_id?, since?, filter?, max_bytes?)` / alias `BashOutput(bash_id?, filter?)` | Returns output produced since the previous read. The server keeps a cursor per job. `since` re-reads from an absolute byte offset still in the ring buffer, and `filter` is a line regex. Default `max_bytes` is 32768. The result includes the status (`running`, `exited(code)`, `killed`, `failed`), the next cursor, a truncation flag and the log path. Without a job id it lists the session's jobs with id, status, pid, age and command (no cursor is consumed). |
 | `shell_kill(job_id, signal?)` / alias `KillShell(shell_id)` | Signals the whole process group, `SIGTERM` by default, and escalates to `SIGKILL` after 3 s. Returns the final status. |
-| `shell_jobs()` | Lists the session's jobs with id, status, pid, age and command. |
+
+There is no separate `shell_jobs` tool; the Desktop icon mapping keeps the
+`shell_jobs` name only so older transcripts still render.
 
 The tool profile exposes `BashOutput`/`KillShell` for the Claude profile and
 `shell_output`/`shell_kill` otherwise, and only when the module is loaded. If

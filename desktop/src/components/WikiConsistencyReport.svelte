@@ -1,6 +1,6 @@
 <script lang="ts">
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
-  import { getContext } from "svelte";
+  import { getContext, untrack } from "svelte";
   import { WIKI_CONFLICTS_NAVIGATION_CONTEXT, type WikiConflictsNavigation } from "../app/workbench-wiki-conflicts.svelte";
   import type { KnowledgeCheckResult, KnowledgeCitation, KnowledgeReportLanguage } from "../../../acp/src/knowledge/contract";
   import type { ProjectFileLineRange } from "../lib/project-files";
@@ -11,6 +11,7 @@
     checking = false,
     queued = false,
     compact = false,
+    collapsedByDefault = false,
     result,
     canSaveAnyway = false,
     canOpenSources = false,
@@ -27,6 +28,7 @@
     checking?: boolean;
     queued?: boolean;
     compact?: boolean;
+    collapsedByDefault?: boolean;
     result?: KnowledgeCheckResult;
     canSaveAnyway?: boolean;
     canOpenSources?: boolean;
@@ -41,32 +43,35 @@
     onResolve?: () => void | Promise<void>;
   } = $props();
 
-  let expanded = $state(true);
+  let expanded = $state(untrack(() => !collapsedByDefault));
   let sourcesExpanded = $state(false);
   const reportId = $props.id();
   // Absent outside the Desktop shell (isolated renders); the action is then hidden.
   const conflictsNavigation = getContext<WikiConflictsNavigation | undefined>(WIKI_CONFLICTS_NAVIGATION_CONTEXT);
   let observedResult: KnowledgeCheckResult | undefined;
+  let observedCollapsedByDefault: boolean | undefined;
   const text = $derived(knowledgeCheckReportText(result, checking, queued, stale));
   const reportOpen = $derived(expanded && !!result && !checking);
+  const singleLine = $derived(collapsedByDefault && !reportOpen);
   const uncertainties = $derived(result?.uncertainties ?? []);
   const sources = $derived(result?.reviewedSources ?? []);
   const actionClass = "min-w-0 max-w-full whitespace-normal break-words rounded-sm px-2 py-1 text-xs font-medium hover:bg-panel-hover disabled:opacity-40";
   const disclosureClass = "flex min-w-0 cursor-pointer list-none items-start gap-1.5 py-2 text-left [&::-webkit-details-marker]:hidden";
 
   $effect(() => {
-    if (result === observedResult) return;
+    if (result === observedResult && collapsedByDefault === observedCollapsedByDefault) return;
     observedResult = result;
-    expanded = true;
+    observedCollapsedByDefault = collapsedByDefault;
+    expanded = !collapsedByDefault;
     sourcesExpanded = false;
   });
 </script>
 
 <section class="min-h-0 shrink-0 border-b border-border bg-panel text-xs" aria-label={text.sectionLabel} aria-busy={checking} data-wiki-consistency-report>
-  <div class="flex min-w-0 flex-col items-start gap-1 px-3 py-2">
+  <div class={singleLine ? "flex min-w-0 items-center gap-1 px-3 py-1" : "flex min-w-0 flex-col items-start gap-1 px-3 py-2"}>
     <button
       type="button"
-      class="flex w-full min-w-0 items-start gap-1.5 rounded-sm py-1 pr-2 text-left hover:bg-panel-hover"
+      class={["flex w-full min-w-0 gap-1.5 rounded-sm py-1 pr-2 text-left hover:bg-panel-hover", singleLine ? "items-center" : "items-start"]}
       aria-expanded={reportOpen}
       aria-controls={`${reportId}-body`}
       aria-label={reportOpen ? text.collapseReport : text.expandReport}
@@ -74,12 +79,12 @@
       onclick={() => expanded = !expanded}
     >
       <ChevronRight class={["mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none", reportOpen ? "rotate-90" : ""]} aria-hidden="true" />
-      <span class="min-w-0 whitespace-normal break-words">
-        <span class={["block font-medium", !checking && !stale && result?.status === "conflicts" ? "text-tool-error" : !checking && !stale && result?.status === "clear" ? "text-tool-success" : "text-tool-warning"]} role="status" aria-live="polite">{stale && !checking ? text.staleSummary : text.summary}</span>
-        {#if result && !checking}<span class="mt-1 block text-muted-foreground">{text.counts}</span>{/if}
+      <span class={singleLine ? "min-w-0 truncate" : "min-w-0 whitespace-normal break-words"} title={singleLine ? `${stale && !checking ? text.staleSummary : text.summary}${result && !checking ? ` · ${text.counts}` : ""}` : undefined}>
+        <span class={[singleLine ? "font-medium" : "block font-medium", !checking && !stale && result?.status === "conflicts" ? "text-tool-error" : !checking && !stale && result?.status === "clear" ? "text-tool-success" : "text-tool-warning"]} role="status" aria-live="polite">{stale && !checking ? text.staleSummary : text.summary}</span>
+        {#if result && !checking}<span class={[singleLine ? "" : "mt-1 block", "text-muted-foreground"]}>{singleLine ? " · " : ""}{text.counts}</span>{/if}
       </span>
     </button>
-    <div class="flex w-full min-w-0 flex-wrap items-center gap-1">
+    <div hidden={singleLine && !checking} class={singleLine ? "shrink-0" : "flex w-full min-w-0 flex-wrap items-center gap-1"}>
       {#if checking}
         <button class={actionClass} type="button" onclick={onCancel}>{text.cancelCheck}</button>
       {:else}

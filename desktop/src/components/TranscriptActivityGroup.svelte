@@ -67,7 +67,11 @@
 >
   <summary bind:this={groupSummary} class="grid min-h-4 list-none grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-x-1.5 overflow-hidden leading-tight transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
     <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/activity:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
-    <ActivityIconTrail entries={item.entries} />
+    {#if expanded}
+      <span class="sr-only">Tool activity</span>
+    {:else}
+      <ActivityIconTrail entries={item.entries} />
+    {/if}
     {#if durationMs !== undefined}<span data-activity-duration class="shrink-0 text-xs text-muted-foreground/45">{formatTranscriptDuration(durationMs)}</span>{/if}
   </summary>
   {#if expanded}

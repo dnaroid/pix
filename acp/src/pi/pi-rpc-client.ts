@@ -9,6 +9,7 @@
 import type { Writable } from "node:stream";
 import type { ChildProcess } from "node:child_process";
 import { rpcStartupFailure } from "./startup-diagnostics.js";
+import { startRpcClient } from "./rpc-stdout.js";
 import { parseBtwState, type BtwCommand, type BtwEvent, type BtwState } from "../btw/contract.js";
 import { TASK_RUN_RESPONSE_PREFIX, type TaskRunResponse } from "../acp/task-run-contract.js";
 import {
@@ -330,7 +331,7 @@ export class PiRpcClient implements PiClient {
 			for (const listener of this.eventListeners) listener(event as PiEvent);
 		});
 		try {
-			await client.start();
+			await startRpcClient(client);
 		} catch (error) {
 			this.unsubscribeClientEvents?.();
 			this.unsubscribeClientEvents = undefined;

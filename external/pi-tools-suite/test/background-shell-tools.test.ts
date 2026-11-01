@@ -25,7 +25,14 @@ class FakePi {
 }
 
 const roots: string[] = [];
+// The /shell-workdir policy reads the user config (~/.config/pi/pi-tools-suite.jsonc) and an env
+// override; isolate both so a developer's "restrictShellWorkdir": false cannot change the outcome.
+const savedEnv = { HOME: process.env.HOME, PI_TOOLS_SUITE_RESTRICT_SHELL_WORKDIR: process.env.PI_TOOLS_SUITE_RESTRICT_SHELL_WORKDIR };
 afterEach(() => {
+	for (const [name, value] of Object.entries(savedEnv)) {
+		if (value === undefined) delete process.env[name];
+		else process.env[name] = value;
+	}
 	setBackgroundShellManager(undefined);
 	registerBackgroundShellTools(undefined);
 	for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
@@ -34,6 +41,8 @@ afterEach(() => {
 async function fixture(sessionId = "sess-1") {
 	const root = await fs.promises.realpath(fs.mkdtempSync(path.join(os.tmpdir(), "bg-tools-")));
 	roots.push(root);
+	process.env.HOME = path.join(root, "home");
+	delete process.env.PI_TOOLS_SUITE_RESTRICT_SHELL_WORKDIR;
 	const workspace = path.join(root, "workspace");
 	const outside = path.join(root, "outside");
 	fs.mkdirSync(workspace);
@@ -72,7 +81,7 @@ describe.if(process.platform !== "win32").serial("background shell tools", () =>
 		expect(job.id).toMatch(/^bg_/);
 		expect(started.content[0].text).toContain("hello");
 		expect(job.logPath).toContain(path.join(".pi", "artifacts", "background-shell", "sess-1"));
-		await waitFor(async () => (await pi.tools.get("shell_jobs").execute("c", {}, undefined, undefined, ctx)).content[0].text.includes("exited(2)"));
+		await waitFor(async () => (await pi.tools.get("shell_output").execute("c", {}, undefined, undefined, ctx)).content[0].text.includes("exited(2)"));
 		const [finalTurn] = await pi.emit("turn_end", ctx, { toolResults: [] });
 		expect(finalTurn).toBeUndefined();
 		const [turnEnd] = await pi.emit("turn_end", ctx, { toolResults: [{ role: "toolResult" }] });
@@ -82,6 +91,10 @@ describe.if(process.platform !== "win32").serial("background shell tools", () =>
 		const output = await pi.tools.get("BashOutput").execute("c2", { bash_id: job.id }, undefined, undefined, ctx);
 		expect(output.content[0].text).toContain("bye");
 		expect(output.content[0].text).not.toContain("hello");
+		const listed = await pi.tools.get("BashOutput").execute("c3", {}, undefined, undefined, ctx);
+		expect(listed.content[0].text).toContain(job.id);
+		expect(listed.details.jobs.map((entry: { id: string }) => entry.id)).toEqual([job.id]);
+		expect(pi.tools.has("shell_jobs")).toBe(false);
 	});
 
 	test.serial("exit during the final turn never trails the transcript; it is deferred to the next prompt", async () => {
@@ -89,7 +102,7 @@ describe.if(process.platform !== "win32").serial("background shell tools", () =>
 		await pi.emit("agent_start", ctx);
 		const started = await pi.tools.get("Bash").execute("c1", { command: "echo done", run_in_background: true }, undefined, undefined, ctx);
 		const id = started.details.backgroundJob.id;
-		await waitFor(async () => (await pi.tools.get("shell_jobs").execute("c", {}, undefined, undefined, ctx)).content[0].text.includes("exited(0)"));
+		await waitFor(async () => (await pi.tools.get("shell_output").execute("c", {}, undefined, undefined, ctx)).content[0].text.includes("exited(0)"));
 		expect(await pi.emit("turn_end", ctx, { toolResults: [] })).toEqual([undefined]);
 		expect(await pi.emit("agent_before_settle", ctx)).toEqual([]);
 		await pi.emit("agent_settled", ctx, { aborted: false });

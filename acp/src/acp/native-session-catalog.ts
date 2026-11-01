@@ -42,12 +42,9 @@ export class NativeSessionCatalog {
         if (this.completedRevisions.get(cwd) === revision) return true;
         await this.scan(cwd, controller.signal);
         controller.signal.throwIfAborted();
-        // Session files can grow while their JSONL bodies are being scanned.
-        // Cache the *post-scan* filesystem state so the notification-driven
-        // follow-up list does not immediately start the same expensive scan.
-        const settledRevision = await this.revision(cwd).catch(() => revision);
-        controller.signal.throwIfAborted();
-        this.completedRevisions.set(cwd, settledRevision);
+        // Only acknowledge the state we started reading. A later append may
+        // not have been consumed; the per-file cache makes its retry cheap.
+        this.completedRevisions.set(cwd, revision);
         if (this.inFlight.get(cwd)?.controller === controller) this.inFlight.delete(cwd);
         if (!this.disposed) {
           for (const listener of [...listeners]) listener();
@@ -86,7 +83,7 @@ export async function sessionDirectoryRevision(cwd: string, agentDir = getAgentD
   const details = await Promise.all(filenames.map(async (name) => {
     try {
       const info = await stat(join(directory, name));
-      return [name, info.size, info.mtimeMs, info.ino];
+      return [name, info.size, info.mtimeMs, info.ctimeMs, info.dev, info.ino];
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [name, "missing"];
       throw error;

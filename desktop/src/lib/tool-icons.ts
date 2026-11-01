@@ -5,6 +5,10 @@ import FilePen from "@lucide/svelte/icons/file-pen";
 import FilePlus from "@lucide/svelte/icons/file-plus";
 import FolderSearch from "@lucide/svelte/icons/folder-search";
 import Terminal from "@lucide/svelte/icons/terminal";
+import Logs from "@lucide/svelte/icons/logs";
+import ListTree from "@lucide/svelte/icons/list-tree";
+import OctagonX from "@lucide/svelte/icons/octagon-x";
+import ScanEye from "@lucide/svelte/icons/scan-eye";
 import Search from "@lucide/svelte/icons/search";
 import ScanSearch from "@lucide/svelte/icons/scan-search";
 import Replace from "@lucide/svelte/icons/replace";
@@ -24,6 +28,8 @@ import PanelsTopLeft from "@lucide/svelte/icons/panels-top-left";
 import Wrench from "@lucide/svelte/icons/wrench";
 
 /** Current tools and synthetic activity labels only; unknown/retired tools use Wrench. */
+// When adding a tool, choose its identity icon here (including provider aliases)
+// and cover it in the activity/status icon tests. Wrench is only a fallback.
 const iconGroups: readonly (readonly [readonly string[], typeof Brain])[] = [
   [["thinking"], Brain],
   [["read"], FileText],
@@ -31,6 +37,10 @@ const iconGroups: readonly (readonly [readonly string[], typeof Brain])[] = [
   [["write"], FilePlus],
   [["ast_apply"], Replace],
   [["shell", "bash"], Terminal],
+  [["shell_output", "bashoutput"], Logs],
+  [["shell_jobs"], ListTree],
+  [["shell_kill", "killshell"], OctagonX],
+  [["lookup"], ScanEye],
   [["project_search", "grep"], Search],
   [["glob"], FolderSearch],
   [["ast_grep"], ScanSearch],

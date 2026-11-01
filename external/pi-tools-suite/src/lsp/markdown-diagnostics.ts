@@ -1,6 +1,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import type { Diagnostic } from "vscode-languageserver-protocol";
+import { markdownLinkText } from "./markdown-parser";
 
 interface LineOffsets {
   readonly text: string;
@@ -151,7 +152,7 @@ function addMermaidDiagnostics(file: string, text: string, offsets: LineOffsets,
 export function localMarkdownDiagnostics(file: string, text: string): Diagnostic[] {
   const offsets = lineOffsets(text);
   const diagnostics: Diagnostic[] = [];
-  addMarkdownLinkDiagnostics(file, text, offsets, diagnostics);
+  addMarkdownLinkDiagnostics(file, markdownLinkText(text), offsets, diagnostics);
   addMermaidDiagnostics(file, text, offsets, diagnostics);
   return diagnostics;
 }

@@ -1688,6 +1688,32 @@ test("Desktop can await coalesced discovery before pruning missing saved tabs", 
   });
 });
 
+test("Desktop default discovery uses the configured agent directory and refreshes changed metadata", async (t) => {
+  const root = resolve(".pi/artifacts/session-list-metadata");
+  await mkdir(root, { recursive: true });
+  const agentDir = mkdtempSync(join(root, "test-"));
+  const cwd = join(agentDir, "project");
+  const safePath = `--${resolve(cwd).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+  const directory = join(agentDir, "sessions", safePath);
+  await mkdir(directory, { recursive: true });
+  const path = join(directory, "native.jsonl");
+  const header = `${JSON.stringify({ type: "session", version: 3, id: "native", cwd, timestamp: "2026-01-01T00:00:00Z" })}\n`;
+  await writeFile(path, header + JSON.stringify({ type: "session_info", name: "Original" }) + "\n");
+  const adapter = new PixAcpAgent({ piEntry: "/test/pi-rpc-entry.js", logger: TEST_LOGGER, createPiClient: () => new FakePiClient(),
+    sessionMapPath: join(agentDir, "map.json"), agentDir, loadTuiTabs: async () => ({ sessionPaths: [] }) });
+  t.after(async () => { await adapter.dispose(); await rm(agentDir, { recursive: true, force: true }); });
+  await connectAs(adapter, "pix-desktop", async cx => {
+    await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientInfo: { name: "pix-desktop", version: "test" } });
+    const list = () => cx.request("session/list", { cwd, _meta: { "pix.waitForDiscovery": true } }) as Promise<{ sessions: Array<{ sessionId: string; title?: string }> }>;
+    const initial = await list();
+    assert.equal(initial.sessions[0]?.title, "Original");
+    await writeFile(path, header + JSON.stringify({ type: "session_info", name: "Updated" }) + "\n");
+    const updated = await list();
+    assert.equal(updated.sessions[0]?.sessionId, initial.sessions[0]?.sessionId);
+    assert.equal(updated.sessions[0]?.title, "Updated");
+  });
+});
+
 test("Desktop discovery failure rejects authoritative lists rather than pruning saved tabs", async () => {
   const harness = createTestAdapter({
     listPiSessions: async () => { throw new Error("scan failed"); },

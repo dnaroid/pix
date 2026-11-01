@@ -39,7 +39,8 @@ import { KnowledgeCheckService } from "../knowledge/service.js";
 import { KNOWLEDGE_CHECK_METHOD } from "../knowledge/contract.js";
 import { parseKnowledgeCheckRequest } from "../knowledge/request.js";
 import { collectRagEvidence } from "../search/rag-evidence.js";
-import { NativeSessionCatalog } from "./native-session-catalog.js";
+import { NativeSessionCatalog, sessionDirectoryRevision } from "./native-session-catalog.js";
+import { NativeSessionMetadataCache, type NativeSessionMetadata } from "./native-session-metadata.js";
 import { FileMentionIndex, parseFileMentionsRequest } from "./file-mentions.js";
 import { SessionRefreshScheduler } from "./session-refresh-scheduler.js";
 import { PIX_SESSION_CATALOG_CHANGED_METHOD } from "./session-catalog-contract.js";
@@ -637,6 +638,7 @@ export class PixAcpAgent {
 	private readonly nativeSessionCatalog: NativeSessionCatalog;
 	private readonly searchService: DesktopSearchService;
 	private readonly backgroundSearchSessions: BackgroundSessionDiscovery;
+	private readonly nativeSessionMetadata: NativeSessionMetadataCache;
 	private readonly searchActivity = new SessionSearchActivity(
 		id => this.sessionMap.get(id),
 		(cwd, id, running) => this.searchService.sessionActivity(cwd, id, running),
@@ -708,9 +710,12 @@ export class PixAcpAgent {
 			},
 		});
 		this.sessionMap = new SessionMapStore(options.sessionMapPath, options.logger);
+		this.nativeSessionMetadata = new NativeSessionMetadataCache(options.agentDir);
 		this.nativeSessionCatalog = new NativeSessionCatalog(
 			async (cwd, signal) => {
-				const native = await this.listPiSessions(cwd, signal);
+				const native = options.listPiSessions
+					? await this.listPiSessions(cwd, signal)
+					: await this.nativeSessionMetadata.list(cwd, signal);
 				signal.throwIfAborted();
 				await this.sessionMap.mergeByPiSessionPath(native.flatMap((info) => {
 					const record = nativeSessionRecord(info, cwd);
@@ -718,7 +723,7 @@ export class PixAcpAgent {
 				}), { requireExistingFiles: true, keepNewerTitles: true });
 			},
 			(error) => this.options.logger.warn(`native session discovery failed: ${stringifyUnknown(error)}`),
-			options.nativeSessionRevision,
+			options.nativeSessionRevision ?? ((cwd) => sessionDirectoryRevision(cwd, options.agentDir)),
 		);
 		// Sub-agent viewer sessions are ephemeral, parent-owned and already summarized
 		// in the parent transcript; keep them out of project session search.
@@ -1040,6 +1045,7 @@ export class PixAcpAgent {
 		this.backgroundSearchSessions.dispose();
 		this.disposed = true;
 		await this.nativeSessionCatalog.dispose();
+		this.nativeSessionMetadata.clear();
 		await this.searchActivity.dispose();
 		await Promise.all([this.searchService.dispose(), this.commitSearchService.dispose()]);
 		await this.usageStatsHost.dispose();
@@ -4582,7 +4588,7 @@ function projectAgentsContextPath(cwd: string, logger: Logger): string | undefin
 
 
 
-function nativeSessionRecord(session: PiSessionInfo, requestedCwd?: string): SessionMapRecord | undefined {
+function nativeSessionRecord(session: NativeSessionMetadata, requestedCwd?: string): SessionMapRecord | undefined {
 	const cwd = requestedCwd ?? session.cwd;
 	if (!cwd || !session.id || !session.path) return undefined;
 	const title = session.name?.trim() || session.firstMessage.trim();

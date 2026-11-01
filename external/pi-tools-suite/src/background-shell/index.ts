@@ -222,29 +222,38 @@ export default function backgroundShell(pi: ExtensionAPI): void {
 	const readJob = (ctx: ExtensionContext, jobId: string) => {
 		const key = sessionKeyOf(ctx);
 		const job = manager.get(key, jobId);
-		if (!job) throw new Error(`Unknown background job: ${jobId}. Use shell_jobs to list this session's jobs.`);
+		if (!job) throw new Error(`Unknown background job: ${jobId}. Call shell_output without job_id to list this session's jobs.`);
 		return { key, job };
+	};
+
+	const listJobs = (ctx: ExtensionContext) => {
+		const jobs = manager.list(sessionKeyOf(ctx));
+		if (!jobs.length) return text("No background jobs in this session.", { jobs: [] });
+		const now = Date.now();
+		return text(jobs.map((job) => `${formatJobLine(job)} (age ${Math.round(((job.endedAt ?? now) - job.startedAt) / 1000)}s)`).join("\n"), { jobs });
 	};
 
 	const outputTool = defineTool({
 		name: "shell_output",
 		label: "Shell Output",
-		description: "Read new output from a background shell job started with run_in_background. The server keeps a cursor per job, so repeated calls return only output produced since the last read; pass since to re-read from an absolute byte offset still in the 256 KB ring buffer. Returns status (running, exited(code), killed, failed), text, next cursor and whether output was truncated. The complete log path is included.",
-		promptSnippet: "Use shell_output(job_id) to read new output from background shell jobs; use shell_kill to stop them and shell_jobs to list them.",
+		description: "Read new output from a background shell job started with run_in_background. The server keeps a cursor per job, so repeated calls return only output produced since the last read; pass since to re-read from an absolute byte offset still in the 256 KB ring buffer. Returns status (running, exited(code), killed, failed), text, next cursor and whether output was truncated. The complete log path is included. Omit job_id to list this session's jobs with id, status, pid, age and command.",
+		promptSnippet: "Use shell_output(job_id) to read new output from background shell jobs (omit job_id to list them); use shell_kill to stop them.",
 		parameters: Type.Object({
-			job_id: Type.String({ description: "Background job id (bg_...)" }),
+			job_id: Type.Optional(Type.String({ description: "Background job id (bg_...); omit to list this session's jobs" })),
 			since: Type.Optional(Type.Number({ minimum: 0, description: "Absolute byte offset to read from instead of the server cursor" })),
 			filter: Type.Optional(Type.String({ description: "Optional regular expression; only matching lines are returned" })),
 			max_bytes: Type.Optional(Type.Number({ minimum: 1, description: "Maximum bytes to return (default 32768)" })),
 		}),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			const state = remember(ctx);
-			const { key } = readJob(ctx, params.job_id);
+			if (params.job_id === undefined || params.job_id === "") return listJobs(ctx);
+			const jobId = params.job_id;
+			const { key } = readJob(ctx, jobId);
 			let filter: RegExp | undefined;
 			if (params.filter) {
 				try { filter = new RegExp(params.filter); } catch (error) { throw new Error(`Invalid filter: ${errorText(error)}`); }
 			}
-			const output = manager.read(key, params.job_id, {
+			const output = manager.read(key, jobId, {
 				...(params.since !== undefined ? { since: params.since } : {}),
 				...(params.max_bytes !== undefined ? { maxBytes: params.max_bytes } : {}),
 				...(filter ? { filter } : {}),
@@ -285,20 +294,6 @@ export default function backgroundShell(pi: ExtensionAPI): void {
 	});
 	pi.registerTool(killTool);
 	registerBackgroundShellTools({ output: outputTool, kill: killTool });
-
-	pi.registerTool({
-		name: "shell_jobs",
-		label: "Shell Jobs",
-		description: "List this session's background shell jobs with id, status, pid, age and command.",
-		parameters: Type.Object({}),
-		async execute(_id, _params, _signal, _onUpdate, ctx) {
-			remember(ctx);
-			const jobs = manager.list(sessionKeyOf(ctx));
-			if (!jobs.length) return text("No background jobs in this session.", { jobs: [] });
-			const now = Date.now();
-			return text(jobs.map((job) => `${formatJobLine(job)} (age ${Math.round(((job.endedAt ?? now) - job.startedAt) / 1000)}s)`).join("\n"), { jobs });
-		},
-	});
 
 	pi.registerCommand("background-jobs", {
 		description: "Background shell jobs: list | kill <job_id> | kill-all | orphans | kill-orphans",

@@ -31,13 +31,13 @@
 
   async function submit(button?: number): Promise<void> {
     if (!enabled) return;
-    // Reply buttons send their own label; checklists send the selection.
+    // Compatibility buttons preserve the full prompt, not just its short label.
     if (button !== undefined) state.selected = [button];
     if (!state.selected.length) return;
     state.submitting = true;
     state.error = "";
     try {
-      await onSubmit(button !== undefined ? actions.items[button]!.label : choiceActionsPrompt(actions.submitLabel, actions.items, state.selected));
+      await onSubmit(button !== undefined ? (actions.items[button]!.prompt ?? actions.items[button]!.label) : choiceActionsPrompt(actions.submitLabel, actions.items, state.selected));
       state.submitted = true;
     } catch (cause) {
       state.error = cause instanceof Error ? cause.message : String(cause);
@@ -59,6 +59,7 @@
         !enabled && !pressed && "opacity-40",
       ]}
       type="button"
+      title={item.prompt}
       disabled={!enabled}
       aria-pressed={state.submitted ? pressed : undefined}
       data-choice-button={index}

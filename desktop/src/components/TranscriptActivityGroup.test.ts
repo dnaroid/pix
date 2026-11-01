@@ -19,6 +19,20 @@ function header(entries: ActivityEntry[]): string {
 }
 
 describe("activity icon trail", () => {
+  it("hides the horizontal trail in an expanded group while retaining the chevron and duration", () => {
+    const html = header([{
+      ...tool("user-bash", "bash"), rawInput: { excludeFromContext: true },
+      startedAtMs: 1, endedAtMs: 100,
+    }]);
+    expect(html).toContain("open");
+    expect(html).not.toContain("activity-icon-trail");
+    expect(html).not.toContain("data-activity-name");
+    expect(html).toContain("Tool activity");
+    expect(html).toContain("lucide-chevron-right");
+    expect(html).toContain("data-activity-duration");
+    expect(html.match(/<svg\b/g)).toHaveLength(1);
+  });
+
   it("renders repeated calls in start order, not completion or alphabetical order", () => {
     const html = header([
       { ...tool("a", "read"), startedAtMs: 1, endedAtMs: 100 },
@@ -51,16 +65,32 @@ describe("activity icon trail", () => {
     expect(activityIcon("skill simplify")).toBe(activityIcon("skill"));
     expect(activityIcon("unknown_a")).toBe(activityIcon("unknown_b"));
     const names = ["read", "shell", "ast_grep", "ast_apply", "apply_patch", "codemode", "project_search",
-      "project_tasks", "todo", "session", "subagents", "question", "compress", "web_search", "web_fetch", "wiki_conflicts", "skill", "thinking"];
+      "project_tasks", "todo", "session", "subagents", "question", "compress", "web_search", "web_fetch", "wiki_conflicts", "skill", "thinking",
+      "shell_output", "shell_jobs", "shell_kill", "lookup"];
     for (const name of ["repo_audit", "repo_knowledge", "repo_context", "repo_inspect", "repo_ast",
       "repo_search", "repo_structure", "repo_architecture", "repo_deps", "repo_ask", "repo_explain",
-      "read_file", "task", "agent", "brainstorm", "lookup",
+      "read_file", "task", "agent", "brainstorm",
       "project", "projects", "get_plan", "update_plan", "multi_tool_use"]) {
       expect(activityIcon(name), name).toBe(activityIcon("unknown"));
     }
     expect(activityIcon("multi_tool_use.parallel")).toBe(activityIcon("parallel"));
     expect(new Set(names.map((name) => activityIcon(name))).size).toBe(names.length);
     for (const name of names) expect(activityIcon(name)).not.toBe(activityIcon("unknown"));
+  });
+
+  it.each([
+    ["shell_output", "logs"], ["shell_jobs", "list-tree"],
+    ["shell_kill", "octagon-x"], ["lookup", "scan-eye"],
+  ])("renders the dedicated %s icon, including namespaced labels", (name, icon) => {
+    expect(activityIcon(`functions.${name}`)).toBe(activityIcon(name));
+    const html = header([tool(name, name)]);
+    expect(html).toContain(`lucide-${icon}`);
+    expect(html).not.toContain("lucide-wrench");
+  });
+
+  it("shares background shell icons with the Claude aliases", () => {
+    expect(activityIcon("BashOutput")).toBe(activityIcon("shell_output"));
+    expect(activityIcon("functions.KillShell")).toBe(activityIcon("shell_kill"));
   });
 
   it("renders a dedicated book alert icon for wiki conflicts, including namespaced labels", () => {

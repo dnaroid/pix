@@ -47,8 +47,16 @@ Show the same project sessions in Pix Desktop that Pix TUI discovers while keepi
   not wait for discovery. Stale workspace/client/generation responses are
   ignored.
   Other ACP clients retain synchronous, fully reconciled `session/list`.
-- Native background scans are single-flight per cwd and compare file names,
-  sizes, mtimes and inode numbers before rereading unchanged JSONL bodies.
+- Native background scans are single-flight per cwd and pre-scan a directory
+  revision from file names and filesystem fingerprints (device, inode, size,
+  modification time and change time). The first discovery reads the JSONL
+  files but retains only per-file title, first-prompt, activity and fork
+  metadata—not full-transcript/search text. Later scans reread only files whose
+  fingerprint changed; stable files are not parsed again. A file changing
+  during a read is not acknowledged as consumed, and failed/aborted reads are
+  retried. Deleted files are pruned from the per-file cache. The metadata cache
+  is scoped to the ACP adapter and cleared during teardown. Discovery uses the
+  configured Pi agent directory.
   Failures retain mapped conversations and allow retries. A running scan is
   canceled during adapter teardown, and stale connection/workspace notifications
   cannot modify an unrelated Desktop catalog. Notifications received during an

@@ -3,6 +3,7 @@ import { splitHtmlSandboxSegments } from "./html-sandbox";
 import type { TranscriptDisplayItem } from "./transcript-types";
 
 function replySelection(text: string, actions: ChoiceActions): ChoiceActions | undefined {
+  if (actions.buttons) return undefined;
   const lines = text.split("\n");
   if (lines.shift() !== `${actions.submitLabel}:` || !lines.length) return undefined;
   const selected: number[] = [];

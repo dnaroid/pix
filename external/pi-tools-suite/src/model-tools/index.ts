@@ -459,13 +459,13 @@ function registerBackgroundAliases(runtime: ModelToolsRuntime, pi: ExtensionAPI)
   pi.registerTool(defineTool({
     name: "BashOutput",
     label: "BashOutput",
-    description: "Read new output from a background Bash job (run_in_background). Returns only output produced since the last read, plus status and log path.",
+    description: "Read new output from a background Bash job (run_in_background). Returns only output produced since the last read, plus status and log path. Omit bash_id to list this session's background jobs with id, status, pid, age and command.",
     parameters: Type.Object({
-      bash_id: Type.String({ description: "Background job id returned by Bash" }),
+      bash_id: Type.Optional(Type.String({ description: "Background job id returned by Bash; omit to list this session's jobs" })),
       filter: Type.Optional(Type.String({ description: "Optional regular expression; only matching lines are returned" })),
     }),
     async execute(id, params, signal, onUpdate, ctx) {
-      return tools.output.execute(id, { job_id: params.bash_id, ...(params.filter ? { filter: params.filter } : {}) }, signal, onUpdate, ctx);
+      return tools.output.execute(id, { ...(params.bash_id ? { job_id: params.bash_id } : {}), ...(params.filter ? { filter: params.filter } : {}) }, signal, onUpdate, ctx);
     },
   }));
   pi.registerTool(defineTool({

@@ -599,6 +599,7 @@
       <WikiConsistencyReport
         {checking}
         {queued}
+        collapsedByDefault={!editing}
         result={knowledgeResult}
         stale={knowledgeReportStale}
         checkedAt={knowledgeReportCheckedAt}

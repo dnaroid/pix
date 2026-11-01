@@ -35,32 +35,7 @@ import type { LspServerConfig, ResolvedCommand } from "./_shared/types";
 import { supportsSave } from "./lsp-utils";
 import type { OpenDocument } from "./types";
 
-interface MarkdownToken {
-  type: string;
-  markup: string;
-  content: string;
-  map: number[] | null;
-  children: MarkdownToken[] | null;
-}
-
-function markdownTextToken(content: string): MarkdownToken {
-  return { type: "text", markup: "", content, map: null, children: null };
-}
-
-function parseMarkdownTokens(text: string): MarkdownToken[] {
-  const tokens: MarkdownToken[] = [];
-  const lines = text.split(/\r?\n/);
-  for (let lineNumber = 0; lineNumber < lines.length; lineNumber += 1) {
-    const line = lines[lineNumber];
-    const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
-    if (!heading) continue;
-    const [, markup, content] = heading;
-    tokens.push({ type: "heading_open", markup, content: "", map: [lineNumber, lineNumber + 1], children: null });
-    tokens.push({ type: "inline", markup: "", content, map: [lineNumber, lineNumber + 1], children: [markdownTextToken(content.trim())] });
-    tokens.push({ type: "heading_close", markup, content: "", map: null, children: null });
-  }
-  return tokens;
-}
+import { parseMarkdownTokens } from "./markdown-parser";
 import { tsserverDiagnosticToLsp, tsserverDiagnosticsFromResponse } from "./tsserver";
 
 export class LspClient {

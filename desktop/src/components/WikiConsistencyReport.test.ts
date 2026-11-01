@@ -28,6 +28,25 @@ function buttons(body: string): string[] { return body.match(/<button\b[^>]*>[\s
 function citationButtons(body: string): string[] { return buttons(body).filter(button => button.includes('aria-label="Открыть фрагмент источника:')); }
 
 describe("Wiki consistency report rendering", () => {
+  it.each(["conflicts", "incomplete", "clear"] as const)("collapses saved %s audits into one line while reading", status => {
+    const body = html({ collapsedByDefault: true, result: report({ status }), onRetry: vi.fn(), onResolve: vi.fn() });
+    const toggle = buttons(body).find(button => button.includes('aria-label="Развернуть отчёт"'));
+    expect(toggle).toContain('aria-expanded="false"');
+    expect(toggle).toContain("min-w-0 truncate");
+    expect(toggle).toContain("<svg");
+    expect(toggle).not.toContain("rotate-90");
+    expect(body).toContain('class="flex min-w-0 items-center gap-1 px-3 py-1"');
+    expect(body).toContain('<div hidden="" class="shrink-0">');
+    expect(body).toMatch(/<div[^>]* hidden[^>]*data-wiki-report-body/);
+  });
+
+  it("keeps cancellation available in a single-line running check", () => {
+    const body = html({ collapsedByDefault: true, checking: true });
+    expect(body).toContain("Отменить проверку");
+    expect(body).not.toContain('<div hidden="" class="shrink-0">');
+    expect(body).not.toContain("data-wiki-report-body");
+  });
+
   it.each([false, true])("keeps summary and wrapping actions on separate rows (compact: %s)", compact => {
     const body = html({ compact, onResolve: vi.fn(), onRetry: vi.fn(), canSaveAnyway: true });
     expect(body).toContain('class="flex min-w-0 flex-col items-start gap-1 px-3 py-2"');

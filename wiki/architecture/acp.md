@@ -59,6 +59,13 @@ Zed (Agent Panel)  <--ACP JSON-RPC over stdio-->  pix-acp  <--JSONL RPC over std
   forwarded to pi unchanged.
 - `src/pi/pi-rpc-client.ts` — thin wrapper around the SDK `RpcClient`
   (`@earendil-works/pi-coding-agent`) that spawns its Node-readable RPC entry.
+- `src/pi/rpc-stdout.ts` / `src/pi/jsonl-reader.ts` — retain SDK RPC parsing,
+  request correlation and timeouts while replacing SDK 1.4.0's quadratic stdout
+  line framing with LF-delimited, linear chunk scanning. Startup synchronously
+  takes over the SDK reader before its first await so startup output is not
+  missed; the private SDK fields and startup ordering are a compatibility seam
+  to recheck on SDK upgrades. The reader handles UTF-8 chunk boundaries, CRLF,
+  final unterminated records, and stream disposal/close.
 - `src/config.ts` / `src/logging.ts` — env config and stderr-only logging.
 
 **stdout is reserved for the protocol stream**; all diagnostics go to stderr.
@@ -83,6 +90,9 @@ npm run dev     # run the adapter directly (expects ACP JSON-RPC on stdio)
 ```
 
 From the repo root: `npm run check:acp`.
+
+The ACP tests include JSONL framing/lifecycle cases, stdout-reader startup and
+failure cases, and a large-session RPC regression test.
 
 The `pi` process spawned by the adapter loads the shared agent environment
 (`~/.pi/agent/`), so the pix-installed tools suite, skills, and prompts are

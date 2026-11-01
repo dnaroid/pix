@@ -11,13 +11,18 @@ export const MAX_CHOICE_BUTTONS = 4;
 
 /** Prompt guidance shared by every client that renders pix-actions. */
 export const CHOICE_ACTIONS_CAPABILITY = "Choice rule: if you need the user's answer before you can continue, call the question tool and wait; if the work is done and you are only offering optional next steps, end the turn with a pix-actions checklist instead. Never use both for the same choice. The checklist is the last thing you do: put it at the end of your final message and stop, with no tool calls or further work after it; if work remains, finish it first or ask with the question tool.\n"
-	+ "When offering next steps you would carry out, end with a closed ```pix-actions <button label> fence containing only \"- [x] step\" (recommended) or \"- [ ] step\" lines; the user can tick several. The button label MUST be on the opening line, never inside the body: a standalone title makes the menu render as code. Keep user-performed steps out of the checklist; when you stop for the user to do something themselves, use plain \"- Done\" lines instead (no checkboxes, short replies): each becomes a one-click reply button. Example:\n"
+	+ "When offering next steps you would carry out, end with a closed ```pix-actions <button label> fence containing only \"- [x] step\" (recommended) or \"- [ ] step\" lines; the user can tick several. No JSON or label/prompt objects: each item is the full instruction to send, with prerequisites already satisfied. The button label MUST be on the opening line, never inside the body: a standalone title makes the menu render as code.\n"
+	+ "Keep user-performed steps out of the checklist. When you stop for the user to do something themselves, use a closed ```pix-actions fence containing 1–4 plain \"- Done\" lines (no checkboxes; each reply at most 40 characters): each becomes a one-click reply button. An unfenced Markdown list stays ordinary text, not buttons. Reply-button example:\n"
+	+ "```pix-actions\n- Done\n- Error loading extension\n```\n"
+	+ "Agent next-step checklist example:\n"
 	+ "```pix-actions Simplify\n- [x] Remove duplicate instructions\n```";
 export const CHOICE_ACTIONS_CAPABILITY_MARKER = "Choice rule: if you need the user's answer";
 
 export interface ChoiceActionItem {
 	readonly label: string;
 	readonly checked: boolean;
+	/** Desktop compatibility buttons can carry a distinct user-message payload. */
+	readonly prompt?: string;
 }
 
 export interface ChoiceActions {

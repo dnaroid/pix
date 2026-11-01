@@ -50,6 +50,25 @@ describe("pix-actions contract", () => {
 		assert.ok(CHOICE_ACTIONS_CAPABILITY.includes("MUST be on the opening line, never inside the body"));
 	});
 
+	it("requires a closed pix-actions fence for reply buttons and demonstrates it", () => {
+		assert.ok(CHOICE_ACTIONS_CAPABILITY.includes('use a closed ```pix-actions fence containing 1–4 plain "- Done" lines'));
+		assert.ok(CHOICE_ACTIONS_CAPABILITY.includes("An unfenced Markdown list stays ordinary text, not buttons."));
+		const examples = [...CHOICE_ACTIONS_CAPABILITY.matchAll(/^```pix-actions[^\n]*\n[\s\S]*?\n```/gm)].map(([text]) => lastChoiceActions(text));
+		assert.equal(examples.length, 2);
+		assert.deepEqual(examples[0], {
+			submitLabel: "Continue",
+			items: [{ label: "Done", checked: false }, { label: "Error loading extension", checked: false }],
+			buttons: true,
+		});
+		assert.equal(examples[1]?.items[0]?.checked, true);
+	});
+
+	it("briefly rejects JSON actions and premature prerequisites", () => {
+		const guidance = "No JSON or label/prompt objects: each item is the full instruction to send, with prerequisites already satisfied.";
+		assert.ok(CHOICE_ACTIONS_CAPABILITY.includes(guidance));
+		assert.ok(guidance.split(/\s+/).length <= 22);
+	});
+
 	it("rejects a standalone button label in the body instead of treating it as an action", () => {
 		assert.equal(lastChoiceActions("```pix-actions\nУпростить\n- [x] Убрать дублирующую маршрутизацию к скиллам из AGENTS.md\n```"), undefined);
 		assert.equal(lastChoiceActions("```pix-actions Упростить\n- [x] Убрать дублирующую маршрутизацию к скиллам из AGENTS.md\n```")?.submitLabel, "Упростить");

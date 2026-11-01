@@ -1,6 +1,7 @@
 import { isClosingFence, parseFence } from "./markdown-fences";
 import { CHOICE_ACTIONS_LANGUAGE, parseChoiceActions, type ChoiceActions } from "./choice-actions";
 import { extractSandboxEngines, loadSandboxEngine, type SandboxEngineLoader } from "./html-sandbox-engines";
+import { MAX_JSON_ACTIONS_CHARS, parseJsonChoiceActions } from "./choice-actions-json";
 
 // These are deliberately bounded: the source lives in the transcript and each
 // running iframe owns its own JavaScript realm, Canvas and DOM.
@@ -28,7 +29,25 @@ export function splitHtmlSandboxSegments(
   let index = 0;
   while (index < lines.length) {
     const fence = parseFence(lines[index] ?? "");
-    if (!fence) { index += 1; continue; }
+    if (!fence) {
+      // Only a standalone trailing array is eligible. Bound candidate assembly
+      // as well as JSON.parse; streaming and ordinary examples stay Markdown.
+      if (options.actions && /^ {0,3}\[/.test(lines[index] ?? "") && (index === 0 || !lines[index - 1]?.trim())) {
+        let body = "";
+        for (let next = index; next < lines.length && body.length <= MAX_JSON_ACTIONS_CHARS; next += 1) {
+          body += (next === index ? "" : "\n") + lines[next];
+        }
+        const actions = parseJsonChoiceActions(body);
+        if (actions) {
+          if (index > markdownStart) segments.push({ type: "markdown", text: lines.slice(markdownStart, index).join("\n") });
+          segments.push({ type: "actions", actions });
+          markdownStart = lines.length;
+          break;
+        }
+      }
+      index += 1;
+      continue;
+    }
     const language = fence.language.toLowerCase();
     const sandbox = options.sandbox && ["pix-html", "html-sandbox"].includes(language);
     let closing = index + 1;
@@ -49,6 +68,9 @@ export function splitHtmlSandboxSegments(
       if (body.trim() && body.length <= MAX_SANDBOX_SOURCE_CHARS) segment = { type: "sandbox", html: body };
     } else if (options.actions && language === CHOICE_ACTIONS_LANGUAGE) {
       const actions = parseChoiceActions(fence.info, body);
+      if (actions) segment = { type: "actions", actions };
+    } else if (options.actions && language === "json" && !lines.slice(closing + 1).some((line) => line.trim())) {
+      const actions = parseJsonChoiceActions(body);
       if (actions) segment = { type: "actions", actions };
     }
     if (segment) {

@@ -16,6 +16,8 @@ describe("activity identity and status color", () => {
   for (const [label, icon, imageRead] of [
     ["shell", "terminal", false], ["functions.apply_patch", "file-pen", false],
     ["thinking", "brain", false], ["read", "image", true],
+    ["shell_output", "logs", false], ["shell_jobs", "list-tree", false],
+    ["shell_kill", "octagon-x", false], ["lookup", "scan-eye", false],
     ["skill simplify", "graduation-cap", false], ["custom_tool", "wrench", false],
   ] as const) {
     it.each(states)(`${label} keeps its icon for $status / $attention`, ({ color, ...state }) => {

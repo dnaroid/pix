@@ -208,6 +208,13 @@ Cancel stops a queued or running task; Dismiss removes a terminal entry.
 Cancelling a request does not start the next request until the previous backend
 promise settles. An already-started native atomic write cannot be recalled.
 
+In Preview while not editing, a saved report starts collapsed into a compact
+single-line summary with inline counts; long summaries truncate and expose the
+full text in a tooltip. Expanding reveals the report details and actions. A
+running check keeps its Cancel action available. Editing and reports in the Wiki
+queue sidebar remain expanded by default. A new result or a change between these
+modes resets the report disclosure to that mode's default.
+
 ### Wiki Conflicts tab
 
 Wiki Conflicts reviews conflicts and uncertainties from all saved page reports

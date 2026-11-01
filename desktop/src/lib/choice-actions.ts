@@ -10,7 +10,13 @@ export {
   MAX_CHOICE_SUBMIT_LABEL_CHARS,
   MIN_CHOICE_ACTIONS,
   choiceActionsPrompt,
-  parseChoiceActions,
   type ChoiceActionItem,
   type ChoiceActions,
 } from "../../../src/bundled-extensions/choice-actions/contract";
+
+import { parseChoiceActions as parseChecklist, type ChoiceActions } from "../../../src/bundled-extensions/choice-actions/contract";
+import { parseJsonChoiceActions } from "./choice-actions-json";
+
+export function parseChoiceActions(info: string, body: string): ChoiceActions | undefined {
+  return parseChecklist(info, body) ?? parseJsonChoiceActions(body);
+}

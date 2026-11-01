@@ -164,9 +164,30 @@ Choose what I should do next:
 ```
 ~~~~
 
+The shared prompt explicitly forbids JSON/`label`/`prompt` output: each item
+is the complete instruction to send and its prerequisites must already hold.
+Desktop additionally tolerates legacy JSON menus as a compatibility fallback,
+not an advertised generation format: a standalone trailing array (at message
+start or after a blank line), a trailing closed `json` fence, or JSON inside a
+closed `pix-actions` fence. Each of 1–4 objects must have exactly string `label`
+and `prompt` fields: nonblank labels are single-line, at most 40 characters;
+nonblank prompts are at most 300 characters. JSON source is capped at 16 KiB
+(characters); malformed, incomplete or out-of-bounds input stays ordinary text.
+Only assistant action-enabled rendering recognizes menus; other code fences
+are skipped. These menus reuse the reply-button UI, activity guards and
+submission lock. A click sends the selected object's full `prompt` verbatim,
+not its label, and the prompt is available as the button tooltip. No actions
+execute automatically and no checkbox receipt is reconstructed for buttons.
+Bare/trailing-`json` fallback is Desktop-only; TUI continues to require the
+canonical list syntax in a `pix-actions` fence.
+
 When the agent stops for the user to do something themselves (install a tool,
-sign in, export a file) and then reply, the body may instead contain only plain
-list items without checkboxes — 1–4 short replies of at most 40 characters:
+sign in, export a file) and then reply, use a **closed `pix-actions` fence**
+whose body contains only plain list items without checkboxes — 1–4 short
+replies of at most 40 characters. The shared Desktop/TUI prompt states this
+requirement and includes a fenced reply-button example. Unfenced Markdown lists
+remain ordinary text, including in historical messages; they are not inferred
+to be buttons:
 
 ~~~~markdown
 ```pix-actions

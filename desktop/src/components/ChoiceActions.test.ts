@@ -38,7 +38,8 @@ describe("ChoiceActions quick-choice block", () => {
   });
 
   it("sends the formatted selection and surfaces submission errors", () => {
-    expect(choiceSource).toContain("await onSubmit(button !== undefined ? actions.items[button]!.label : choiceActionsPrompt(actions.submitLabel, actions.items, state.selected));");
+    expect(choiceSource).toContain("await onSubmit(button !== undefined ? (actions.items[button]!.prompt ?? actions.items[button]!.label) : choiceActionsPrompt(actions.submitLabel, actions.items, state.selected));");
+    expect(choiceSource).toContain("title={item.prompt}");
     expect(choiceSource).toContain("state.submitted = true;");
     expect(choiceSource).toContain('role="alert"');
   });

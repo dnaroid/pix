@@ -90,7 +90,7 @@ test("failure does not poison the last successful revision, and disposal cancels
   assert.equal(notifications, 0);
 });
 
-test("a session growing during discovery does not trigger an immediate second scan", async () => {
+test("a session growing during discovery is retried rather than acknowledged without reading", async () => {
   let revision = "before";
   let scans = 0;
   const scanStarted = deferred();
@@ -107,9 +107,10 @@ test("a session growing during discovery does not trigger an immediate second sc
     revision = "after"; // a JSONL append happens while its directory is scanned
     release.resolve();
     await updated.promise;
-    catalog.refresh("/project", () => assert.fail("post-scan revision already reconciled"));
-    await nextTurn();
-    assert.equal(scans, 1);
+    assert.equal(await catalog.refresh("/project", () => {}), true);
+    assert.equal(scans, 2);
+    await catalog.refresh("/project", () => assert.fail("unchanged revision must not notify"));
+    assert.equal(scans, 2);
   } finally {
     await catalog.dispose();
   }
