@@ -72,10 +72,12 @@ maintenance, without treating generated answers as semantic proof.
   Keep the governing
   document's behavior/scenarios/constraints/interfaces aligned in
   the same task; create a focused spec only if needed. New specs use the
-  project's spec template (`specs/TEMPLATE.md` when present), with
-  `kind: spec` and intended `status`, and
-  project-root-relative paths in Implementation/Tests sections. If the template
-  is absent, ask before creating one rather than inventing a convention.
+  project's documentation location, authoring rules and spec template when
+  present, with `kind: spec` and intended `status`. Describe behavior,
+  constraints and verification outcomes rather than catalogues of source/test
+  paths. Keep exact paths for documented actions, contracts or historical
+  evidence. If the template is absent, ask before creating one rather than
+  inventing a convention.
   Existing useful documents do not need reformatting.
 - Before completing an implementation task, the parent runs the available
   `knowledge-auditor` with the final behavior/result and exact task-changed
@@ -152,43 +154,6 @@ Historical: [0046 — Task-scoped knowledge audit completion](../decisions/0046-
   It may fix small proven links/typos, but never invent, accept or
   supersede decisions itself. Parent-owned fallback audits use the same checks.
 
-## Implementation
-
-- `external/pi-tools-suite/src/tool-descriptions.ts`
-- `external/pi-tools-suite/src/project-search/index.ts`
-- `external/pi-tools-suite/test/fixtures/hard-to-find-project/benchmark/run-locate-benchmark.mjs`
-- `external/pi-tools-suite/src/repo-discovery/subagent.ts`
-- `external/pi-tools-suite/src/async-subagents/core/child-tools.ts`
-- `external/pi-tools-suite/src/async-subagents/core/spawn.ts`
-- `external/pi-tools-suite/src/async-subagents/agents/knowledge-auditor.md`
-- `external/pi-tools-suite/src/async-subagents/core/config.ts`
-- `external/pi-tools-suite/src/async-subagents/core/agent-catalog.ts`
-- `external/pi-tools-suite/src/todo/index.ts`
-- `wiki/tools/suite.md`
-
-## Tests
-
-- `external/pi-tools-suite/test/tool-descriptions.test.ts`
-- `external/pi-tools-suite/test/tool-selection-e2e.test.ts`
-- `external/pi-tools-suite/test/tool-selection-fixture.test.ts`
-- `external/pi-tools-suite/test/tool-selection-fixture.ts`
-- `external/pi-tools-suite/test/tool-selection-process.ts`
-- `external/pi-tools-suite/test/fixtures/tool-selection-spec-template.md`
-- `external/pi-tools-suite/test/fixtures/tool-selection-payment-retry.md`
-- `external/pi-tools-suite/test/async-subagents/knowledge-auditor.test.ts`
-- `external/pi-tools-suite/test/todo.test.ts`
-- `external/pi-tools-suite/test/fixtures/hard-to-find-project/README.md`
-- `wiki/tools/suite.md`
-- `external/pi-tools-suite/test/async-subagents/repo-tools.test.ts`
-- `external/pi-tools-suite/test/async-subagents/provider-child-inventory.test.ts`
-- `external/pi-tools-suite/test/evals/decision-policy.ts`
-- `external/pi-tools-suite/test/evals/decision-policy.test.ts`
-- `external/pi-tools-suite/test/evals/fixtures/decision-policy/`
-- `external/pi-tools-suite/test/evals/cases.ts`
-- `external/pi-tools-suite/test/evals/coverage-manifest.ts`
-- `external/pi-tools-suite/test/evals/harness/types.ts`
-- `external/pi-tools-suite/test/evals/harness/runner.ts`
-
 ## Verification
 
 - Tests cover supported command routing, bounded defaults, input validation,
@@ -197,7 +162,6 @@ Historical: [0046 — Task-scoped knowledge audit completion](../decisions/0046-
   with real model calls. It retains the focused-search, contract,
   architecture, audit-fallback and session/compression assertions; deterministic
   fixture tests cover root isolation, parser compatibility and child cleanup.
-- `bun test test/tool-descriptions.test.ts test/project-search.test.ts`
 - `npm --prefix external/pi-tools-suite run typecheck`
 - `git diff --check`
 - `npm --prefix external/pi-tools-suite run test:evals:contracts` checks the

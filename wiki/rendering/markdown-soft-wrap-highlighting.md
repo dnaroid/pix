@@ -37,12 +37,6 @@ Keep syntax highlighting continuous when one logical Markdown or fenced-code lin
 - A soft wrap must not terminate or restart an inline Markdown construct, string, or comment.
 - Visual lines retain their existing text, width, copy text, and continuation metadata.
 
-## Related files
-
-- `src/markdown-format.ts`
-- `src/syntax-highlight.ts`
-- `tests/markdown-format.test.ts`
-
 ## Verification
 
 - Regression tests cover wrapped inline code, emphasis, links, headings, and fenced code strings/comments.
@@ -58,13 +52,5 @@ Keep syntax highlighting continuous when one logical Markdown or fenced-code lin
 - Confirmed by code: `renderMarkdownTextLines` wraps before `ScreenStyler` invokes line-local syntax highlighting.
 - Confirmed by tests: `tests/markdown-format.test.ts` directly covers inline-code/emphasis, headings, and fenced TypeScript string/comment highlighting across soft wraps.
 - Confirmed by user report: inline-code color is lost after a terminal-width wrap.
-
-## Implementation
-
-- `src/markdown-format.ts`
-
-## Tests
-
-- `tests/markdown-format.test.ts`
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"57fdfc29afb6178743bd186e98e700f6758fb7e7ff9bed6a679dc14383cd9924","checkedAt":"2026-10-31T00:09:46.670Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":61,"reportLanguage":"ru"} -->

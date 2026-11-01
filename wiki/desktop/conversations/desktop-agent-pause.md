@@ -66,51 +66,16 @@ colors in both light and dark mode.
 - The default ACP Pi entry is a thin Pix RPC shim around the pinned Pi RPC runtime. It intercepts private control messages before they can enter the transcript and implements the turn-boundary pause algorithm by wrapping `Agent.finishTurn` and using `Agent.continue()`. Existing explicit `continue` decisions remain authoritative, so a pause request stays pending until the next boundary that can be resumed through `Agent.continue()`.
 - Explicit `PIX_ACP_PI_ENTRY` overrides remain supported, but a replacement entry must implement the Pix control shim for Desktop pause/continue to work.
 
-## Related files
-
-- `src/app/session/agent-pause-controller.ts`
-- `src/bundled-extensions/question/recovery.ts` (third private SDK continuation mirror)
-- `acp/src/pi/pix-rpc-entry.js`
-- `acp/src/pi/pi-rpc-client.ts`
-- `acp/src/acp/desktop-commands.ts`
-- `acp/src/acp/pix-acp-agent.ts`
-- `desktop/src/lib/agent-control.ts`
-- `desktop/src/lib/agent-control.test.ts`
-- `desktop/src/lib/acp-client.ts`
-- `desktop/src/lib/acp-pix-extensions.ts`
-- `desktop/src/app/prompt-agent-control.svelte.ts`
-- `desktop/src/app/prompt-run-lifecycle.svelte.ts`
-- `desktop/src/app/prompt-run-lifecycle.test.ts`
-- `desktop/src/app/prompt-runtime.svelte.ts`
-- `desktop/src/app/prompt-runtime-busy.test.ts`
-- `desktop/src/app/desktop-workbench-prop-builders.ts`
-- `desktop/src/components/TranscriptPane.svelte`
-- `desktop/src/components/PromptComposerControls.svelte`
-- `desktop/src/components/PromptComposerActivityRow.svelte`
-- `desktop/src/components/PromptComposerActivityRow.test.ts`
-
-## Tests
-
-- `acp/test/agent.test.ts`
-- `acp/test/desktop-commands.test.ts`
-- `acp/test/pix-rpc-entry.test.ts`
-- `acp/test/pi-rpc-pause.test.ts`
-- `desktop/src/app/prompt-agent-control.test.ts`
-- `desktop/src/app/prompt-runtime-busy.test.ts`
-- `desktop/src/components/PromptComposerActivityRow.test.ts`
-- `desktop/src/lib/agent-control.test.ts`
-- `desktop/src/app/prompt-run-lifecycle.test.ts`
-
 ## Verification
 
 - ACP tests cover pause-requested to paused state and generic resumable-stop to continuation flow, including the settled continuation stop reason.
-- `acp/test/agent.test.ts` deterministically gates settlement snapshots and checks extension restarts during both prompt-owned and adopted runs, including retained ownership, queueing and Pause availability.
+- Deterministically gates settlement snapshots and checks extension restarts during both prompt-owned and adopted runs, including retained ownership, queueing and Pause availability.
 - Recovered-question/adopted-run regressions cover `running` state parsing, enabled Pause/Stop rendering, actual pause dispatch, duplicate start notifications, failed pause recovery, and terminal settlement without losing the busy owner.
 - Desktop tests cover the private ACP control request, session-state parsing, same-session pause transition detection, and source-level wiring/placement of the centered pause toast.
 - Activity-row render tests cover running controls without metadata, clickable/pressed pending Pause, Pause disablement while resuming, paused/continuable Continue, idle row removal, and questionnaire suppression. Source checks cover placement above the message form and callback separation from message actions.
 - Pending-pause cancellation tests cover prompt-owned and adopted runs, unchanged ownership/queue blocking, rapid repeated clicks, boundary commitment, failed cancellation, and stale replies after state pushes or session/runtime replacement.
-- `desktop/src/app/prompt-run-lifecycle.test.ts` covers stale completion and queued settlement callbacks, including cleanup/reset followed by a new run with the same session ID.
-- `desktop/src/app/prompt-runtime-busy.test.ts` covers busy pushes before old prompt/Continue responses or transcript metadata, rejected overlapping sends, stale/failed Continue recovery, retained Stop and queue blocking, and cleanup/reset. ACP tests cover repeated state republication for preflight, prompt-owned, and adopted busy runs without replacing their owner.
+- Stale completion and queued settlement callbacks, including cleanup/reset followed by a new run with the same session ID.
+- Busy pushes before old prompt/Continue responses or transcript metadata, rejected overlapping sends, stale/failed Continue recovery, retained Stop and queue blocking, and cleanup/reset. ACP tests cover repeated state republication for preflight, prompt-owned, and adopted busy runs without replacing their owner.
 - ACP typecheck/tests/stdio smoke and Desktop Svelte/TypeScript checks pass.
 
 ## Risks / compatibility

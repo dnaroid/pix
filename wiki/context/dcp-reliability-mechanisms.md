@@ -360,40 +360,10 @@ themselves, so per-defect closure is recorded there, not here. Current
 guarantees are exactly the ones verified above; the originals are preserved in
 git history.
 
-## Implementation
-
-- `external/pi-tools-suite/src/dcp/index.ts`
-- `external/pi-tools-suite/src/dcp/context-usage.ts`
-
-## Tests
-
-- `external/pi-tools-suite/test/dcp-context-usage.test.ts`
-- `tests/dcp-usage-fallback.integration.test.ts`
-
-## Related files
-
-- `external/pi-tools-suite/src/dcp/state-transaction.ts`
-- `external/pi-tools-suite/src/dcp/journal.ts`
-- `external/pi-tools-suite/src/dcp/conversation-index.ts`
-- `external/pi-tools-suite/src/dcp/auto-compress.ts`
-- `external/pi-tools-suite/src/dcp/compression-blocks.ts`
-- `external/pi-tools-suite/src/dcp/pruner-candidates.ts`
-- `external/pi-tools-suite/src/dcp/shadow-plan.ts`
-- `external/pi-tools-suite/src/session-recovery/index.ts`
-- `external/pi-tools-suite/test/auto-compress.test.ts`
-- `external/pi-tools-suite/test/dcp-transaction-faults.test.ts`
-- `external/pi-tools-suite/test/dcp-review-regressions.test.ts`
-- `external/pi-tools-suite/test/dcp-journal-lifecycle.test.ts`
-- `external/pi-tools-suite/test/dcp-marathon-replay.test.ts`
-- `external/pi-tools-suite/test/dcp-lifecycle-marathon.test.ts`
-- `external/pi-tools-suite/test/dcp-session-sim-e2e.test.ts`
-- `external/pi-tools-suite/test/support/dcp-session-simulator.ts`
-- `external/pi-tools-suite/test/dcp-shadow-plan.test.ts`
-
 ## Verification
 
-- From `external/pi-tools-suite/`, run the focused DCP wall/replay tests named
-  above, `npm run test:dcp-session-sim` for the session-efficiency wall, and
+- From `external/pi-tools-suite/`, run focused DCP wall/replay tests,
+  `npm run test:dcp-session-sim` for the session-efficiency wall, and
   `bun test test` for the full deterministic suite.
 - Canonical from the repo root: `npm run check` and
   `npm run test:tools-suite`; the dedicated session-sim entrypoint is

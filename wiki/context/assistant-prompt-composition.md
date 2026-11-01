@@ -49,24 +49,6 @@ updates rather than broad deletion of project text. Sanitization is request-time
 it does not rewrite persisted historical transcripts. A later external extension
 that replaces the prompt after the suite can override the suite's result.
 
-## Implementation
-
-- `external/pi-tools-suite/src/prompt-sanitizer.ts`
-- `external/pi-tools-suite/src/index.ts`
-- `external/pi-tools-suite/src/coding-discipline/index.ts`
-- `external/pi-tools-suite/src/tool-descriptions.ts`
-- `external/pi-tools-suite/src/async-subagents/core/agent-strategy.ts`
-- `external/pi-tools-suite/src/async-subagents/core/agent-catalog.ts`
-
-## Tests
-
-- `external/pi-tools-suite/test/prompt-sanitizer.test.ts`
-- `external/pi-tools-suite/test/prompt-sanitizer-sdk.test.ts`
-- `external/pi-tools-suite/test/coding-discipline.test.ts`
-- `external/pi-tools-suite/test/tool-descriptions.test.ts`
-- `external/pi-tools-suite/test/async-subagents/core.test.ts`
-- `external/pi-tools-suite/test/async-subagents/tools.test.ts`
-
 ## Verification
 
 Run focused tests and suite typecheck, then the broad suite and smoke checks.

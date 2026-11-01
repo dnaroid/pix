@@ -113,34 +113,39 @@ capacity limits. `[confirmed by code: src/antigravity-auth/index.ts]`
 - Outbound network to: `accounts.google.com`, `oauth2.googleapis.com`, `googleapis.com/oauth2/v1/userinfo`, and the Antigravity `cloudcode-pa` endpoints (daily/prod). The autopush constant remains only as a legacy/debugging value and is not in request fallback lists. `[confirmed by code: oauth.ts, stream.ts, constants.ts]`
 - Emits UI/session status messages and provider-failure notifications. `[confirmed by code: status.ts]`
 
-## Related files
+## Regression coverage
 
-- `external/pi-tools-suite/src/antigravity-auth/index.ts` — provider/command registration, event wiring
-- `.../auth-store.ts` — secret file I/O, key/refresh encoding, opencode import, account selection
-- `.../oauth.ts` — login, add-account, refresh/rotation/failover
-- `.../stream.ts` — SSE streaming, failover loop, quota detection
-- `.../status.ts` — status/notification helpers
-- `.../constants.ts` — provider ids, endpoints, scopes, redirect URI, project id
-- `.../headers.ts`, `.../payload.ts`, `.../models.ts`, `.../types.ts`, `.../commands.ts`
+Account rotation coverage is deterministic and serialized. `[confirmed by tests]`
 
-## Existing tests
+- Antigravity reasoning levels are clamped to the provider's supported `high` maximum.
 
-- `external/pi-tools-suite/test/antigravity-auth.test.ts` (`bun:test`, `describe.serial "Antigravity account rotation"`): `[confirmed by tests]`
-  - Antigravity reasoning levels are clamped to the provider's supported `high` maximum.
-  - Canonical Pi transcript system messages replay the active system prompt and tool declarations into the Antigravity payload.
-  - Tool-schema regression checks confirm `uniqueItems: true` and `uniqueItems: false` are removed at top-level and nested schema locations, other constraints are retained, and the source transcript is unchanged.
-  - Model catalog test pins the exact registered model id order (current catalog + legacy aliases + Gemini CLI mirrors, no image-output models).
-  - Deterministic payload mapping tests pin every new public id → live route/budget combination (3.5/3.6/3.7/3.8 Flash tiers, 3.1 Pro low/agent, GPT-OSS, Sonnet/Opus thinking) and assert legacy Antigravity and Gemini CLI routes are unchanged.
-  - OAuth client credentials preserved across refresh.
-  - SDK cancellation propagates into OAuth refresh.
-  - Nullable header deletion markers are removed before raw fetch.
-  - Content requests use the native agy CLI 1.1.24 User-Agent + current daily endpoint and strip stale/problematic proxy headers including `x-goog-user-project`.
-  - Client credentials resolve from env when `auth.json` has only accounts, and otherwise fall back to the native/public Antigravity OAuth client.
-  - A stream that ends without a finish reason fails instead of returning a partial success.
-  - No-account turn surfaces an error notification (deduped to one).
-  - Opencode accounts are **not** auto-imported at request time (no fetch).
-  - `ANTIGRAVITY_ALL_ACCOUNTS_EXHAUSTED` emitted only after trying every account for the model (rotates `access-0`→`access-1`, refreshes `refresh-1`, sets `activeIndex=1`, emits one `switch`).
-  - Non-limit 503 does **not** emit the all-exhausted marker.
+- Canonical Pi transcript system messages replay the active system prompt and tool declarations into the Antigravity payload.
+
+- Tool-schema regression checks confirm `uniqueItems: true` and `uniqueItems: false` are removed at top-level and nested schema locations, other constraints are retained, and the source transcript is unchanged.
+
+- Model catalog test pins the exact registered model id order (current catalog + legacy aliases + Gemini CLI mirrors, no image-output models).
+
+- Deterministic payload mapping tests pin every new public id → live route/budget combination (3.5/3.6/3.7/3.8 Flash tiers, 3.1 Pro low/agent, GPT-OSS, Sonnet/Opus thinking) and assert legacy Antigravity and Gemini CLI routes are unchanged.
+
+- OAuth client credentials preserved across refresh.
+
+- SDK cancellation propagates into OAuth refresh.
+
+- Nullable header deletion markers are removed before raw fetch.
+
+- Content requests use the native agy CLI 1.1.24 User-Agent + current daily endpoint and strip stale/problematic proxy headers including `x-goog-user-project`.
+
+- Client credentials resolve from env when `auth.json` has only accounts, and otherwise fall back to the native/public Antigravity OAuth client.
+
+- A stream that ends without a finish reason fails instead of returning a partial success.
+
+- No-account turn surfaces an error notification (deduped to one).
+
+- Opencode accounts are **not** auto-imported at request time (no fetch).
+
+- `ANTIGRAVITY_ALL_ACCOUNTS_EXHAUSTED` emitted only after trying every account for the model (rotates `access-0`→`access-1`, refreshes `refresh-1`, sets `activeIndex=1`, emits one `switch`).
+
+- Non-limit 503 does **not** emit the all-exhausted marker.
 
 ## Gaps / risks
 

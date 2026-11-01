@@ -114,33 +114,6 @@ persistent layout setting. Its resulting normal geometry is persisted here.
 - Configured automatic main-window creation is disabled; native startup creates
   either the saved window set or one default main window.
 
-## Related files
-
-- `desktop/src-tauri/Cargo.toml`
-- `desktop/src-tauri/src/lib.rs`
-- `desktop/src-tauri/src/window_restore.rs`
-- `desktop/src-tauri/src/window_geometry.rs`
-- `desktop/src-tauri/tauri.conf.json`
-- `desktop/src/app/project-workspace.svelte.ts`
-- `desktop/src/app/workspace-controller.ts`
-- `desktop/src/lib/window-layout-storage.ts`
-- `desktop/src/app/session-inspector-preference.svelte.ts`
-- `desktop/src/components/WorkspaceSidebar.svelte`
-- `desktop/src/components/workspace-sidebar-layout-controller.svelte.ts`
-- `desktop/src/components/SessionInspector.svelte`
-- `scripts/watch-all.mjs`
-- `scripts/watch-all-desktop-quit.mjs`
-
-## Tests
-
-- `desktop/src/lib/native-window-config.test.ts`
-- `desktop/src-tauri/src/window_restore.rs`
-- `desktop/src-tauri/src/window_geometry.rs`
-- `desktop/src/app/project-workspace.test.ts`
-- `desktop/src/app/workspace-controller.test.ts`
-- `desktop/src/lib/window-layout-storage.test.ts`
-- `tests/watch-all-desktop-quit.test.ts`
-
 ## Verification
 
 - Run `cargo check --manifest-path desktop/src-tauri/Cargo.toml`.

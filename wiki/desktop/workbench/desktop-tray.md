@@ -62,26 +62,13 @@ status: active
   another attention event; the retry is cancelled on teardown, and the failure is
   logged as `frontend:warning` once per failure streak.
 
-## Implementation and verification
+## Verification and limits
 
-- `desktop/src-tauri/src/desktop_tray.rs`: config parsing, window menu, icon and
-  application presentation; unit tests cover explicit opt-in, JSONC, stable
-  entries, duplicate titles, refreshed membership and left-release-only activation.
-- `desktop/src-tauri/src/lib.rs`, `window_restore.rs`: startup, shutdown and
-  window membership/title hooks.
-- `desktop/src-tauri/src/desktop_tray_icon.rs`, `desktop_tray_attention.rs`:
-  cached antialiased icon variants and live-window attention aggregation.
-- `desktop/src-tauri/src/desktop_notification.rs`: exact native foreground activation.
-- `desktop/src/lib/desktop-tray-attention.ts`, `desktop-notifications.ts`,
-  `desktop/src/App.svelte`: unseen-event tracking, settled-work integration and
-  foreground conversation acknowledgement. Focused tests cover serialization,
-  stale completion, failure retry, teardown and notification independence.
-- `desktop/src/components/settings/DesktopSettingsEditor.svelte`,
-  `desktop/src/lib/settings-search-catalog.ts`: authored setting and lookup.
-- `src/schemas/pix-desktop-schema.ts`, `schemas/pix-desktop.json`,
-  `desktop/src/lib/default-desktop-config.ts`: schema and default.
-- `tests/pix-desktop-tray-schema.test.ts`: schema parity, boolean validation and
-  a source guard against tray activation-policy changes or custom window cycling.
+Regression checks cover explicit opt-in, JSONC, stable menu entries,
+duplicate titles, refreshed membership, left-release-only activation,
+attention serialization, stale completions, failure retry, teardown,
+notification independence, schema parity and boolean validation.
+Guards reject tray activation-policy changes and custom window cycling.
 
 Native macOS QA must cover both startup modes (including Dock and application
 menu availability), multiple windows, minimized window activation,

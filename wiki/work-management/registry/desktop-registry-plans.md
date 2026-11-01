@@ -196,35 +196,15 @@
   require each verified item to be saved as `[x]` immediately; finer sub-steps
   stay in session Steps.
 
-## Implementation and verification
+## Verification and limits
 
-- `desktop/src/components/RegistryPlansPanel.svelte`: attached list and search.
-- `desktop/src/components/registry-plans-view.svelte.ts`: workspace-scoped search
-  and scroll memory, with stale-owner guards and scroll-listener teardown.
-- `desktop/src/components/RegistryPanel.svelte` and `WorkspaceSidebar.svelte`:
-  composition and project-artifact routing.
-- `desktop/src/app/desktop-sidebar-view-model.svelte.ts`: actual Preview path.
-- `desktop/src/app/project-plan-actions.svelte.ts`: new-session plan launch,
-  composed with existing task actions and session activation services.
-- `desktop/src/app/project-plan-prompt.ts`: pure Run prompt builder shared by the
-  Desktop launch action and behavioral evals; includes scoped blockers, gates,
-  parallel integration, evidence invalidation and concurrent-edit handling.
-- `desktop/src/app/project-documents.svelte.ts`: confirmed deletion and save
-  serialization; `desktop-project-services.ts` owns Preview/registry follow-up.
-- `desktop/src/components/RegistryPlansPanel.test.ts`: rendered rows/filtering,
-  selection wiring, workspace/filter resets, remount memory and listener cleanup.
-- `external/pi-tools-suite/src/desktop-plan-prompt.ts` and `src/index.ts`: lazy
-  Desktop host guidance and registration. `test/desktop-plan-prompt.test.ts`
-  verifies Desktop-only scope, composition/idempotence and relocated runtime paths.
-- `desktop/src/app/project-plan-actions.test.ts` verifies the exact shared Run
-  prompt is sent in a fresh session, including lifecycle and stale-owner guards.
-- `external/pi-tools-suite/test/evals/plan-guidance.ts` supplies six read-only
-  model checkpoints using the current guide or production Run prompt: independent
-  work, conflicting contracts, scoped blockers, failed gates, worker completion
-  without evidence and integration-invalidated evidence. Validator tests reject
-  incorrect decisions, missing/failed plan reads and fixture changes. These cases
-  do not exercise actual worker dispatch, concurrent edits or integration; their
-  commands and limits are documented in `wiki/development/testing/evals.md`.
+Regression checks cover rendered rows/filtering, selection wiring,
+workspace/filter resets, remount memory, listener cleanup, fresh-session
+Run prompts, lifecycle and stale-owner guards, and Desktop-only prompt
+composition. Read-only model checkpoints cover independent work, conflicting
+contracts, scoped blockers, failed gates, completion without evidence and
+integration-invalidated evidence. They do not exercise actual worker
+dispatch, concurrent edits or integration; see [evals](../../development/testing/evals.md).
 
 Document loading, Markdown rendering, editing and saving retain their existing
 Preview and project-document contracts. Document scroll is not a separate
@@ -232,7 +212,7 @@ per-plan cache in this list; only the navigator's scroll is retained here.
 
 Checklist progress is native saved-file metadata: `list_project_documents`
 returns `planProgress`, a plan-path map of `{ completed, total }` or `null`.
-`desktop/src-tauri/src/plan_progress.rs` implements the bounded counter/cache;
+A bounded counter/cache supplies progress;
 each one-line plan card displays a progress ring (`PlanProgressRing`) and
 completed/total counts, not verification that plan gates passed. No real UI QA was performed.
 

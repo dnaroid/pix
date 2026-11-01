@@ -354,34 +354,6 @@ origin/auth/path/evidence checks continue to be implemented by the runner.
   does not install automation dependencies, grant OS permissions, or invent a
   different fallback surface.
 
-## Related files
-
-- `external/pi-tools-suite/src/async-subagents/agents/ui-qa.md`
-- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/guides/`
-- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/scripts/ui-qa-runner.mjs`
-- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/browser/scripts/browser-qa-runner.mjs`
-- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/backends/`
-- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/chrome-devtools/chrome-devtools-provider.mjs`
-- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/native-terminal/native-terminal-host.mjs`
-- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/native-terminal/bridge-client.mjs`
-- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/macos/macos-accessibility.swift`
-- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/macos/helper-cache.mjs`
-- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/macos/release-helper.mjs`
-- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/windows/windows-uia.ps1`
-- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/linux/linux-atspi.py`
-- `external/pi-tools-suite/src/async-subagents/core/agents-dir.ts`
-- `external/pi-tools-suite/src/async-subagents/core/config.ts`
-- `external/pi-tools-suite/src/async-subagents/core/spawn.ts`
-- `external/pi-tools-suite/src/async-subagents/core/ui-qa.ts`
-- `external/pi-tools-suite/test/async-subagents/core.test.ts`
-- `external/pi-tools-suite/test/async-subagents/browser-qa-runner.test.ts`
-- `external/pi-tools-suite/test/async-subagents/ui-qa-runner.test.ts`
-- `external/pi-tools-suite/test/async-subagents/ui-qa-tui-environment.test.ts`
-- `external/pi-tools-suite/test/async-subagents/ui-qa-macos-helper-cache.test.ts`
-- `external/pi-tools-suite/test/async-subagents/ui-qa-macos-helper-cache-storage.test.ts`
-- `external/pi-tools-suite/test/async-subagents/ui-qa-macos-release-helper.test.ts`
-- `external/pi-tools-suite/test/async-subagents/ui-qa-desktop.e2e.test.ts`
-
 ## Verification
 
 Core regression tests cover the thin body size and router contract, absence of

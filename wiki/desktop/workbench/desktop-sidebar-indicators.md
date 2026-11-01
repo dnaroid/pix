@@ -247,49 +247,9 @@ Decision: [0027 — Cause-specific sidebar quick actions](../../decisions/0027-s
 - Package-terminal registry mutexes are used only to copy/update in-memory state. Rejected child processes are killed/reaped after releasing those registries, PTY resize uses a separate per-terminal master lock, and Stop never waits indefinitely for a busy stdin writer before reaching its process-tree kill path.
 - Poll failures are represented as indicator health instead of crashing or disabling unrelated views.
 
-## Implementation
+## Regression coverage
 
-- `desktop/src/components/WorkspaceSidebar.svelte`
-- `desktop/src/components/ProjectExplorer.svelte`
-- `desktop/src/components/sidebar-project-retry.ts`
-- `desktop/src/components/SettingsPanel.svelte`
-- `desktop/src/lib/sidebar-indicators.ts`
-- `desktop/src/lib/sidebar-indicator-types.ts`
-- `desktop/src/lib/sidebar-indicator-policy.ts`
-- `desktop/src/lib/sidebar-indicator-service.ts`
-- `desktop/src/app/git-ci.svelte.ts`
-- `desktop/src/lib/git-ci.ts`
-- `desktop/src/lib/search-index-controller.ts`
-- `desktop/src/lib/workspace-search-index-controller.ts`
-- `desktop/src/lib/search-index-monitor.ts`
-- `desktop/src/lib/search-index-indicators.ts`
-- `desktop/src/components/WorkspaceSidebarActivityBar.svelte`
-- `desktop/src/components/SidebarIndicatorMenu.svelte`
-- `desktop/src/components/sidebar-indicator-menu-controller.svelte.ts`
-- `desktop/src/components/workspace-sidebar-indicator-actions.ts`
-- `desktop/src/lib/sidebar-indicator-actions.ts`
-- `desktop/src-tauri/src/lib.rs`
-- `desktop/src-tauri/src/sidebar_registry_resource_hash.rs`
-- `desktop/src/app/desktop-sidebar-view-model.svelte.ts`
-- `desktop/src/app/registry.svelte.ts`
-
-## Tests
-
-- `desktop/src-tauri/src/lib.rs` (sidebar indicator unit tests)
-- `desktop/src-tauri/src/sidebar_registry_resource_hash.rs`
-- `desktop/src/lib/sidebar-indicators.test.ts`
-- `desktop/src/lib/sidebar-indicator-service.test.ts`
-- `desktop/src/app/git-ci.test.ts`
-- `desktop/src/components/sidebar-indicator-menu-controller.test.ts`
-- `desktop/src/components/workspace-sidebar-indicator-actions.test.ts`
-- `desktop/src/lib/sidebar-indicator-actions.test.ts`
-- `desktop/src/lib/search-index-controller.test.ts`
-- `desktop/src/lib/workspace-search-index-controller.test.ts`
-- `desktop/src/lib/search-index-monitor.test.ts`
-- `desktop/src/lib/search-index-indicators.test.ts`
-- `desktop/src/components/WorkspaceSidebar.test.ts`
-- `desktop/src/components/sidebar-project-retry.test.ts`
-- `desktop/src/app/registry-store.test.ts`
+- Sidebar indicator unit tests
 
 ## Verification
 

@@ -150,47 +150,6 @@ status: active
 - Actions remain workspace-scoped and validate resource type and safe name.
   The ACP build must include the standalone Registry service for live verification.
 
-## Implementation
-
-- `acp/src/registry/config.ts`
-- `acp/src/registry/cache-lock.ts`
-- `acp/src/registry/git.ts`
-- `acp/src/registry/service.ts`
-- `acp/src/registry/resources.ts`
-- `acp/src/registry/publication-location.ts`
-- `acp/src/registry/publication-scope.ts`
-- `acp/src/registry/project-resource-sync.ts`
-- `acp/src/registry/metadata.ts`
-- `acp/src/registry/tag-publication.ts`
-- `acp/src/registry/status.ts`
-- `acp/src/registry/agent-markdown.ts`
-- `external/pi-tools-suite/src/async-subagents/core/agents-dir.ts`
-- `acp/src/acp/desktop-commands.ts`
-- `desktop/src/lib/registry.ts`
-- `desktop/src/app/registry.svelte.ts`
-- `desktop/src/components/RegistryPanel.svelte`
-- `desktop/src/components/RegistryCatalog.svelte`
-- `desktop/src/components/RegistryItemActions.svelte`
-- `desktop/src/lib/registry-card-actions.ts`
-- `desktop/src/lib/registry-background-sync.ts`
-- `skills/skill-creator/SKILL.md`
-- `skills/skill-creator/scripts/quick_validate.py`
-- `.pi/skills/project-agent-creator/SKILL.md`
-- `.pi/skills/project-agent-creator/scripts/validate-agents.ts`
-
-## Tests
-
-- `acp/test/registry-cache.test.ts`
-- `acp/test/registry.test.ts`
-- `acp/test/registry-metadata.test.ts`
-- `acp/test/agent.test.ts`
-- `acp/test/desktop-commands.test.ts`
-- `desktop/src/lib/registry.test.ts`
-- `desktop/src/app/registry-store.test.ts`
-- `desktop/src/components/RegistryPanel.test.ts`
-- `desktop/src/lib/registry-card-actions.test.ts`
-- `desktop/src/lib/registry-background-sync.test.ts`
-
 ## Verification
 
 Run targeted registry/metadata, ACP command-validation and Desktop unit tests,

@@ -132,31 +132,9 @@ tools are not guessed to be mutations.
 - Parent-session metadata is reported when Pi exposes it; parent files are not
   traversed.
 
-## Implementation
+## Regression coverage
 
-- `external/pi-tools-suite/src/session/index.ts`
-- `external/pi-tools-suite/src/session/actions.ts`
-- `external/pi-tools-suite/src/session/parameters.ts`
-- `external/pi-tools-suite/src/session-name/index.ts`
-- `external/pi-tools-suite/src/session-recovery/index.ts`
-- `external/pi-tools-suite/src/module-catalog.ts`
-- `external/pi-tools-suite/src/tool-descriptions.ts`
-- `external/pi-tools-suite/src/dcp/regret-signals.ts`
-
-## Tests
-
-- `external/pi-tools-suite/test/session.test.ts`
-- `external/pi-tools-suite/test/session-name.test.ts`
-- `external/pi-tools-suite/test/session-recovery.test.ts`
-- `external/pi-tools-suite/test/config.test.ts`
-- `external/pi-tools-suite/test/codemode-sdk.case.ts` (real-SDK cases run via `npm --prefix external/pi-tools-suite run test:sdk`)
-- `external/pi-tools-suite/test/dcp-session-sim-e2e.test.ts`
-- `external/pi-tools-suite/test/tool-descriptions.test.ts`
-- `external/pi-tools-suite/test/evals/extension-contracts.test.ts`
-- `external/pi-tools-suite/test/evals/session-cases.ts`
-- `external/pi-tools-suite/test/evals/session-cases.test.ts`
-- `external/pi-tools-suite/test/evals/coverage-manifest.ts`
-- `external/pi-tools-suite/test/tool-selection-e2e.test.ts`
+- Real-SDK cases run via `npm --prefix external/pi-tools-suite run test:sdk`
 
 ## Verification
 

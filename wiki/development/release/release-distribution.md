@@ -442,7 +442,7 @@ official release artifacts.
 `test:release` covers targets, checksums, complete-asset gates, version propagation,
 published-release protection, stale output cleanup, platform filtering, conservative
 dependency sharing, bin shims, and strict size/content gates.
-`tests/release-update.test.ts` covers corrupt portable markers, no npm mutation
+regression checks cover corrupt portable markers, no npm mutation
 under `node_modules`, force behavior, stable GitHub metadata, exact asset/checksum
 selection, TUI/Desktop updater separation, and swap rollback. Desktop updater
 tests cover progress, install/restart, duplicate-install suppression, failure UX,
@@ -495,22 +495,5 @@ the signed Tauri updater feed and native smoke both use NSIS; carrying a second
 installer adds several minutes of packaging time without adding a supported
 update path. Windows NSIS smoke passes encoded installer/destination paths in the
 PowerShell command itself rather than through inherited environment variables.
-
-## Implementation
-
-- `scripts/release/`: preparation, Node downloads, signing, installers, smoke and publication; launcher scripts are under `scripts/release/launchers/` and release tests under `scripts/release/test/`.
-- `.github/workflows/check.yml`: PR/master correctness matrix.
-- `.github/workflows/publish.yml`: release contract, native matrix and stable Release publication.
-- `desktop/src-tauri/src/backend_runtime.rs`, `desktop/src-tauri/src/release_smoke.rs`,
-  `desktop/src-tauri/src/lib.rs` and release config: resource-backed host.
-- `src/app/cli/release-update.ts`, `src/app/cli/portable-update.ts`,
-  `src/app/cli/portable-update-helper.ts`, `src/app/cli/update.ts`, TUI command actions and ACP update
-  report: distribution-aware checks and safe portable replacement.
-- `desktop/src/app/desktop-updater.svelte.ts`, `desktop/src/components/DesktopUpdateBanner.svelte`, the
-  Tauri updater/process plugins and release config: signed native GUI updates.
-- `scripts/release/test/packaging.test.mjs`, `tests/release-update.test.ts`, Rust module tests: deterministic guards.
-- `scripts/release/prune.mjs`, `scripts/release/dedupe.mjs`,
-  `scripts/release/payload-files.mjs`, `scripts/release/size-budget.mjs` and
-  `scripts/release/test/optimization.test.mjs`: bounded runtime inventory and size regressions.
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"1532a2770334a7bd72dcaf8997a1d14f0b5aa052cccd5be0266dbb2deca99a01","checkedAt":"2026-10-31T12:57:42.331Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":61,"reportLanguage":"ru"} -->

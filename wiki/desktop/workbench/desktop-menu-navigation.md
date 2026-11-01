@@ -68,36 +68,14 @@ roles and lifecycle are defined in `wiki/desktop/workbench/desktop-context-menus
 - Introducing a third-party menu/component library.
 - Moving stateful command execution out of the component/application owner.
 
-## Related files
-
-- `desktop/src/lib/keyboard-navigation.ts`
-- `desktop/src/components/PromptComposer.svelte`
-- `desktop/src/components/PromptComposerActionsMenu.svelte`
-- `desktop/src/components/TranscriptPane.svelte`
-- `desktop/src/components/transcript-user-message-menu-controller.svelte.ts`
-- `desktop/src/components/WorkspaceSidebar.svelte`
-- `desktop/src/components/workspace-sidebar-status-menu-controller.svelte.ts`
-- `desktop/src/components/ProjectSwitcher.svelte`
-- `desktop/src/components/RegistryItemActions.svelte`
-- `desktop/src/lib/registry-card-actions.ts`
-
 ## Verification
 
-- `desktop/src/lib/keyboard-navigation.test.ts` covers disabled-item skipping,
-  wrapping, Home/End, and type-ahead matching.
+- Disabled-item skipping, wrapping, Home/End, and type-ahead matching.
 - Project switcher/sidebar source tests cover menu wiring.
 - Registry source tests cover overflow keyboard/lifecycle wiring; card-action
   tests cover routine/secondary partitioning and viewport positioning.
 - `npm --prefix desktop test`
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`
-
-## Implementation
-
-- `desktop/src/lib/keyboard-navigation.ts`
-
-## Tests
-
-- `desktop/src/lib/keyboard-navigation.test.ts`
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"6265a97681fcecd117822238f673f3d38471159753b23fdb911898c65cdb67e7","checkedAt":"2026-10-31T14:04:48.905Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":57,"reportLanguage":"ru"} -->

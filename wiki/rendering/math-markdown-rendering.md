@@ -43,21 +43,6 @@ Render common AI-generated mathematical expressions as formulas instead of expos
 - Complete Unicode/MathML layout of all advanced TeX environments in the terminal; unsupported constructs use readable linear rendering where possible.
 - Treating arbitrary non-Markdown tool output as mathematical text.
 
-## Implementation
-
-- `desktop/src/lib/markdown-math.ts`
-- `desktop/src/lib/markdown-inline.ts`
-- `desktop/src/lib/markdown-blocks.ts`
-- `desktop/src/components/MarkdownText.svelte`
-- `desktop/src/styles.css`
-- `src/terminal-math.ts`
-- `src/markdown-format.ts`
-
-## Tests
-
-- `desktop/src/lib/markdown.test.ts`
-- `tests/markdown-format.test.ts`
-
 ## Verification
 
 - Test Cyrillic DER/JER fractions, inline formulas, narrow terminal wrapping, streaming incompletion, invalid TeX, escaped dollars, and code fences.

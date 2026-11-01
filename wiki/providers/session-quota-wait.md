@@ -107,54 +107,6 @@ returns to waiting without losing the task or replaying completed tool calls.
   timestamps must not be represented as an exact replenishment guarantee.
 - The automatic probe is a real model request and may consume replenished quota.
 
-## Implementation
-
-- `src/app/session/quota-wait.ts`
-- `src/app/session/quota-wait-control.ts`
-- `src/app/session/agent-pause-controller.ts`
-- `src/app/model/model-usage-status.ts`
-- `src/bundled-extensions/quota-wait/index.ts`
-- `src/bundled-extensions/quota-wait/usage.ts`
-- `src/bundled-extensions/quota-wait/popup.ts`
-- `src/app/runtime.ts`
-- `src/app/app.ts`
-- `src/app/session/queued-message-controller.ts`
-- `src/app/types.ts`
-- `src/app/popup/popup-menu-controller.ts`
-- `src/app/rendering/render-controller.ts`
-- `acp/src/acp/pix-acp-agent.ts`
-- `acp/src/pi/pix-rpc-entry.js`
-- `acp/src/config.ts`
-- `acp/src/main.ts`
-- `desktop/src-tauri/src/backend_runtime.rs`
-- `desktop/src/app/quota-wait.svelte.ts`
-- `desktop/src/lib/quota-wait.ts`
-- `desktop/src/app/desktop-status-bar-view-model.svelte.ts`
-- `desktop/src/components/QuotaWaitPopup.svelte`
-- `desktop/src/components/QuotaWaitSchedulePopup.svelte`
-- `desktop/src/components/DesktopOverlays.svelte`
-- `desktop/src/components/StatusBar.svelte`
-- `desktop/src/components/RuntimeStatusBarItems.svelte`
-- `desktop/src/app/session-coordinator.ts`
-- `desktop/src/app/prompt-agent-control.svelte.ts`
-- `desktop/src/app/prompt-submit.ts`
-- `desktop/src/app/prompt-queue-runtime.svelte.ts`
-
-## Tests
-
-- `desktop/src/components/RuntimeStatusBarItems.test.ts`
-- `desktop/src/components/DesktopVisualRegressions.test.ts`
-- `desktop/src/lib/quota-wait.test.ts`
-- `tests/quota-wait.test.ts`
-- `tests/quota-wait-extension.test.ts`
-- `tests/quota-wait-sdk.test.ts`
-- `tests/quota-wait-control.test.ts`
-- `tests/model-usage-status.test.ts`
-- `tests/queued-message-controller.test.ts`
-- `tests/agent-pause-controller.test.ts`
-- `acp/test/agent.test.ts`
-- `acp/test/pix-rpc-entry.test.ts`
-
 ## Verification
 
 Build the TUI, ACP and Desktop; run deterministic state-machine, extension,

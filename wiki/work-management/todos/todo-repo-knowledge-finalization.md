@@ -44,24 +44,11 @@ maintenance belongs to the parent/subagent workflow, not todo result hooks.
 - [0067 — Final documentation maintenance without knowledge-state gates](../../decisions/0067-final-documentation-maintenance.md).
 - Historical: [0046 — Task-scoped knowledge audit completion](../../decisions/0046-task-scoped-knowledge-completion.md).
 
-## Implementation
-
-- `external/pi-tools-suite/src/todo/index.ts`
-- `external/pi-tools-suite/src/todo/todo.ts`
-- `external/pi-tools-suite/src/tool-descriptions.ts`
-- `wiki/tools/suite.md`
-
-## Tests
-
-- `external/pi-tools-suite/test/todo.test.ts`
-- `external/pi-tools-suite/test/tool-descriptions.test.ts`
-
 ## Verification
 
 - Todo tests cover `update` and `batch_update` without knowledge reminders in
   indexed projects, absence outside indexed projects, and final completion/clear.
 - Repo-discovery tests no longer register or expect a post-mutation knowledge hook.
-- `bun test test/todo.test.ts test/tool-descriptions.test.ts`
 - `npm run typecheck -- --pretty false`
 - `git diff --check`
 

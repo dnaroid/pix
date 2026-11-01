@@ -60,51 +60,17 @@ Keep long Pix Desktop conversations scrollable from the latest content all the w
 11. The floating jump-to-latest arrow has a fully transparent background, without a border, shadow, or backdrop blur, so transcript content underneath remains readable. Hover changes the arrow color, not its background; keyboard focus retains a visible outline.
 12. Chat image attachments retain natural proportions without cropping or upscaling, capped at 20rem and the available width. Project/local Markdown image and video previews in chat use the full message content width, bounded by intrinsic image width and the visible transcript scroll pane height; videos retain native playback controls. The pane height bound updates on pane/composer resize and keeps its last positive value while hidden. Known image proportions reserve the frame through loading/error fallbacks and Markdown regeneration during streaming, including offscreen previews awaiting lazy hydration. A first image with unknown dimensions uses a compact fallback and can change height once on load; there is no arbitrary square or guaranteed reservation before dimensions are known. Outside chat, Markdown media retain the 48rem container and 28rem height caps; composer/tool thumbnails, remote images, and attachment sizing are unchanged. Follow-latest behavior is unchanged.
 
-## Implementation
+## Streaming image retention
 
 Unchanged project/local Markdown image nodes are restored before lazy hydration
 during streaming, not merely dimension-reserved. Pending work follows retained
 node ownership; removed nodes and destroyed renderers ignore late completion.
 See [image retention decision](../../decisions/0016-streaming-image-dom-retention.md).
 
-- `desktop/src/app/transcript-scroll.svelte.ts`
-- `desktop/src/app/desktop-workbench-prop-builders.ts`
-- `desktop/src/app/prompt-queue-actions.svelte.ts`
-- `desktop/src/app/desktop-prompt-action-services.ts`
-- `desktop/src/app/session-history.svelte.ts`
-- `desktop/src/components/TranscriptPane.svelte`
-- `desktop/src/components/transcript-history-pager.ts`
-- `desktop/src/components/AttachmentGrid.svelte`
-- `desktop/src/components/MarkdownText.svelte`
-- `desktop/src/components/markdown-image-retention.ts`
-- `desktop/src/components/markdown-content-action.ts`
-- `desktop/src/lib/image-preview-layout.ts`
-- `desktop/src/lib/acp-pix-extensions.ts`
-- `acp/src/acp/session-history-file.ts`
-- `acp/src/acp/pix-acp-agent.ts`
-
-## Tests
-
-- `desktop/src/app/transcript-scroll.test.ts`
-- `desktop/src/app/desktop-workbench-prop-builders.test.ts`
-- `desktop/src/components/transcript-history-pager.test.ts`
-- `desktop/src/app/prompt-queue-actions.test.ts`
-- `desktop/src/app/session-history.test.ts`
-- `desktop/src/components/markdown-image-layout.test.ts`
-- `desktop/src/components/transcript-image-layout.test.ts`
-- `desktop/src/lib/acp-client.test.ts`
-- `acp/test/session-history-file.test.ts`
-- `acp/test/agent.test.ts`
-
 ## Verification
 
-- `npm --prefix desktop test -- transcript-scroll.test.ts`
-- `npm --prefix desktop test -- transcript-history-pager.test.ts`
-- `npm --prefix desktop test -- transcript-image-layout.test.ts`
-- `npm --prefix desktop test -- prompt-queue-actions.test.ts`
-- `npm --prefix desktop test -- session-history.test.ts acp-client.test.ts`
-- `node --import tsx --test acp/test/session-history-file.test.ts` from the repo root
-- `node --import tsx --test --test-name-pattern="desktop history cursor" acp/test/agent.test.ts` from the repo root
+- From the repo root
+- From the repo root
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`
 - Manual desktop verification: open a conversation longer than the initial history tail, scroll continuously upward, and confirm older turns appear while the visible entry stays anchored and the first persisted entry is eventually reachable.

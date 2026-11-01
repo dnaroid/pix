@@ -311,14 +311,9 @@ scope filtering are derived on Desktop; no request is needed to switch project
 scope. Session summaries expose project paths so the UI can keep
 other-project rows non-clickable.
 
-## Tests
+## Regression coverage
 
-Focused coverage is in `tests/usage-stats-local-sources.test.ts`,
-`tests/usage-stats-service.test.ts`, `tests/usage-snapshot-cache.test.ts`,
-`tests/usage-stats-worker-collector.test.ts`, `tests/model-usage-cache.test.ts`,
-`acp/test/usage-stats-host.test.ts`,
-Desktop usage derivation/store tests, and `UsagePanel.test.ts`. These cover
-the source contract, whole-tree collection, single-service host, project
+Coverage includes the source contract, whole-tree collection, single-service host, project
 filtering, local calendar formatting, persisted stale-first hydration,
 profile/account isolation, invalidation and teardown races, corrupt cache
 handling, and panel behavior.

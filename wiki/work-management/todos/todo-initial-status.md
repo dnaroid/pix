@@ -43,24 +43,6 @@ batch creation commits nothing, including when `replace: true`. Existing
 dependency validation, transitions, persistence, replay and automatic clearing
 remain unchanged; there is no new blocked status.
 
-## Implementation
-
-- `external/pi-tools-suite/src/todo/state/invariants.ts`
-- `external/pi-tools-suite/src/todo/state/state-reducer.ts`
-- `external/pi-tools-suite/src/todo/tool/types.ts`
-- `external/pi-tools-suite/src/todo/tool/response-envelope.ts`
-- `external/pi-tools-suite/src/todo/index.ts`
-- `external/pi-tools-suite/src/tool-descriptions.ts`
-
-## Tests
-
-- `external/pi-tools-suite/test/todo.test.ts`
-- `external/pi-tools-suite/test/tool-descriptions.test.ts`
-- `external/pi-tools-suite/test/evals/todo-conciseness.ts`
-- `external/pi-tools-suite/test/evals/todo-prompt-snapshots.ts`
-- `external/pi-tools-suite/test/evals/run-todo-paired.ts`
-- `external/pi-tools-suite/test/evals/todo-conciseness.test.ts`
-
 ## Verification
 
 Run focused todo and tool-description tests plus suite typecheck. Cover explicit

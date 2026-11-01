@@ -115,47 +115,6 @@ position. The composer menu can open it with an empty draft and while the parent
 is running or paused. `/btw` with main attachments fails without discarding them.
 The command's send button says "Ask in BTW", not "Queue message".
 
-## Implementation
-
-- `acp/src/btw/contract.ts`
-- `acp/src/btw/context.ts`
-- `acp/src/btw/service.ts`
-- `acp/src/btw/request.ts`
-- `acp/src/pi/btw-host.ts`
-- `acp/src/pi/pix-rpc-entry.js`
-- `acp/src/pi/pi-rpc-client.ts`
-- `acp/src/acp/pix-acp-agent.ts`
-- `acp/src/acp/slash-commands.ts`
-- `desktop/src/lib/acp-client.ts`
-- `desktop/src/lib/acp-pix-extensions.ts`
-- `desktop/src/app/btw.svelte.ts`
-- `desktop/src/app/btw-draft.ts`
-- `desktop/src/app/btw-model.ts`
-- `desktop/src/app/prompt-submit.ts`
-- `desktop/src/app/session-coordinator.ts`
-- `desktop/src/components/BtwDock.svelte`
-- `desktop/src/components/BtwPane.svelte`
-- `desktop/src/components/BtwModelControl.svelte`
-- `desktop/src/components/ModelThinkingPicker.svelte`
-- `desktop/src/lib/model-picker-popover.ts`
-- `desktop/src/components/PromptComposerActionsMenu.svelte`
-- `desktop/src/components/PromptComposer.svelte`
-- `desktop/src/App.svelte`
-
-## Tests
-
-- `acp/test/btw.test.ts`
-- `acp/test/pi-rpc-btw.test.ts`
-- `acp/test/agent.test.ts`
-- `acp/test/slash-commands.test.ts`
-- `desktop/src/app/btw.test.ts`
-- `desktop/src/app/btw-model.test.ts`
-- `desktop/src/lib/model-picker-popover.test.ts`
-- `desktop/src/components/BtwPane.test.ts`
-- `desktop/src/app/prompt-submit-btw.test.ts`
-- `desktop/scripts/btw-smoke.mjs`
-- `desktop/scripts/fixtures/BtwSmoke.svelte`
-
 ## Verification
 
 Backend tests exercise real SDK session projections and the real RPC output guard,

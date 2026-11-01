@@ -99,37 +99,16 @@ Decision: [0015 — Canonical disposable harness output](../decisions/0015-harne
 - Runtime mirrors are generated from authoritative suite sources; do not fix
   an installed/generated prompt copy independently of its source.
 
-## Implementation
+## Regression coverage
 
-- `AGENTS.md`
-- `desktop/src-tauri/src/lib.rs`
-- `external/pi-tools-suite/src/artifact-paths.ts`
-- `external/pi-tools-suite/src/desktop-visual-prompt.ts`
-- `external/pi-tools-suite/src/index.ts`
-- `external/pi-tools-suite/src/tool-descriptions.ts`
-- `external/pi-tools-suite/src/async-subagents/core/prompt.ts`
-- `external/pi-tools-suite/test/evals/harness/output-dir.ts`
-- `external/pi-tools-suite/test/evals/run-evals.ts`
-- `external/pi-tools-suite/test/evals/run-p01n-paired.ts`
-- `external/pi-tools-suite/test/evals/run-todo-paired.ts`
-- `external/pi-tools-suite/test/evals/todo-prompt-snapshots.ts`
-- `external/pi-tools-suite/test/evals/delivery-review/live.test.ts`
-
-## Tests
-
-- `desktop/src-tauri/src/lib.rs` (project cleanup tests, including durable search database/sidecar preservation)
-- `external/pi-tools-suite/test/tool-descriptions.test.ts`
-- `external/pi-tools-suite/test/async-subagents/core.test.ts`
-- `external/pi-tools-suite/test/evals/output-dir.test.ts`
-- `external/pi-tools-suite/test/evals/todo-conciseness.test.ts`
-- `external/pi-tools-suite/test/desktop-visual-prompt.test.ts`
+- Project cleanup tests, including durable search database/sidecar preservation
 
 ## Verification
 
 Run the native project cleanup tests to confirm both manual Clean and automatic
 TTL cleanup preserve the durable search database and sidecars.
 
-Run the five focused Bun test files above and suite source typecheck.
+Run focused harness/prompt regression tests and the suite source typecheck.
 Assertions cover log guidance on shell/Bash aliases, generic child prompts,
 project-relative eval paths, unique run directories and explicit overrides.
 Check generated runtime/live synchronization and review task-scoped knowledge

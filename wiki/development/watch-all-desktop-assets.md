@@ -136,64 +136,22 @@ a separate explicitly requested scenario.
 - Rebuilding the web bundle twice per cycle.
 - Changing Cargo profiles or incremental compilation outside `watch:all`.
 
-## Related files
+## Related decision
 
 - [Decision: disk-saving native watch builds](../decisions/0005-watch-all-cargo-disk.md)
 
-## Implementation
-
-- `scripts/pix-watch`
-- `scripts/watch-all.mjs`
-- `scripts/watch-all-desktop-quit.mjs`
-- `scripts/watch-all-state.mjs`
-- `scripts/watch-all-temp.mjs`
-- `desktop/src/app/desktop-watch-restart.svelte.ts`
-- `desktop/src/App.svelte`
-- `desktop/src/components/DesktopTitlebar.svelte`
-- `desktop/src-tauri/build.rs`
-- `desktop/src-tauri/src/lib.rs`
-- `desktop/src-tauri/tauri.conf.json`
-- `desktop/vite.config.ts`
-
-## Tests
-
-- `tests/pix-watch.test.ts`
-- `tests/watch-all-desktop-quit.test.ts`
-- `tests/watch-all-state.test.ts`
-- `tests/watch-all-runtime.test.ts`
-- `desktop/src/app/desktop-watch-restart.test.ts`
-- `tests/watch-all.test.ts`
-- `tests/watch-all-frontend.test.ts`
-
 ## Verification
 
-- `tests/watch-all-desktop-quit.test.ts` covers exact-PID targeting, clean-exit
-  ordering, already-exited apps, refused Quit, timeout, and launcher retention
-  on failure without operating a real Desktop instance.
-- `tests/watch-all-state.test.ts` covers the progress schema, serialized state
-  publication, failed-write recovery, failed-build recovery, and edits queued
-  during an active build without launching real processes. Desktop's
-  `desktop/src/app/desktop-watch-restart.test.ts` covers status polling,
-  non-overlap, and ignored late completion after teardown; native parser tests
-  cover legacy state and the four allowed progress values.
-- `tests/pix-watch.test.ts` uses a fake npm (never the real watcher) to verify
-  global symlink resolution, launch from an unrelated directory, argument
-  forwarding, and exit-status propagation.
-- `tests/watch-all.test.ts` covers the ordered `web -> native` build plan, the bounded watcher-state handoff, and the Tauri CLI override that suppresses the duplicate `beforeBuildCommand`.
-- `tests/watch-all-runtime.test.ts` covers runtime-only artifact copying, failure/retry preservation, and avoiding redundant copying after native builds.
+- Exact-PID targeting, clean-exit ordering, already-exited apps, refused Quit, timeout, and launcher retention on failure without operating a real Desktop instance.
+- The progress schema, serialized state publication, failed-write recovery, failed-build recovery, and edits queued during an active build without launching real processes. Desktop's regression checks cover status polling, non-overlap, and ignored late completion after teardown; native parser tests cover legacy state and the four allowed progress values.
+- Uses a fake npm (never the real watcher) to verify global symlink resolution, launch from an unrelated directory, argument forwarding, and exit-status propagation.
+- The ordered `web -> native` build plan, the bounded watcher-state handoff, and the Tauri CLI override that suppresses the duplicate `beforeBuildCommand`.
+- Runtime-only artifact copying, failure/retry preservation, and avoiding redundant copying after native builds.
 - It also verifies that initial and repeated native watch builds use the same
   disk-saving Cargo environment and package-only cleanup before build/capture,
   without applying them to the web build, and abort on cleanup failure.
-- `tests/watch-all-frontend.test.ts` covers private Vite output and Tauri config,
-  asset survival when shared output is removed, separate watcher paths,
-  Rust-only output reuse, and failed web-output rejection/recovery.
-- `tests/watch-all.test.ts` also covers bounded failed-command output retention
-  and the repeated bottom-of-terminal failure report, plus exact app-PID
-  liveness checks used by the macOS startup gate, artifact retention and stale
-  root reclamation with concurrent watcher and surviving app scenarios. It also
-  covers reflog parsing, Git integration filtering, changed-part recovery after
-  a missed bulk checkout event, duplicate suppression, and the conservative
-  full-rebuild fallback when the Git diff probe fails.
+- Private Vite output and Tauri config, asset survival when shared output is removed, separate watcher paths, Rust-only output reuse, and failed web-output rejection/recovery.
+- Also covers bounded failed-command output retention and the repeated bottom-of-terminal failure report, plus exact app-PID liveness checks used by the macOS startup gate, artifact retention and stale root reclamation with concurrent watcher and surviving app scenarios. It also covers reflog parsing, Git integration filtering, changed-part recovery after a missed bulk checkout event, duplicate suppression, and the conservative full-rebuild fallback when the Git diff probe fails.
 - After changing/rebuilding Desktop web output, the subsequent native build must rerun the `pix-desktop` build script and produce a launchable bundle with `index.html` embedded.
 - Run `node --import tsx --test tests/watch-all*.test.ts`,
   `npm --prefix desktop run check`, and a production Desktop web/native smoke

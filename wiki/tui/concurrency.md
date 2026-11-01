@@ -54,15 +54,6 @@ the state that started it, without blocking normal terminal interaction.
 - Multibyte UTF-8 split across terminal chunks.
 - Quit during startup tab restoration or stalled runtime disposal.
 
-## Related files
-
-- `src/app/session/tabs-controller.ts`
-- `src/app/session/session-lifecycle-controller.ts`
-- `src/app/input/`
-- `src/app/extensions/extension-ui-controller.ts`
-- `src/app/terminal/terminal-controller.ts`
-- `src/input-editor.ts`
-
 ## Verification
 
 - Deterministic deferred-promise tests for tab/session identity after every relevant `await`.

@@ -43,17 +43,6 @@ Make Pix Desktop text selection behave like a native desktop application: conver
 8. Existing per-component `select-none` behavior remains authoritative for interaction labels that intentionally live inside the transcript, such as disclosure summaries.
 9. In Tauri windows, right-click on selected content opens the native application text menu, not the WebView menu. Selection Copy takes priority over whole-user-message actions; the message ellipsis still exposes those actions. Text editing uses native editing commands without replacing the draft value or inventing a separate undo stack. See `desktop-context-menus.md`.
 
-## Related files
-
-- `desktop/src/styles.css`
-- `desktop/src/components/TranscriptPane.svelte`
-- `desktop/src/components/ToolResult.svelte`
-- `desktop/src/components/DiffView.svelte`
-- `desktop/src/components/PreviewPane.svelte`
-- `desktop/src/components/PromptComposer.svelte`
-- `desktop/src/components/WorkspaceSidebar.svelte`
-- `desktop/src/components/WorkbenchTabs.svelte`
-
 ## Verification
 
 - `npm --prefix desktop run check`

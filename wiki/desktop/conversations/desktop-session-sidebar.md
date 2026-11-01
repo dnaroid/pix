@@ -117,29 +117,6 @@ follows decision 0048.
   verified checklist item as `[x]` immediately; finer sub-steps stay in session
   Steps.
 
-## Related files
-
-- `external/pi-tools-suite/src/lib/rpc-session-state.ts`
-- `external/pi-tools-suite/src/todo/todo.ts`
-- `external/pi-tools-suite/src/async-subagents/index.ts`
-- `acp/src/pi/pi-rpc-client.ts`
-- `acp/src/acp/session-state-bridge.ts`
-- `acp/src/acp/pix-acp-agent.ts`
-- `desktop/src/lib/acp-client.ts`
-- `desktop/src/lib/acp-client-types.ts`
-- `desktop/src/lib/session-todos.ts`
-- `desktop/src/lib/session-subagents.ts`
-- `desktop/src/lib/session-activity.ts`
-- `desktop/src/components/WorkbenchTabs.svelte`
-- `desktop/src/components/StatusBar.svelte`
-- `desktop/src/components/SessionActivityStatusHud.svelte`
-- `desktop/src/components/StatusBarPopover.svelte`
-- `desktop/src/components/WorkspaceSidebar.svelte`
-- `desktop/src/app/session-activity.svelte.ts`
-- `desktop/src/app/desktop-presentation-state.svelte.ts`
-- `desktop/src/app/desktop-status-bar-view-model.svelte.ts`
-- `desktop/src/app/desktop-workbench-prop-builders.ts`
-
 ## Verification
 
 - Suite tests cover RPC-only publishing for both runtime channels and preserve the existing event-bus snapshots.

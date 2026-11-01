@@ -46,24 +46,6 @@ Give Pix TUI and Desktop user-controlled model-picker whitelists while keeping t
   staged model+effort still writes the task override instead of treating Apply
   as a no-op; clearing the selection restores normal session defaults.
 
-## Related files
-
-- `src/config.ts`
-- `src/default-pix-config.ts`
-- `src/schemas/pix-schema.ts`
-- `src/schemas/pix-desktop-schema.ts`
-- `schemas/pix.json`
-- `src/app/popup/menu-items-controller.ts`
-- `src/app/popup/popup-menu-controller.ts`
-- `src/app/popup/popup-action-controller.ts`
-- `src/app/rendering/popup-menu-renderer.ts`
-- `src/app/input/input-controller.ts`
-- `desktop/src/app/model-preferences.svelte.ts`
-- `desktop/src/app/desktop-overlays-view-model.svelte.ts`
-- `desktop/src/components/ModelThinkingPicker.svelte`
-- `desktop/src/components/WorkspaceSidebarTaskModelControl.svelte`
-- `desktop/src/lib/model-visibility.ts`
-
 ## Verification
 
 - Root config tests cover normalization, persistence, explicit empty whitelists, and project-override suppression.

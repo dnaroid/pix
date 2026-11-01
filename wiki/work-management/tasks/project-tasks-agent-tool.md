@@ -183,19 +183,8 @@ CREATE TABLE task_attachments (
   (not parsed, migrated or deleted), and pre-SQLite remote Registry artifacts
   are not treated as current project tasks.
 
-## Evidence and owners
+## Related behavior
 
-- `external/pi-tools-suite/src/project-tasks/{index,commands,engine,storage,attachments}.ts`
-- `external/pi-tools-suite/src/project-tasks/launch.ts`
-- `acp/src/acp/task-run-{contract,bridge}.ts`, `acp/src/pi/task-run-host.js`
-- `acp/test/{task-run-bridge,pi-rpc-task-run}.test.ts`
-- `desktop/src/app/desktop-agent-task-run.test.ts`
-- `external/pi-tools-suite/test/project-tasks.test.ts`
-- `external/pi-tools-suite/src/project-search/engine.ts`
-- `desktop/src-tauri/src/project_tasks_sqlite.rs`
-- `desktop/src-tauri/src/lib.rs`
-- `acp/src/registry/{task-database,task-bundle}.ts`
-- `acp/test/registry.test.ts`
 - [Desktop panel and launch](desktop.md)
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"b6b132441030dec597c79ae9839b566868ea26235fb4adde1c6625061ee46594","checkedAt":"2026-10-31T00:15:58.516Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":55,"reportLanguage":"ru"} -->

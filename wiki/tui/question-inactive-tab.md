@@ -50,13 +50,6 @@ Matches upstream Pi 1.4.0 interactive-mode semantics.
 - Scope cleanup (`cancelCustomUi`/`clearWidgets`) cancels the whole stack, resolves every pending promise with `undefined` and restores the oldest saved draft.
 - Popups opened by a component through its own `tui.menu`/`showMenu` remain direct host popups, not stack entries.
 
-## Related files
-
-- `src/app/extensions/extension-ui-controller.ts`
-- `src/bundled-extensions/question/index.ts`
-- `src/bundled-extensions/question/tui.ts`
-- `tests/extension-ui-controller.test.ts`
-
 ## Verification
 
 - Custom UI requested from an inactive scope remains pending and works after activation.
@@ -70,13 +63,5 @@ Matches upstream Pi 1.4.0 interactive-mode semantics.
 - Confirmed by code: inactive scopes previously caused `showCustomUi()` to return `undefined` immediately.
 - Confirmed by code: `question` previously recognized only `null` as cancellation and passed `undefined` into successful-result construction.
 - Confirmed by tests: `tests/extension-ui-controller.test.ts` covers scoped pending custom UI and activation.
-
-## Implementation
-
-- `src/app/extensions/extension-ui-controller.ts`
-
-## Tests
-
-- `tests/extension-ui-controller.test.ts`
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"33d8e9699c276b16324711ea6cd833325a18893b3f6f8daf5328aa60a7903fd0","checkedAt":"2026-10-30T23:24:32.648Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":63,"reportLanguage":"ru"} -->

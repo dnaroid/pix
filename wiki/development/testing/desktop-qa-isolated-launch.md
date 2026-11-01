@@ -196,34 +196,7 @@ unsupported isolation capability, native startup failure, inaccessible UI or
 missing host permissions are explicit failures/blockers. An old working window,
 window title alone, static checks or browser preview cannot turn them into a pass.
 
-## Implementation
-
-- `scripts/qa-desktop.mjs`
-- `scripts/qa-desktop/cli.mjs`
-- `scripts/qa-desktop/doctor.mjs`
-- `scripts/qa-desktop/prepare.mjs`
-- `scripts/qa-desktop/persistent.mjs`
-- `scripts/qa-desktop/watch.mjs`
-- `scripts/qa-desktop/paths.mjs`
-- `scripts/qa-desktop/seed.mjs`
-- `scripts/qa-desktop/launch.mjs`
-- `scripts/qa-workspace.mjs`
-- `scripts/qa-sandbox.mjs`
-- `fixtures/qa/pix-project/`
-- `wiki/development/testing/qa-sandbox.md`
-- `desktop/src-tauri/src/qa_profile.rs`
-- `desktop/src-tauri/src/startup_theme.rs`
-- `desktop/src-tauri/src/lib.rs`
-- `.pi/skills/pix-desktop-qa/SKILL.md`
-
-## Tests and verification
-
-- `tests/qa-desktop-doctor.test.ts`
-- `tests/qa-desktop-prepare.test.ts`
-- `tests/qa-desktop-launch.test.ts`
-- `tests/qa-desktop-persistent.test.ts`
-- `scripts/release/test/qa-workspace.test.mjs`
-- `desktop/src-tauri/src/qa_profile.rs` (unit tests)
+## Regression coverage
 
 Run the focused Node tests and native profile/lifecycle tests. Native acceptance
 must identify the pinned source and actual QA PID, verify a real rendered UI in

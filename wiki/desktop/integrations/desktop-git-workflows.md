@@ -191,48 +191,6 @@ Network Git operations (Push/Publish, Fetch, Pull and the fetch step of Update p
 - HTTP(S) transfers abort when slower than 1000 B/s for 60 s (`GIT_HTTP_LOW_SPEED_LIMIT`/`_TIME`), unless the environment or any `http.*lowSpeedLimit`/`lowSpeedTime` config sets them. If the transport configuration cannot be read, no transport setting is overridden.
 - There is no user-facing cancel for these operations yet; the deadline and transport guards bound them. The sidebar remote-update probe (`ls-remote`, 5-second deadline) shares the same supervisor.
 
-## Implementation
-
-Repository commit-author and secondary synchronization dependencies (the broader workflow ownership map follows):
-
-- `desktop/src/components/GitPanel.svelte`
-- `desktop/src/components/GitIdentitySection.svelte`
-- `desktop/src/lib/git-identity-editor.svelte.ts`
-- `desktop/src/lib/git-workflow.ts`
-- `desktop/src/app/git-workspace.svelte.ts`
-- `desktop/src/app/desktop-sidebar-view-model.svelte.ts`
-- `desktop/src-tauri/src/git_identity.rs`
-- `desktop/src-tauri/src/git_operations.rs`
-- `desktop/src/components/GitRepositoryTools.svelte`
-- `desktop/src-tauri/src/lib.rs`
-
-## Tests
-
-- `desktop/src/lib/git-identity-editor.test.ts`
-- `desktop/src/app/git-workspace.test.ts`
-- `desktop/src-tauri/src/git_identity.rs`
-- `desktop/src-tauri/src/git_operations.rs`
-- `desktop/src-tauri/src/git_process.rs`
-- `desktop/src-tauri/src/git_history_search.rs`
-- `desktop/src/lib/git-history-search.test.ts`
-- `desktop/scripts/fixtures/GitWorkflowFixture.svelte`
-
-## Implementation ownership
-
-- `desktop/src/components/GitPanel.svelte`: branch/status, review checkpoint, panel composition.
-- `desktop/src/components/GitIdentitySection.svelte` and `desktop/src/lib/git-identity-editor.svelte.ts`: repository-author disclosure, draft and lifecycle handling.
-- `desktop/src-tauri/src/git_identity.rs`: effective/local configuration reads and locked, repository-only two-key saves.
-- `desktop/src/components/GitCiSection.svelte`, `desktop/src/app/git-ci.svelte.ts` and `desktop/src/lib/git-ci.ts`: current-HEAD CI presentation, polling/lazy jobs and normalized provider state.
-- `desktop/src/components/GitCommitComposer.svelte`: editable draft, preparation buttons and explicit commit choice.
-- `desktop/src/components/GitChangesSection.svelte` and `GitRepositoryTools.svelte`: file operations and secondary tools.
-- `desktop/src/components/GitDiffPane.svelte`: full-height Review/Diff editor and fix/copy actions.
-- `desktop/src/app/git-workspace.svelte.ts`: Git transaction, workspace state, review retention, IPC and lifecycle guards.
-- `desktop/src/app/git-assist.ts`: model preparation, verified review fix-session handoff, and failed-CI repair-session handoff.
-- `desktop/src/app/desktop-sidebar-view-model.svelte.ts`, `desktop-navigation-view-model-services.ts`, `desktop-workbench-git-services.ts` and `desktop-workbench-prop-builders.ts`: workspace-assistant readiness for Source Control and Git Diff, independent of conversation-tab runtime readiness.
-- `desktop/src/lib/acp-client.ts`, `desktop/src/lib/acp-pix-extensions.ts`, `acp/src/acp/desktop-commands.ts` and `acp/src/acp/pix-acp-agent.ts`: cwd-bound Git-assistant request transport and standalone ACP execution without allocating a conversation session.
-- `desktop/src/lib/git-workflow.ts` and `git.ts`: shared policies, types and prompt/draft helpers.
-- `desktop/src-tauri/src/git_operations.rs`: secondary commands and temporary-repository tests; `desktop/src-tauri/src/git_process.rs`: supervised (deadline, process-group kill, bounded output, non-interactive transport) runner for network Git; `desktop/src-tauri/src/git_history_search.rs` and `desktop/src/lib/git-history-search.ts`: cancellable full-history commit search; `desktop/src-tauri/src/git_ci.rs`: bounded/cancellable `gh`/`glab` queries and provider normalization; `desktop/src-tauri/src/lib.rs`: repository detection/initialization, command registration and window/app teardown.
-
 ## Verification
 
 Repository-author regression coverage is in

@@ -31,30 +31,6 @@ Bring the Pix TUI's two bang-command modes to Desktop using the matching Desktop
 - Successful, failed, cancelled, and truncated `!` results reuse Pi's bash result fields, and persisted `bashExecution` messages replay into the same execution-row shape.
 - `!!` reuses the existing Desktop PTY stack (`package_terminal_start_shell` + `package_terminal_write`) and the same shared `TerminalSessionsPane` / xterm `TerminalView` used by Package Scripts rather than introducing a second terminal implementation. The Package Scripts left-sidebar view remains a separate consumer of that shared terminal surface; `!!` no longer expands or selects that sidebar view.
 
-## Related files
-
-- `desktop/src/lib/terminal-commands.ts`
-- `desktop/src/app/prompt-submit.ts`
-- `desktop/src/app/desktop-prompt-action-services.ts`
-- `desktop/src/App.svelte`
-- `desktop/src/components/DesktopSidebar.svelte`
-- `desktop/src/components/WorkspaceSidebar.svelte`
-- `desktop/src/components/PackageScriptsPanel.svelte`
-- `desktop/src/components/WorkbenchTerminalPane.svelte`
-- `desktop/src/components/TerminalSessionsPane.svelte`
-- `desktop/src/components/package-scripts-controller.svelte.ts`
-- `desktop/src/components/TerminalView.svelte`
-- `desktop/src/app/workbench-terminal.svelte.ts`
-- `desktop/src/app/workbench-model.ts`
-- `desktop/src/lib/workbench-tabs.ts`
-- `desktop/src/lib/acp-client.ts`
-- `desktop/src/lib/acp-pix-extensions.ts`
-- `acp/src/acp/desktop-commands.ts`
-- `acp/src/acp/pix-acp-agent.ts`
-- `acp/src/acp/bash-execution.ts`
-- `acp/src/acp/session-replay.ts`
-- `acp/src/pi/pi-rpc-client.ts`
-
 ## Verification
 
 - Desktop parser tests cover `!` chat mode, `!!` interactive mode, leading whitespace, and empty-prefix fallback.
@@ -69,13 +45,5 @@ Bring the Pix TUI's two bang-command modes to Desktop using the matching Desktop
 - Importing the root renderer's terminal command controller into Desktop or ACP.
 - Treating `!` / `!!` as ordinary model prompts or ACP slash commands.
 - Reimplementing a second Desktop PTY/terminal stack specifically for `!!`.
-
-## Implementation
-
-- `desktop/src/lib/terminal-commands.ts`
-
-## Tests
-
-- `desktop/src/lib/terminal-commands.test.ts`
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"4493c94828ce53950c29c22ea95a4b6a212ef36717bc90a5041c1a11bbcfc0b6","checkedAt":"2026-10-31T00:28:47.455Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":62,"reportLanguage":"ru"} -->

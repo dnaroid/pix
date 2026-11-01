@@ -81,33 +81,6 @@ status: active
   retain [native modal behavior](../desktop/workbench/desktop-modal-dialogs.md).
 - Decision: [0049 — Nonmodal model picker](../decisions/0049-nonmodal-model-picker.md).
 
-## Implementation
-
-- `desktop/src/components/FrontierModelBadge.svelte`
-- `desktop/src/lib/frontier-model-badges.ts`
-- `desktop/src/lib/settings.ts`
-- `desktop/src/app/preview-file-io.ts`
-
-- `desktop/src/components/ModelThinkingPicker.svelte`
-- `desktop/src/components/StatusBar.svelte`
-- `desktop/src/app/model-picker-state.svelte.ts`
-- `desktop/src/app/model-config-actions.ts`
-- `desktop/src/app/desktop-model-services.ts`
-- `desktop/src/App.svelte`
-- `desktop/src/lib/model-picker-popover.ts`
-- `desktop/src/lib/model-selection-frequency.ts`
-
-## Tests
-
-- `desktop/src/lib/frontier-model-badges.test.ts`
-
-- `desktop/src/components/ModelThinkingPicker.test.ts`
-- `desktop/src/lib/model-selection-frequency.test.ts`
-- `desktop/src/components/DesktopModalDialogs.test.ts`
-- `desktop/src/app/model-picker-state.test.ts`
-- `desktop/src/app/model-config-actions.test.ts`
-- `desktop/src/lib/model-picker-popover.test.ts`
-
 ## Verification
 
 - Focused tests cover geometry, dismissal/focus, cleanup and pending-open races;

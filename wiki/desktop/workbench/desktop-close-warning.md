@@ -47,23 +47,6 @@ status: active
   [window persistence](desktop-window-state.md).
 - Native ownership rationale: [0024](../../decisions/0024-desktop-close-warning.md).
 
-## Implementation
-
-- `desktop/src/lib/close-confirmation.ts`
-- `desktop/src/app/session-tab-closure.ts`
-- `desktop/src/app/window-run-activity.ts`
-- `desktop/src/App.svelte`
-- `desktop/src-tauri/src/close_guard.rs`
-- `desktop/src-tauri/src/lib.rs`
-- `desktop/src-tauri/capabilities/default.json`
-
-## Tests
-
-- `desktop/src/lib/close-confirmation.test.ts`
-- `desktop/src/app/session-tab-closure.test.ts`
-- `desktop/src/app/window-run-activity.test.ts`
-- `desktop/src-tauri/src/close_guard.rs::tests`
-
 ## Verification
 
 Run focused Desktop tests, Desktop check and native Cargo check/tests. In native

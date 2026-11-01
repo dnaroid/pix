@@ -114,41 +114,19 @@ trust decision; global config servers run with no gate. `[confirmed by code]`
 - **LSP server handlers** respond to `workspace/executeCommand`, `textDocument/diagnostic`, `workspace/configuration`, `client/registerCapability`, and `markdown/*` (parse, fs/readFile, fs/stat, fs/readDirectory). `[confirmed by code: client.ts registerHandlers]`
 - **Network**: none initiated by trust/config itself; LSP servers may use network. `[inferred]`
 
-## Implementation
+## Regression coverage
 
-- `external/pi-tools-suite/src/lsp/_shared/trust.ts`
-- `external/pi-tools-suite/src/lsp/_shared/config.ts`
-- `external/pi-tools-suite/src/lsp/_shared/types.ts`
-- `external/pi-tools-suite/src/lsp/_shared/paths.ts`
-- `external/pi-tools-suite/src/lsp/_shared/runner.ts`
-- `external/pi-tools-suite/src/lsp/client.ts`
-- `external/pi-tools-suite/src/lsp/manager.ts`
-- `external/pi-tools-suite/src/lsp/child-process.ts`
-- `external/pi-tools-suite/src/lsp/process-owner.ts`
-- `external/pi-tools-suite/src/lsp/runtime-control.ts`
-- `external/pi-tools-suite/src/lsp/local-runtime-control.ts`
-- `external/pi-tools-suite/src/lsp/shared-manager.ts`
-- `external/pi-tools-suite/src/lsp/broker-server.ts`
-- `external/pi-tools-suite/src/lsp/index.ts`
-- `external/pi-tools-suite/src/lsp/onboarding.ts`
-- `external/pi-tools-suite/src/lib/lsp.ts`
-- `external/pi-tools-suite/src/config.ts`
+- "caches Trust once decisions for the current session" — `sessionTrustedHashes` prevents re-prompt.
 
-## Tests
+- "persists Trust always decisions and does not cache rejects" — file persistence; rejects re-prompt every time.
 
-- `external/pi-tools-suite/test/lsp.test.ts`
-- `external/pi-tools-suite/test/lsp-onboarding.test.ts`
-- `external/pi-tools-suite/test/lsp-broker.test.ts`
-- `external/pi-tools-suite/test/lsp-process-owner.test.ts`
+- "loads LSP servers from shared pi-tools-suite config" — global config read from `$HOME/.config/pi/pi-tools-suite.jsonc` (not `$PI_AGENT_DIR/lsp.json`).
 
-## Existing tests
-- `lsp.test.ts` `[confirmed by tests]`:
-  - "caches Trust once decisions for the current session" — `sessionTrustedHashes` prevents re-prompt.
-  - "persists Trust always decisions and does not cache rejects" — file persistence; rejects re-prompt every time.
-  - "loads LSP servers from shared pi-tools-suite config" — global config read from `$HOME/.config/pi/pi-tools-suite.jsonc` (not `$PI_AGENT_DIR/lsp.json`).
-  - Execution tests with a real fake LSP server script in temp, configured via **global** config: diagnostics, re-use, crash backoff, multi-root, tsserver/pull/dynamic diagnostics, stubborn-process kill, abort.
-  - Runtime tests use real `<project>/.pi/pi-tools-suite.jsonc`: monitoring cannot prompt/spawn or expose mutation actions; execution and internal lifecycle tests preserve trust/shutdown races.
-- `lsp-process-owner.test.ts` exercises POSIX owner SIGKILL and stubborn descendant cleanup without relying on shutdown hooks.
+- Execution tests with a real fake LSP server script in temp, configured via **global** config: diagnostics, re-use, crash backoff, multi-root, tsserver/pull/dynamic diagnostics, stubborn-process kill, abort.
+
+- Runtime tests use real `<project>/.pi/pi-tools-suite.jsonc`: monitoring cannot prompt/spawn or expose mutation actions; execution and internal lifecycle tests preserve trust/shutdown races.
+
+- POSIX owner SIGKILL and stubborn descendant cleanup without relying on shutdown hooks.
 
 ## Gaps / risks
 ### Arbitrary command execution

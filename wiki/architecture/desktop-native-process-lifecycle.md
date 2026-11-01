@@ -136,37 +136,21 @@ fetches objects or mutates Git refs, the index, or the working tree.
 - Per-window slots are removed on destruction; cancelled reservations are not
   retained as tombstones for arbitrary labels.
 
-## Implementation
+## Regression coverage
 
-- `desktop/src-tauri/src/lib.rs::start_process`
-- `desktop/src-tauri/src/lib.rs::stop_process_slot`
-- `desktop/src-tauri/src/lib.rs::spawn_package_terminal`
-- `desktop/src-tauri/src/lib.rs::capture_destroyed_window`
-- `desktop/src-tauri/src/lsp_install.rs::install_lsp_server`
-- `desktop/src-tauri/src/git_ci.rs` (`GitCiProcessState`, bounded CLI runner)
-- `desktop/src-tauri/src/lib.rs::workspace_git_remote_update_probe`
-- `desktop/src-tauri/src/lib.rs::sidebar_git_remote_ls_remote_output`
-- `desktop/src-tauri/src/acp_queue.rs::Queue`
-- `desktop/src-tauri/src/acp_diagnostics.rs` (stderr capture and crash receipts)
-- `desktop/src/app/connection.svelte.ts` (failure reporting and stale-save guards)
-- `desktop/src/lib/acp-crash-diagnostics.ts` (bounded/redacted summaries)
-- `desktop/src-tauri/src/native_process.rs::force_stop`
-- `desktop/src-tauri/src/native_process/windows.rs` (suspended spawn, job ownership)
+- Oversized payload, saturated queue, shutdown
 
-## Tests
+- Bounded capture, unique receipts, symlink refusal
 
-- `desktop/src-tauri/src/acp_queue.rs` (oversized payload, saturated queue, shutdown)
-- `desktop/src-tauri/src/acp_diagnostics.rs` (bounded capture, unique receipts, symlink refusal)
-- `desktop/src/app/connection.test.ts` (late stderr, stale save success/failure, requested stops)
-- `desktop/src/lib/acp-crash-diagnostics.test.ts` (summary, redaction and bounds)
-- `desktop/src-tauri/src/native_lifecycle_tests.rs` (command-level admission,
-  invalid JSON isolation, writer failure acknowledgement drain, startup/stop
-  publication cancellation, same-label replacement resource isolation,
-  natural exit with inherited pipe and PTY startup guards)
-- `desktop/src-tauri/src/lib.rs` (destroyed reservation, isolated force-stop,
-  bounded/read-only remote-Git update probe)
-- `desktop/src-tauri/src/native_process/windows.rs` (Windows job descendants
-  after natural leader exit, injected suspended startup failure)
+- Late stderr, stale save success/failure, requested stops
+
+- Summary, redaction and bounds
+
+- Command-level admission, invalid JSON isolation, writer failure acknowledgement drain, startup/stop publication cancellation, same-label replacement resource isolation, natural exit with inherited pipe and PTY startup guards
+
+- Destroyed reservation, isolated force-stop, bounded/read-only remote-Git update probe
+
+- Windows job descendants after natural leader exit, injected suspended startup failure
 
 ## Verification
 

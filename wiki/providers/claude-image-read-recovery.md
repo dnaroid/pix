@@ -46,16 +46,6 @@ There is no patch installer or mutable npm source dependency. Recovery ships as
 normal maintained source. Upstream updates require review and rerunning the
 offline lifecycle/regression matrix; see [local provider](claude-code-provider.md).
 
-## Implementation
-
-- `external/pi-tools-suite/src/claude-code-provider/src/image-read-recovery.ts`
-- `external/pi-tools-suite/src/claude-code-provider/src/provider.ts`
-
-## Tests
-
-- `external/pi-tools-suite/test/claude-code-provider/image-read-recovery.test.ts`
-- `external/pi-tools-suite/test/claude-code-provider/image-read-provider.test.ts`
-
 ## Verification
 
 Run `bun test external/pi-tools-suite/test/claude-code-provider`.

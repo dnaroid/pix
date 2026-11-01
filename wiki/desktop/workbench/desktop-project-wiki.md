@@ -782,156 +782,33 @@ The index is an authored Markdown home page; tree structure follows directories.
 There is no automatic table-of-contents rewrite, backlink graph, wiki-link
 syntax, drag ordering or filename migration in this change.
 
-## Implementation
-
-- `desktop/src/components/ProjectWikiPanel.svelte`
-- `desktop/src/components/ProjectWikiSearch.svelte`
-- `desktop/src/components/ProjectWikiSearch.test.ts`
-- `desktop/src/lib/project-wiki-search.ts` and
-  `desktop/src/lib/project-wiki-search.test.ts`
-- `desktop/src/components/ProjectWikiTree.svelte`
-- `desktop/src/components/wiki-consistency-tree-state.svelte.ts`
-- `desktop/src/lib/wiki-consistency-tree.ts`
-- `desktop/src/components/project-wiki-controller.svelte.ts`
-- `desktop/src/lib/project-wiki.ts`
-- `desktop/src/lib/project-wiki-navigation.ts`
-- `external/pi-tools-suite/src/lib/project-wiki.ts` (shared configuration)
-- `external/pi-tools-suite/src/project-wiki-prompt.ts`
-- `desktop/src/components/WikiMarkdownEditor.svelte`
-- `desktop/src/lib/wiki-markdown-editor.ts`
-- `desktop/src/lib/wiki-markdown-content.ts`
-- `desktop/src/components/WorkspaceSidebar.svelte`
-- `desktop/src/components/WorkspaceSidebarActivityBar.svelte`
-- `desktop/src/components/PreviewPane.svelte`
-- `desktop/src/components/WikiConsistencyReport.svelte`
-- `desktop/src/components/wiki-consistency-report-text.ts`
-- `desktop/src/components/WikiConsistencyCitation.svelte`
-- `desktop/src/components/preview-evidence-controller.svelte.ts`
-- `desktop/src/lib/knowledge-citation.ts`
-- `desktop/src/lib/knowledge-resolution.ts` and
-  `desktop/src/app/knowledge-resolution.svelte.ts`
-- `desktop/src/components/preview-editor-controller.svelte.ts`
-- `desktop/src/app/project-documents.svelte.ts`
-- `desktop/src/app/project-knowledge-queue.svelte.ts`
-- `desktop/src/app/knowledge-judge-gate.ts`
-- `desktop/src/app/wiki-auto-check.svelte.ts`
-- `desktop/src/app/wiki-auto-check-settings.svelte.ts`
-- `desktop/src/app/wiki-conflict-notifications.ts`
-- `desktop/src/lib/wiki-auto-check-config.ts`
-- `desktop/src/lib/wiki-check-inventory.ts`
-- `desktop/src/components/WikiAutoCheckControl.svelte`
-- `desktop/src/components/ProjectWikiCheckQueue.svelte`
-- Wiki Conflicts tab: `desktop/src/lib/wiki-conflicts-index.ts`,
-  `desktop/src/app/wiki-finding-decision.ts`,
-  `desktop/src/app/wiki-finding-decision.test.ts`,
-  `desktop/src/app/wiki-finding-resolution.ts`,
-  `desktop/src/app/wiki-finding-resolution.test.ts`,
-  `desktop/src/lib/wiki-citation-context.ts`,
-  `desktop/src/lib/wiki-conflicts-navigation.ts`,
-  `desktop/src/lib/wiki-tree-menu.ts`,
-  `desktop/src/app/wiki-consistency-owner.svelte.ts`,
-  `desktop/src/app/workbench-wiki-conflicts.svelte.ts`,
-  `desktop/src/app/wiki-conflicts-inbox.svelte.ts`,
-  `desktop/src/app/wiki-conflict-compare.svelte.ts`,
-  `desktop/src/app/wiki-conflicts-recheck.svelte.ts`,
-  `desktop/src/components/WikiConflictsTab.svelte`,
-  `desktop/src/components/WikiConflictsList.svelte`,
-  `desktop/src/components/WikiConflictDecisionBar.svelte`,
-  `desktop/src/components/wiki-conflicts-text.ts`,
-  `desktop/src/components/ProjectWikiPanel.svelte`,
-  `desktop/src/components/WikiConflictCompare.svelte`,
-  `desktop/src/components/wiki-conflicts-text.ts`,
-  `desktop/src/lib/wiki-file-dates.ts`, `desktop/src/lib/wiki-file-dates.test.ts`,
-  `desktop/src/lib/wiki-citation-context.ts`,
-  `desktop/src/lib/wiki-citation-context.test.ts`,
-  `desktop/src/lib/wiki-side-edit.ts`, `desktop/src/lib/wiki-side-edit.test.ts`,
-  `desktop/src/app/wiki-side-edit.ts`, `desktop/src/app/wiki-side-edit.test.ts`,
-  `desktop/src/app/wiki-finding-task.ts`, `desktop/src/app/wiki-finding-task.test.ts`,
-  `desktop/src-tauri/src/wiki_file_dates.rs`
-- `acp/src/knowledge/contract.ts` and `acp/src/knowledge/request.ts`
-- `acp/src/knowledge/evidence.ts` and `acp/src/knowledge/native-search.ts`
-- `acp/src/knowledge/comparison.ts` and `acp/src/knowledge/service.ts`
-- `acp/src/knowledge/chunks.ts` and `acp/src/knowledge/chunk-report.ts`
-- `acp/src/knowledge/preferences.ts` and `acp/src/knowledge/report-language.ts`
-- `acp/src/knowledge/stamp.ts`
-- `acp/src/acp/pix-acp-agent.ts` (Desktop check RPC)
-- `desktop/src/app/preview-state.svelte.ts`
-- `desktop/src/app/preview-file-io.ts`
-- `desktop/src/lib/markdown-context.ts`
-- `desktop/src/lib/markdown-links.ts`
-- `desktop/src-tauri/src/lib.rs`
-- `desktop/src-tauri/src/wiki_consistency.rs`
-- `desktop/src-tauri/src/wiki_check_inventory.rs`
-- `src/schemas/workspace-schema.ts` and generated `schemas/workspace.json`
-
 ## Verification
 
 Contradiction-check verification uses the following focused targets:
 
-- `acp/test/knowledge-comparison.test.ts`: structured model-output validation,
-  exact quote provenance, derived line ranges, internal conflicts and cancellation.
-- `acp/test/knowledge-chunks.test.ts`: lossless bounded splitting, full-document
-  hashes/baselines, original citation lines, cross-part conflicts, partial failures,
-  cancellation, all-snapshot freshness and bounded merged report persistence.
-- `acp/test/knowledge-evidence.test.ts`: project/Wiki scoping, original source
-  reads, fair context allocation, line boundaries, ordinary coverage limits,
-  actual retrieval failures and corpus/source freshness.
-- `acp/test/knowledge-service.test.ts` and
-  `acp/test/knowledge-native-search.test.ts`: model/runtime ownership, deadlines,
-  late disposal, subprocess protocol and cancellation.
-- `acp/test/knowledge-rpc.test.ts`: Desktop request validation and sessionless RPC.
-- `acp/test/knowledge-preferences.test.ts`: global report-language inheritance,
-  override, invalid values and per-request updates.
-- `acp/test/knowledge-stamp.test.ts`, `acp/test/knowledge-request-stamp.test.ts`
-  and native `wiki_consistency` tests: exact body hashes, bounded inline metadata,
-  shared TypeScript/Rust fixtures, line preservation, safe directory reads,
-  metadata-cache reuse, replacement invalidation and bounded eviction.
-- `desktop/src/app/project-knowledge-check.test.ts` and
-  `desktop/src/components/preview-editor-controller.test.ts`: Wiki eligibility,
-  current draft ownership, Preview checks, persisted marks, explicit override,
-  retry/cancel and stale-save guards.
-- `desktop/src/app/project-document-save-guard.test.ts`: strict raw baselines,
-  cancellation before queued writes and committed-baseline publication.
-- `desktop/src/app/project-knowledge-queue.test.ts` and
-  `desktop/src/app/project-manual-knowledge-check.test.ts`: FIFO ordering,
-  snapshot identity, navigation survival, explicit cancellation, history limits
-  and background marker writes without overwriting newer content.
-- `desktop/src/app/desktop-project-services.test.ts`: completion notifications,
-  workspace-safe actions and background writes that cannot replace another Preview.
-- `desktop/src/app/wiki-auto-check.test.ts`: bounded discovery and backpressure,
-  hash/pass deduplication, external changes, incremental inventory limits,
-  source readiness, project replacement, cancellation and late cursor cleanup.
-- `desktop/src/app/project-auto-knowledge-check.test.ts` and
-  `desktop/src/app/knowledge-judge-gate.test.ts`: actual store/queue integration,
-  model serialization, raw guarded checkpoints, restart, failed rechecks and
-  metadata writes that wait for active comparisons.
-- `desktop/src/app/wiki-auto-check-settings.test.ts`,
-  `desktop/src/lib/wiki-auto-check-config.test.ts` and
-  `desktop/src/components/WikiAutoCheckControl.test.ts`: JSONC preservation,
-  explicit toggles, pass initialization, stale owners and saved checkbox state.
-- `desktop/src/app/wiki-conflict-notifications.test.ts`: grounded-conflict-only
-  notifications, aggregation, persisted evidence deduplication and safe actions.
-- `acp/test/knowledge-auto-check-stamp.test.ts`: bounded attempted checkpoints,
-  logical body hashes, retained report bytes and separation from green stamps.
-- `desktop/src/lib/wiki-check-inventory.test.ts` and native
-  `wiki_check_inventory` tests: IPC cancellation, bounded pagination, cursor
-  ownership/expiry, symlink exclusion, replacement fences and strict reads.
-- `desktop/src/lib/wiki-consistency-tree.test.ts`: current saved-result parsing,
-  stale/renamed reports, recursive red priority, complete green coverage,
-  index-page counts and incremental deletion/replacement.
-- `desktop/src/components/wiki-consistency-tree-state.test.ts`: cached refreshes,
-  changed-file invalidation, collapsed descendants, partial/capped inventories,
-  independent-branch recovery, retained red under failed branches, dot filtering,
-  stale owners, cursor cleanup and teardown.
-- `desktop/src/lib/wiki-status-inventory.test.ts` and native status-inventory
-  tests: visible tree-only inventory with unchanged automatic-check eligibility,
-  hidden-path exclusion, mode-bound cursors and preserved containment/read guards.
-- `desktop/src/components/wiki-consistency-report-text.test.ts` and
-  `desktop/src/lib/knowledge-report-settings.test.ts`: report localization,
-  source preservation and matching schema/config defaults.
+- Structured model-output validation, exact quote provenance, derived line ranges, internal conflicts and cancellation.
+- Lossless bounded splitting, full-document hashes/baselines, original citation lines, cross-part conflicts, partial failures, cancellation, all-snapshot freshness and bounded merged report persistence.
+- Project/Wiki scoping, original source reads, fair context allocation, line boundaries, ordinary coverage limits, actual retrieval failures and corpus/source freshness.
+- Model/runtime ownership, deadlines, late disposal, subprocess protocol and cancellation.
+- Desktop request validation and sessionless RPC.
+- Global report-language inheritance, override, invalid values and per-request updates.
+- Exact body hashes, bounded inline metadata, shared TypeScript/Rust fixtures, line preservation, safe directory reads, metadata-cache reuse, replacement invalidation and bounded eviction.
+- Wiki eligibility, current draft ownership, Preview checks, persisted marks, explicit override, retry/cancel and stale-save guards.
+- Strict raw baselines, cancellation before queued writes and committed-baseline publication.
+- FIFO ordering, snapshot identity, navigation survival, explicit cancellation, history limits and background marker writes without overwriting newer content.
+- Completion notifications, workspace-safe actions and background writes that cannot replace another Preview.
+- Bounded discovery and backpressure, hash/pass deduplication, external changes, incremental inventory limits, source readiness, project replacement, cancellation and late cursor cleanup.
+- Actual store/queue integration, model serialization, raw guarded checkpoints, restart, failed rechecks and metadata writes that wait for active comparisons.
+- JSONC preservation, explicit toggles, pass initialization, stale owners and saved checkbox state.
+- Grounded-conflict-only notifications, aggregation, persisted evidence deduplication and safe actions.
+- Bounded attempted checkpoints, logical body hashes, retained report bytes and separation from green stamps.
+- IPC cancellation, bounded pagination, cursor ownership/expiry, symlink exclusion, replacement fences and strict reads.
+- Current saved-result parsing, stale/renamed reports, recursive red priority, complete green coverage, index-page counts and incremental deletion/replacement.
+- Cached refreshes, changed-file invalidation, collapsed descendants, partial/capped inventories, independent-branch recovery, retained red under failed branches, dot filtering, stale owners, cursor cleanup and teardown.
+- Visible tree-only inventory with unchanged automatic-check eligibility, hidden-path exclusion, mode-bound cursors and preserved containment/read guards.
+- Report localization, source preservation and matching schema/config defaults.
 
-- `desktop/src/components/WikiConsistencyReport.test.ts`: structured report,
-  independent disclosures, escaped model text and explicit session action.
+- Structured report, independent disclosures, escaped model text and explicit session action.
 - Wiki Conflicts tab: `desktop/src/lib/wiki-conflicts-index.test.ts` (identity,
   merge, stale, filters), `wiki-citation-context.test.ts`,
   `wiki-conflicts-navigation.test.ts`, `wiki-tree-menu.test.ts`,
@@ -950,12 +827,8 @@ Contradiction-check verification uses the following focused targets:
   and `desktop/src/app/wiki-finding-task.test.ts`; native `wiki_file_dates` tests
   cover Git metadata and bounded blame. `acp/test/knowledge-decisions.test.ts`
   covers decision validation and task links.
-- `desktop/src/lib/knowledge-citation.test.ts`, Preview evidence/navigation
-  tests: current exact quotes, moved lines, stale/ambiguous evidence, source-map
-  fallback, history, delayed reads and cleanup.
-- `desktop/src/lib/knowledge-resolution.test.ts` and
-  `desktop/src/app/knowledge-resolution.test.ts`: snapshot binding, task context,
-  session activation, duplicate prevention and stale-startup cleanup.
+- Current exact quotes, moved lines, stale/ambiguous evidence, source-map fallback, history, delayed reads and cleanup.
+- Snapshot binding, task context, session activation, duplicate prevention and stale-startup cleanup.
 
 Deterministic model callbacks verify orchestration and evidence validation;
 they do not establish semantic accuracy. A separately reported actual-model
@@ -972,11 +845,11 @@ document-relative links and Markdown metadata/URL policy. Native
 and absent expected-content saves. The Desktop dropdown/disclosure regressions,
 Svelte/TypeScript check and production web build remain applicable.
 
-`external/pi-tools-suite/test/project-wiki-prompt.test.ts` covers conditional
+Regression checks cover conditional
 injection, default/custom JSONC paths, config changes, missing/invalid indexes,
 workspace changes, external symlinks, opaque overrides and safe path quoting.
 
-`desktop/src/lib/project-wiki-navigation.test.ts` covers index selection and
+Regression checks cover index selection and
 late folder lookups superseded by navigation, configuration changes or teardown.
 The panel browser smoke checks folder click/keyboard activation, independent
 disclosures, hidden index rows, delayed-navigation cancellation through

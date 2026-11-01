@@ -33,11 +33,6 @@ Generate a session title from the first regular user request when a new session 
 3. An unnamed resumed session with a prior regular user request remains unchanged by later prompts.
 4. Deferred title eligibility is session-local and resets on session replacement or shutdown.
 
-## Related files
-
-- `src/bundled-extensions/session-title/index.ts`
-- `tests/session-title.test.ts`
-
 ## Verification
 
 - Regression test reproduces `/skill:...` expansion being present in the branch before the first regular prompt.

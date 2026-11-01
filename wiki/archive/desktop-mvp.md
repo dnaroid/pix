@@ -141,14 +141,6 @@ current product non-goals.
 - Unknown ACP updates are ignored rather than crashing the transcript.
 - Unsupported or malformed elicitation schemas are cancelled.
 
-## Related files
-
-- `desktop/`
-- `acp/src/main.ts`
-- `acp/src/acp/pix-acp-agent.ts`
-- `acp/src/acp/event-translator.ts`
-- `acp/src/acp/ui-request-bridge.ts`
-
 ## Verification
 
 - `npm --prefix desktop run check`

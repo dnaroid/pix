@@ -59,13 +59,6 @@ Keep `web_search` and `web_fetch` usable when the primary Ollama experimental we
 - A Tavily Extract response with only `failed_results` is treated as an error.
 - Clearing a stored key does not unset an environment override; status and notifications make that precedence visible without exposing the key.
 
-## Related files
-
-- `external/pi-tools-suite/src/web-search/index.ts`
-- `external/pi-tools-suite/src/tool-descriptions.ts`
-- `external/pi-tools-suite/test/web-search.test.ts`
-- `wiki/tools/suite.md`
-
 ## Verification
 
 - Unit tests for Ollama success without fallback.

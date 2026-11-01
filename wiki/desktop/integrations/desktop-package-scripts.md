@@ -46,37 +46,10 @@ Expose project-root package scripts, project-defined launch commands, and window
 - Closing a terminal stops it when necessary, forgets its backend record, removes its decoder/state, and selects a neighboring terminal when the closed tab was active.
 - Starting/restarting/closing actions are serialized by panel action state so conflicting terminal mutations are not issued concurrently.
 
-## Related files
-
-- `desktop/src/components/PackageScriptsPanel.svelte`
-- `desktop/src/components/TerminalSessionsPane.svelte`
-- `desktop/src/components/SavedLaunchCommands.svelte`
-- `desktop/src/components/package-scripts-controller.svelte.ts`
-- `desktop/src/components/TerminalView.svelte`
-- `desktop/src/components/terminal-font.css`
-- `desktop/src/components/terminal-font.ts`
-- `desktop/src/components/fonts/JetBrainsMonoNerdFontMono-Regular.ttf`
-- `desktop/public/fonts/OFL.txt` (Vite copies the full license into the packaged frontend)
-- `desktop/src/components/terminal-font.test.ts`
-- `desktop/src/components/terminal-view-lifetime.ts`
-- `desktop/src/components/terminal-view-lifetime.test.ts`
-- `desktop/src/lib/package-scripts.ts`
-- `desktop/src/lib/project-launch-commands.ts`
-- `desktop/src/lib/project-launch-commands.test.ts`
-- `desktop/src/components/PackageScriptsPanel.test.ts`
-- `desktop/src/lib/package-scripts.test.ts`
-- `desktop/src/lib/terminal-input.ts`
-- `desktop/src/lib/terminal-input.test.ts`
-- `desktop/src/components/package-scripts-controller.test.ts`
-- `desktop/src/components/package-scripts-reactivity.test.ts`
-- `desktop/src-tauri/src/lib.rs`
-- `desktop/src-tauri/tauri.conf.json`
-- `desktop/src/lib/desktop-asset-csp.test.ts`
-
 ## Verification
 
-- `desktop/src/lib/package-scripts.test.ts` covers compact name-only package-script filtering, terminal snapshot decoding, bounded output, and status helpers.
-- `desktop/src/lib/desktop-asset-csp.test.ts` checks the narrowly scoped style-only Tauri CSP exemption, declared inline style policy, lack of inline script allowance, and release override inheritance.
+- Compact name-only package-script filtering, terminal snapshot decoding, bounded output, and status helpers.
+- Checks the narrowly scoped style-only Tauri CSP exemption, declared inline style policy, lack of inline script allowance, and release override inheritance.
 - Desktop visual/source regressions cover the shared full xterm surface, native block/outline cursor behavior, Geist Mono 10 px terminal font and bundled Nerd fallback, standard ANSI palette retention, color-capable PTY environment, explicit 5,000-line xterm scrollback, visible scrollbar styling, and name-only script rows. The font tests check actual bundled cmap coverage for representative BMP and supplementary Nerd glyphs, the full license in the public assets copied into the Desktop frontend, and guarded DOM width-cache invalidation/repaint on late font loads.
 - Terminal lifetime tests use controlled animation frames and link promises to check unmount cancellation, late success/failure suppression, and normal initial/resize/link behavior.
 - Input tests use controlled acknowledgements to check ordering, independent terminals, Unicode boundaries, and recovery after failed writes. Controller tests cover workspace changes during launch/restart, initial shell-command ownership, launch reservation, and teardown.

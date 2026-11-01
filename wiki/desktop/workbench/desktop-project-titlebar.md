@@ -244,61 +244,16 @@ without blocking desktop interactions.
   edit is reapplied to the returned current document. Repeated conflicts remain
   visible in the modal instead of silently winning with stale content.
 
-## Related files
-
-- `desktop/src-tauri/src/project_icon.rs`
-- `desktop/src/lib/project-icon.ts`
-
-- `desktop/src-tauri/src/window_restore.rs`
-- `desktop/src-tauri/tauri.conf.json`
-- `desktop/src/app/project-workspace.svelte.ts`
-- `desktop/src/app/desktop-status-bar-view-model.svelte.ts`
-- `desktop/src/components/WorkspaceSidebar.svelte`
-- `desktop/src/components/WorkspaceSidebarActivityBar.svelte`
-- `desktop/src/components/workspace-sidebar-layout-controller.svelte.ts`
-- `desktop/src/components/workspace-sidebar-project-settings-controller.svelte.ts`
-- `desktop/src/components/ProjectSwitcher.svelte`
-- `desktop/src/components/ProjectSwitcherContextMenu.svelte`
-- `desktop/src/components/ProjectSettingsDialog.svelte`
-- `desktop/src/components/ProjectFolderIcon.svelte`
-- `desktop/src/components/RuntimeStatusBarItems.svelte`
-- `desktop/src/lib/recent-projects.ts`
-- `desktop/src/lib/project-colors.ts`
-- `desktop/src/app/project-workspace.test.ts`
-- `desktop/src/components/WorkbenchTabs.svelte`
-- `desktop/src/components/DesktopTitlebar.svelte`
-- `desktop/src-tauri/src/lib.rs`
-
 ## Verification
 
-- `desktop/src-tauri/src/window_restore.rs` tests cover native project-title
-  formatting, Unicode/spaces, trailing separators, root paths, and empty windows.
-- `desktop/src/lib/recent-projects.test.ts` covers normalized full-path fallback
-  identity and two-letter project abbreviations.
-- `desktop/src/app/project-workspace.test.ts` covers URL precedence over stale
-  storage and retaining the URL workspace when storage fails. It also checks
-  active-only startup refresh, lazy reads for inactive recent projects, cached
-  color retention, and stale read rejection across switching and saving; Rust
-  tests cover QA workspace validation and URL query encoding/replacement.
-- `desktop/src/lib/project-colors.test.ts` covers JSONC override parsing and
-  fallback behavior.
-- `desktop/src/components/ProjectSwitcher.test.ts` covers current/new-window
-  actions, project-row Finder/removal actions and keyboard dismissal, the visible
-  chevron affordance, and verifies that the UI component does not own filesystem
-  IPC.
-- `desktop/src/components/ProjectSettingsDialog.test.ts` covers the settings
-  entry point, automatic/custom controls, native color picker, and presentation/
-  persistence separation.
-- `desktop/src/components/workspace-sidebar-project-settings-controller.test.ts`
-  covers same-workspace refresh stability, saving/error retention, reset on a
-  real workspace change, and stale save completion after switching projects.
-- `desktop/src/components/WorkspaceSidebar.test.ts` verifies that the Activity
-  Bar project icon stays neutral, `ProjectSwitcher.test.ts` verifies that the
-  active Project-switcher row stays neutral, and
-  `WorkbenchTabs.test.ts` verifies the titlebar badge appears before tabs and is
-  wired to project identity color, while `DesktopVisualRegressions.test.ts`
-  verifies that the status-bar project label owns the identity color while the
-  Git branch remains muted.
+- Native project-title formatting, Unicode/spaces, trailing separators, root paths, and empty windows.
+- Normalized full-path fallback identity and two-letter project abbreviations.
+- URL precedence over stale storage and retaining the URL workspace when storage fails. It also checks active-only startup refresh, lazy reads for inactive recent projects, cached color retention, and stale read rejection across switching and saving; Rust tests cover QA workspace validation and URL query encoding/replacement.
+- JSONC override parsing and fallback behavior.
+- Current/new-window actions, project-row Finder/removal actions and keyboard dismissal, the visible chevron affordance, and verifies that the UI component does not own filesystem IPC.
+- The settings entry point, automatic/custom controls, native color picker, and presentation/ persistence separation.
+- Same-workspace refresh stability, saving/error retention, reset on a real workspace change, and stale save completion after switching projects.
+- That the Activity Bar project icon stays neutral, regression checks cover that the active Project-switcher row stays neutral, and regression checks cover the titlebar badge appears before tabs and is wired to project identity color, while regression checks cover that the status-bar project label owns the identity color while the Git branch remains muted.
 - Rust tests in `desktop/src-tauri/src/lib.rs` cover atomic workspace-config
   replacement and stale compare-and-swap rejection.
 - Run `npm --prefix desktop test`, `npm --prefix desktop run check`, and

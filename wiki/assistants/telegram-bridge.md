@@ -227,8 +227,5 @@ Telegram ⇄ long polling ⇄ broker (inside one pi session process)
 
 ## Verification
 
-- `external/pi-tools-suite/test/telegram-bridge.test.ts` — config, protocol,
-  formatting, broker routing across projects, topic lifecycle, lock and
-  takeover over a real socket, extension delivery/redaction.
-- `acp/test/agent.test.ts` — "external (Telegram) user messages reach Desktop
-  as live user rows".
+- Config, protocol, formatting, broker routing across projects, topic lifecycle, lock and takeover over a real socket, extension delivery/redaction.
+- "external (Telegram) user messages reach Desktop as live user rows".

@@ -172,10 +172,9 @@ the current sub-agent profile merge pipeline.
 - Changes to spawn behavior, router prompt templates, or tool schemas. The
   parent system prompt gains only the effective role catalog described above.
 
-## Tests
+## Regression coverage
 
-`external/pi-tools-suite/test/async-subagents/core.test.ts`, describe
-"project agent definitions (.pi/agents)": load/replacement semantics,
+Coverage includes load/replacement semantics,
 body→promptAppend, name
 mismatch error, no-frontmatter skip, broken YAML error with path, walk-up
 discovery, project preset/profile precedence, resolved

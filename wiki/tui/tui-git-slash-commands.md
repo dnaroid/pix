@@ -51,32 +51,11 @@ Expose Pix's existing Git review and commit-message helper workflows directly in
 - The confirmation menu does not edit the generated commit message; cancel and rerun when a different message is wanted.
 - `/code-review` does not modify the working tree or index.
 
-## Related files
-
-- `src/app/commands/command-git-actions.ts`
-- `src/app/commands/command-controller.ts`
-- `src/app/commands/command-registry.ts`
-- `tests/command-git-actions.test.ts`
-- `tests/command-registry.test.ts`
-- `tests/slash-command-parity.test.ts`
-- `src/default-pix-config.ts`
-- `src/schemas/pix-schema.ts`
-- `acp/src/acp/git-assistant.ts`
-- `wiki/configuration/model-selector-fallbacks.md`
-
 ## Verification
 
 - Root TypeScript typecheck passes.
 - Focused command tests cover registration, confirmed commit, staged-diff race refusal, all review input classes, and model fallback inheritance/replacement.
 - Slash-command parity treats `/code-review` and `/commit-message` as TUI commands with existing Desktop UI equivalents rather than requiring duplicate Desktop slash commands.
 - Generated Pix JSON schema must remain synchronized with `src/schemas/pix-schema.ts`.
-
-## Implementation
-
-- `src/app/commands/command-git-actions.ts`
-
-## Tests
-
-- `tests/command-git-actions.test.ts`
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"def346ef6ad4fd5ec12be3407b0d132625dc7212c8ce3cbdf0e2197f7b8022de","checkedAt":"2026-10-30T23:22:00.269Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":53,"reportLanguage":"ru"} -->

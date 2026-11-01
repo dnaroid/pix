@@ -42,36 +42,9 @@ Make collapsed Desktop activity rows compactly show the full thinking/tool flow 
 - The expanded group's vertical tool gutter is an accessible collapse button: clicking the line or its adjacent hit area, or activating it by keyboard, closes the group without clearing nested disclosures or triggering tool-result loads. Focus returns to the group header so keyboard users can reopen it.
 - Opening a group does not request all deferred results. Only opening an individual deferred tool result requests its body; the session-history controller deduplicates in-flight loads and does not re-request hydrated results.
 
-## Related files
-
-- `desktop/src/app/prompt-run-lifecycle.svelte.ts`
-- `desktop/src/app/session-update-batcher.ts`
-- `desktop/src/lib/transcript.ts`
-- `desktop/src/lib/transcript-reducer.ts`
-- `desktop/src/lib/transcript-timing.ts`
-- `desktop/src/lib/transcript-presentation.ts`
-- `desktop/src/lib/transcript.test.ts`
-- `desktop/src/components/TranscriptPane.svelte`
-- `desktop/src/components/TranscriptActivityGroup.svelte`
-- `desktop/src/components/ActivityIconTrail.svelte`
-- `desktop/src/lib/activity-icon-window.ts`
-- `desktop/src/components/ComposerActivity.svelte`
-- `desktop/src/components/ComposerActivity.test.ts`
-- `desktop/src/components/PromptComposerActivityRow.svelte`
-- `desktop/src/components/PromptComposerActivityRow.test.ts`
-- `desktop/src/lib/composer-activity.ts`
-- `desktop/src/lib/tool-activity.ts`
-- `desktop/src/lib/tool-activity.test.ts`
-- `desktop/src/components/PromptComposer.svelte`
-- `desktop/src/lib/transcript-activity.test.ts`
-- `desktop/src/components/DesktopVisualRegressions.test.ts`
-- `desktop/src/lib/composer-activity.test.ts`
-- `desktop/scripts/transcript-activity-smoke.mjs`
-
 ## Verification
 
 - ACP history tests cover preservation and propagation of persisted timing metadata. Transcript tests cover live thought boundaries, prompt-end finalization, replayed timing metadata, mixed thinking/tool grouping, the deterministic live-action headings retained in `activityGroupHeading` for the delegated composer status, ordered activity labels including repeats and skill reads, controllable live-clock sampling/final-duration freezing, parallel wall-clock span, and duration formatting. Icon-trail tests cover bounded viewport mounting and scroll-to-final-call while preserving the accessible full label. Desktop visual regression tests cover the neutral collapsed header and natively-toned expanded rows; tool-presentation tests cover the expanded rows' tone mapping. `ComposerActivity.test.ts` source checks verify the pinned status mounts inside the composer dock before its form, and that the sweep animation is nested under a `prefers-reduced-motion: no-preference` media query so reduced motion renders static text.
-- `npm --prefix desktop test -- transcript.test.ts transcript-activity.test.ts session-history-concurrency.test.ts`
 - `npm --prefix desktop run test:transcript-activity` exercises native disclosure events, lazy mounting/hydration, late completions, session replacement, the one-line collapsed header (one chevron, icon trail including repeats, elapsed time — no aggregate status icon or action text) with failure kept on child rows, controllable live-duration updates/freezing and timer teardown, keyboard toggles, and a large collapsed transcript in Chromium with stubbed backend calls.
 - `npm --prefix desktop run check` and `npm --prefix desktop run build:web` check types and production compilation. Browser smoke is not an end-to-end native Tauri or arbitrary-size frame-budget guarantee.
 

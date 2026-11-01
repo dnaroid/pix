@@ -32,19 +32,16 @@ the window again. A document that never finishes loading remains hidden.
 Theme/background/show API failures are logged; no timer reveals an unpainted
 window as a fallback.
 
-## Implementation
+## Related guidance
 
-- `desktop/src-tauri/src/startup_theme.rs`
-- `desktop/src-tauri/src/window_restore.rs`
-- `desktop/index.html`
-- `desktop/src/styles.css`
 - [Visual contract](../design.md)
 - [Reveal decision](../../decisions/0003-desktop-startup-reveal.md)
 
-## Tests
+## Regression coverage
 
-- `desktop/src-tauri/src/startup_theme.rs` (palette and one-shot reveal tests)
-- `desktop/src/startup-theme.test.ts` (pre-bundle CSS and palette consistency)
+- Palette and one-shot reveal tests
+
+- Pre-bundle CSS and palette consistency
 
 ## Verification
 

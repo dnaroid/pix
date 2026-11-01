@@ -47,16 +47,6 @@ status: active
 - Gap-free layouts: [0040 — Gap-free window tiling](../../decisions/0040-gap-free-window-tiling.md)
   supersedes the uniform-grid selection in 0029, not its display/state policies.
 
-## Implementation
-
-- `desktop/src-tauri/src/window_tiling.rs`
-- `desktop/src-tauri/src/lib.rs`
-- `desktop/src-tauri/Cargo.toml`
-
-## Tests
-
-- `desktop/src-tauri/src/window_tiling.rs::tests`
-
 ## Verification
 
 - `cargo test --manifest-path desktop/src-tauri/Cargo.toml window_tiling::tests --lib`

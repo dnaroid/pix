@@ -284,62 +284,6 @@ Files with a source line longer than the 8,000-character chunk bound are deliber
 excluded (including removal of any old indexed rows for that file), not treated as a
 whole-scan failure. Other eligible files remain searchable.
 
-## Implementation
-
-- `external/pi-tools-suite/src/project-search/native-contract.ts`
-- `external/pi-tools-suite/src/project-search/native-ranking.mjs`
-- `external/pi-tools-suite/src/project-search/reranker-documents.mjs`
-- `external/pi-tools-suite/src/project-search/session-read-cache.mjs`
-- `external/pi-tools-suite/src/project-search/native-source-config.mjs`
-- `external/pi-tools-suite/src/project-search/native-engine.mjs`
-- `external/pi-tools-suite/src/project-search/native-scan.mjs`
-- `external/pi-tools-suite/src/project-search/native-store.mjs`
-- `external/pi-tools-suite/src/project-search/source-work.mjs`
-- `external/pi-tools-suite/src/project-search/native-semantic.mjs`
-- `external/pi-tools-suite/src/project-search/native-vector-store.mjs`
-- `external/pi-tools-suite/src/project-search/native-embedding-provider.mjs`
-- `external/pi-tools-suite/src/project-search/native-embedding-provider.d.mts`
-- `external/pi-tools-suite/src/project-search/semantic-command.ts`
-- `external/pi-tools-suite/src/project-search/semantic-reset.ts`
-- `external/pi-tools-suite/src/project-search/native-cli.mjs`
-- `external/pi-tools-suite/src/project-search/native.ts`
-- `external/pi-tools-suite/src/project-search/engine.ts`
-- `external/pi-tools-suite/src/project-search/index.ts`
-- `external/pi-tools-suite/src/module-catalog.ts`
-- `external/pi-tools-suite/src/repo-discovery/subagent.ts`
-- `desktop/src/lib/native-repository-search.ts`
-- `desktop/src/lib/universal-search.ts`
-- `desktop/src/components/UniversalSearch.svelte`
-- `desktop/src/components/NativeRepositorySemanticConsent.svelte`
-- `desktop/src-tauri/src/native_repository_semantic_config.rs`
-- `desktop/src-tauri/src/native_project_search.rs`
-- `desktop/src-tauri/src/backend_runtime.rs`
-- `desktop/src-tauri/src/lib.rs`
-- `external/pi-tools-suite/package.json`
-- `external/pi-tools-suite/package-lock.json`
-- `package.json`
-- `package-lock.json`
-
-## Tests
-
-- `external/pi-tools-suite/test/native-source-config.test.ts`
-- `external/pi-tools-suite/test/native-project-search.test.ts`
-- `external/pi-tools-suite/test/source-work.test.mjs`
-- `external/pi-tools-suite/test/native-semantic-search.test.ts`
-- `external/pi-tools-suite/test/native-semantic-command.test.ts`
-- `external/pi-tools-suite/test/semantic-reset.test.ts`
-- `external/pi-tools-suite/test/tool-descriptions.test.ts`
-- `external/pi-tools-suite/test/project-search.test.ts`
-- `external/pi-tools-suite/test/async-subagents/repo-tools.test.ts`
-- `external/pi-tools-suite/test/async-subagents/provider-child-inventory.test.ts`
-- `desktop/src/lib/native-repository-search.test.ts`
-- `desktop/src/lib/universal-search.test.ts`
-- `desktop/src/components/UniversalSearch.test.ts`
-- `desktop/src-tauri/src/native_project_search.rs`
-- `desktop/src-tauri/src/backend_runtime.rs`
-- `scripts/release/test/native-search.test.mjs`
-- `desktop/src-tauri/src/native_repository_semantic_config.rs`
-
 ## Verification
 
 Use deterministic no-key fixtures for file/line correctness, incremental deletion,

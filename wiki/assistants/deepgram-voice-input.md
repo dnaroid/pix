@@ -188,23 +188,11 @@ download Vosk models or load/install Vosk bindings.
 
 ## Verification
 
-- `tests/voice-controller.test.ts` covers terminal URL/auth transport, PCM
-  forwarding, interim/final parsing, finalize/last-interim behavior, errors,
-  stale-scope rejection, one readiness cue per capture and silent cancellation.
-- `tests/config.test.ts` covers the user-config API key, project-secret rejection,
-  and Deepgram defaults.
-- `desktop/src/lib/deepgram.test.ts` covers desktop recorder format choice,
-  configured Nova-3 language/model transport, finalization, Results parsing,
-  recorder-start readiness and cancelled/failed start silence.
-- `desktop/src/lib/dictation-ready-cue.test.ts` covers short-tone scheduling,
-  one-shot playback, audio resource cleanup, blocked audio and late resume.
-- `desktop/src/lib/dictation-shortcut.test.ts` covers listener ownership,
-  eligibility at delivery, late registration, errors and serialized native
-  enable/disable teardown. `desktop/src-tauri/src/dictation_shortcut.rs` unit
-  tests cover key filtering, pass-through without eligibility and one toggle per
-  held press, including release after focus changes. Native key-window routing,
-  macOS permission prompts and hardware microphone routing require macOS QA;
-  unit tests do not establish that a physical microphone key reaches the tap.
+- Terminal URL/auth transport, PCM forwarding, interim/final parsing, finalize/last-interim behavior, errors, stale-scope rejection, one readiness cue per capture and silent cancellation.
+- The user-config API key, project-secret rejection, and Deepgram defaults.
+- Desktop recorder format choice, configured Nova-3 language/model transport, finalization, Results parsing, recorder-start readiness and cancelled/failed start silence.
+- Short-tone scheduling, one-shot playback, audio resource cleanup, blocked audio and late resume.
+- Listener ownership, eligibility at delivery, late registration, errors and serialized native enable/disable teardown. `desktop/src-tauri/src/dictation_shortcut.rs` unit tests cover key filtering, pass-through without eligibility and one toggle per held press, including release after focus changes. Native key-window routing, macOS permission prompts and hardware microphone routing require macOS QA; unit tests do not establish that a physical microphone key reaches the tap.
 - `npm run check:desktop`/desktop tests cover Svelte integration and the composer
   surface. Rust unit coverage includes user-config key resolution and environment
   fallback; compilation validates it when a Rust toolchain is available.
@@ -215,31 +203,5 @@ download Vosk models or load/install Vosk bindings.
 - Persisting or replaying microphone audio.
 - Exposing the permanent Deepgram API key to the desktop WebView.
 - Voice input in the desktop editor or questionnaire modes.
-
-## Implementation
-
-- `src/app/input/voice-controller.ts`
-- `desktop/src/lib/deepgram.ts`
-- `desktop/src/lib/search-voice-controller.ts`
-- `desktop/src/components/UniversalSearch.svelte`
-- `desktop/src/lib/dictation-ready-cue.ts`
-- `desktop/src/lib/dictation-shortcut.ts`
-- `desktop/src/components/prompt-composer-voice-controller.svelte.ts`
-- `desktop/src-tauri/src/dictation_shortcut.rs`
-- `desktop/src-tauri/src/lib.rs`
-- `desktop/src-tauri/Cargo.toml`
-- `desktop/src-tauri/Cargo.lock`
-
-## Tests
-
-- `tests/voice-controller.test.ts`
-- `tests/config.test.ts`
-- `desktop/src/lib/deepgram.test.ts`
-- `desktop/src/lib/search-voice-controller.test.ts`
-- `desktop/src/components/UniversalSearch.test.ts`
-- `desktop/src/lib/dictation-ready-cue.test.ts`
-- `desktop/src/lib/dictation-shortcut.test.ts`
-- `desktop/src-tauri/src/dictation_shortcut.rs`
-- `desktop/src-tauri/src/lib.rs`
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"314fd8f18c454a6845235bd14d61004d4e094f865a09abd7eacedc7e363f7fee","checkedAt":"2026-10-31T00:48:19.526Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":62,"reportLanguage":"ru"} -->

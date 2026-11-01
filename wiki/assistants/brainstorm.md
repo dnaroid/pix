@@ -119,16 +119,15 @@ the run state untouched, `1` run marked incomplete.
   (idempotent for incomplete runs) and returns a `stop` action. Incomplete runs cannot resume. Old `pi-brainstorm-v4` and earlier
   protocols stay readable but cannot continue.
 
-## Tests
+## Regression coverage
 
-`external/pi-tools-suite/test/brainstorm/`:
-- `council-config.test.ts`: layering, roster, overrides, parity with the suite loader.
-- `council-protocol.test.ts`: five-round flow, gaps and quorum, `--missing`,
-  substitution, thinking, extra turn/live follow-up and persisted tamper refusal,
-  symlinked subdirectories, respawn/resend recovery, oversize and empty answers,
-  init validation, idempotent abort.
-- `council-prompts.test.ts`: required templates, unknown placeholders.
-- `extension.test.ts`: skill discovery and the `/brainstorm` shortcut.
+- Layering, roster, overrides, parity with the suite loader.
+
+- Five-round flow, gaps and quorum, `--missing`, substitution, thinking, extra turn/live follow-up and persisted tamper refusal, symlinked subdirectories, respawn/resend recovery, oversize and empty answers, init validation, idempotent abort.
+
+- Required templates, unknown placeholders.
+
+- Skill discovery and the `/brainstorm` shortcut.
 
 ## Verification
 

@@ -257,34 +257,13 @@ compression/IDs, retained late result, excluded side-branch/raw compressed text,
 no forced UI hydration and an append-only archive. It is a deterministic
 runtime-lifecycle test, not a live Desktop/TUI GUI or remote-model test.
 
-## Implementation
-
-- `external/pi-tools-suite/src/dcp/statistics.js`
-- `external/pi-tools-suite/src/dcp/index.ts`
-- `external/pi-tools-suite/src/dcp/context-usage.ts`
-
-## Tests
-
-- `tests/dcp-stats.test.ts`
-- `external/pi-tools-suite/test/dcp-context-usage.test.ts`
-- `tests/dcp-usage-fallback.integration.test.ts`
-
 ## Verification
 
-- `tests/dcp-stats.test.ts`: accounting/provenance, exact diagnostic boundaries,
-  unknown/stale values, broken chains, injected ACP branches and async reads.
-- `tests/dcp-lifecycle.integration.test.ts`: actual `SessionManager` and
-  `openLazySessionManager`, resume with init/block outside the hot tail,
-  non-tip forks, model-capacity downgrade, unknown exposure, read failures,
-  same-timestamp identity collisions, obsolete async loads and the startup
-  side-branch/late-append regression through provider hooks.
-- `tests/dcp-journal-branch.test.ts`: partial/interleaved presentation tails,
-  missing old ancestors, foreign read tips even when present in the tail,
-  conflicting/missing/cyclic parent links, duplicate IDs, stable-leaf fork-back,
-  changed owners and bounded retries.
-- `tests/mouse-controller.test.ts`: on-demand dialog integration.
-- `external/pi-tools-suite/test/compress-pruner.test.ts`: `/dcp stats` uses the
-  same report and preserves the user-only message boundary.
+- Accounting/provenance, exact diagnostic boundaries, unknown/stale values, broken chains, injected ACP branches and async reads.
+- Actual `SessionManager` and `openLazySessionManager`, resume with init/block outside the hot tail, non-tip forks, model-capacity downgrade, unknown exposure, read failures, same-timestamp identity collisions, obsolete async loads and the startup side-branch/late-append regression through provider hooks.
+- Partial/interleaved presentation tails, missing old ancestors, foreign read tips even when present in the tail, conflicting/missing/cyclic parent links, duplicate IDs, stable-leaf fork-back, changed owners and bounded retries.
+- On-demand dialog integration.
+- `/dcp stats` uses the same report and preserves the user-only message boundary.
 - Existing DCP journal, transaction-fault and marathon suites remain required.
 
 Run the named host tests with `node --import tsx --test`, the DCP tests with

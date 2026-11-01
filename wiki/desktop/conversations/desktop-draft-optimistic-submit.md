@@ -46,24 +46,6 @@ in first-prompt model routing just as it is for non-optimistic materialization.
   optimistic user row during adoption. Notices arriving after adoption append to
   the same transcript. Background adoption must not replace the selected chat.
 
-## Implementation
-
-- `desktop/src/app/prompt-submit.ts::createPromptSubmit`
-- `desktop/src/app/draft-session.svelte.ts::createDraftSession`
-- `desktop/src/app/desktop-prompt-action-services.ts::createDesktopPromptActionServices`
-- `desktop/src/app/desktop-session-transition-services.ts::createDesktopSessionTransitionServices`
-- `desktop/src/app/active-session-state.svelte.ts::adoptDraftTranscript`
-- `desktop/src/app/session-tab-selection.ts::createSessionTabSelection`
-- `desktop/src/app/composer-drafts.ts::createComposerDraftStore`
-
-## Tests
-
-- `desktop/src/app/prompt-submit.test.ts`
-- `desktop/src/app/draft-tab-selection.test.ts`
-- `desktop/src/app/active-session-state.test.ts`
-- `desktop/src/app/composer-drafts.test.ts`
-- `desktop/src/components/DesktopDraftSessionConcurrency.test.ts`
-
 ## Verification
 
 - The first draft prompt is visible and the composer is empty while the

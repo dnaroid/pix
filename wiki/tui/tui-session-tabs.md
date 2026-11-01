@@ -136,30 +136,6 @@ user actually sends work to the agent.
   conversation surface. A draft must never render a subagent panel belonging
   to the detached real session.
 
-## Related files
-
-- `src/app/session/tabs-controller.ts`
-- `src/app/session/session-lifecycle-controller.ts`
-- `src/app/session/lazy-session-manager.ts`
-- `src/app/runtime.ts`
-- `src/app/screen/status-controller.ts`
-- `src/app/rendering/status-line-renderer.ts`
-- `src/app/input/input-action-controller.ts`
-- `src/app/popup/popup-menu-controller.ts`
-- `src/app/popup/menu-items-controller.ts`
-- `src/app/popup/popup-action-controller.ts`
-- `src/app/commands/command-navigation-actions.ts`
-- `src/app/commands/command-host.ts`
-- `src/app/app.ts`
-- `tests/tabs-controller.test.ts`
-- `tests/lazy-session-manager.test.ts`
-- `tests/input-action-controller.test.ts`
-- `tests/menu-items-controller.test.ts`
-- `tests/command-navigation-actions.test.ts`
-- `tests/popup-menu-controller.test.ts`
-- `tests/popup-action-controller.test.ts`
-- `wiki/desktop/conversations/desktop-session-parity.md`
-
 ## Verification
 
 - Tab-controller tests cover UI-only New Tab, startup without a runtime, direct
@@ -177,13 +153,5 @@ user actually sends work to the agent.
   shared saved-session load is already in progress.
 - `npm run test:inner`
 - `npx tsc --noEmit`
-
-## Implementation
-
-- `src/app/session/tabs-controller.ts`
-
-## Tests
-
-- `tests/tabs-controller.test.ts`
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"dbbf9ded3073159eadf9a286e4e3befe7bacac2a7d89e6baaee7d26b392fe740","checkedAt":"2026-10-31T12:38:04.378Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":56,"reportLanguage":"ru"} -->

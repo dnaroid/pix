@@ -42,36 +42,12 @@ Give Pix Desktop one reusable command vocabulary for keyboard shortcuts, command
 - Existing slash-command pickers for model, thinking, jump, and prompt history continue to use the same picker component without changing their command semantics.
 - Contextual user-message actions are exactly Copy message, Fork, Fork in new tab, Undo changes, and Edit and resend. Their availability and mutation guards follow [user-message actions](../conversations/desktop-user-message-actions.md); palette navigation does not change that contract.
 
-## Related files
-
-- `desktop/src/lib/desktop-commands.ts`
-- `desktop/src/lib/command-interactions.ts`
-- `desktop/src/components/CommandPicker.svelte`
-- `desktop/src/components/StatusBar.svelte`
-- `desktop/src/components/PromptComposer.svelte`
-- `desktop/src/components/PromptComposerActionsMenu.svelte`
-- `desktop/src/components/TranscriptPane.svelte`
-- `desktop/src/components/WorkbenchTabs.svelte`
-- `desktop/src/lib/workbench-tabs.ts`
-- `desktop/src/app/desktop-command-controller.svelte.ts`
-- `desktop/src/app/desktop-command-services.ts`
-- `desktop/src/app/desktop-workbench-prop-builders.ts`
-- `desktop/src/app/desktop-workbench-view-model-services.ts`
-
 ## Verification
 
-- `desktop/src/lib/desktop-commands.test.ts` covers centralized metadata, platform shortcut labels, and shortcut matching.
-- `desktop/src/lib/command-interactions.test.ts` covers command-registry rows mapped into the shared picker.
+- Centralized metadata, platform shortcut labels, and shortcut matching.
+- Command-registry rows mapped into the shared picker.
 - `npm --prefix desktop test`
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`
-
-## Implementation
-
-- `desktop/src/lib/desktop-commands.ts`
-
-## Tests
-
-- `desktop/src/lib/desktop-commands.test.ts`
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"818be7b69eec20efae80eac7e64706b96026830c937a8054d620a977c415baee","checkedAt":"2026-10-31T14:05:30.494Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":65,"reportLanguage":"ru"} -->

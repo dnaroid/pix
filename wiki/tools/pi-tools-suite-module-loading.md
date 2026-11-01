@@ -59,20 +59,9 @@ generations are not pruned.
 
 Decision: [0012 — Isolate suite module loading](../decisions/0012-isolate-suite-module-loading.md).
 
-## Implementation
+## Regression coverage
 
-- `scripts/build-pi-tools-suite.mjs`
-- `scripts/release/prune.mjs` (staged release payload cleanup)
-- `external/pi-tools-suite/index.ts`
-- `external/pi-tools-suite/runtime-loader.mjs`
-- `external/pi-tools-suite/src/index.ts`
-- `external/pi-tools-suite/src/module-loader.ts`
-
-## Tests
-
-- `tests/pi-tools-suite-runtime.test.ts` (SDK identity, reload, source fallback,
-  packaging, staged runtime pruning and invalid manifests)
-- `external/pi-tools-suite/test/module-loader.test.ts`
+- SDK identity, reload, source fallback, packaging, staged runtime pruning and invalid manifests
 
 ## Verification
 

@@ -24,14 +24,6 @@ guarantee that Claude Code or the remote service accepts unlimited images.
 This is maintained source, not an npm patch installer. Upstream updates require
 fresh review; see [local provider](claude-code-provider.md).
 
-## Implementation
-
-- `external/pi-tools-suite/src/claude-code-provider/src/context-serializer.ts`
-
-## Tests
-
-- `external/pi-tools-suite/test/claude-code-provider/image-count.test.ts`
-
 ## Verification
 
 Run `bun test external/pi-tools-suite/test/claude-code-provider/image-count.test.ts`.

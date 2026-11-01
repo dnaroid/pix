@@ -41,13 +41,6 @@ model behavior when the user has not configured `enabledModels`.
 - `/scoped-models reset`, `/scoped-models default`, and `/scoped-models clear`
   remove the saved scope and immediately switch the session to unscoped mode.
 
-## Related files
-
-- `src/app/runtime.ts`
-- `src/app/popup/menu-items-controller.ts`
-- `src/app/commands/command-model-actions.ts`
-- `src/app/rendering/popup-menu-renderer.ts`
-
 ## Verification
 
 - Model-menu tests cover the full available-model snapshot with and without an

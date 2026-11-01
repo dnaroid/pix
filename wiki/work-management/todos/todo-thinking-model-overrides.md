@@ -63,33 +63,15 @@ Allow per-model inclusive Min/Max bounds on todo thinking, including a fixed lev
   rows remain visible, and choosing **No override** stores the `null` removal
   marker; Advanced JSONC remains the escape hatch for direct source editing.
 
-## Related files
-
-- `external/pi-tools-suite/src/config.ts`
-- `external/pi-tools-suite/src/todo/index.ts`
-- `external/pi-tools-suite/src/todo/thinking-policy.ts`
-- `external/pi-tools-suite/src/todo/tool/types.ts`
-- `external/pi-tools-suite/src/default-pi-tools-suite-config.ts`
-- `src/schemas/pi-tools-suite-schema.ts`
-- `schemas/pi-tools-suite.json`
-- `desktop/src/components/settings/ToolsSuiteSettingsEditor.svelte`
-- `desktop/src/components/settings/SettingsTodoThinkingOverrides.svelte`
-- `desktop/src/components/settings/SettingsModelSelect.svelte`
-- `desktop/src/components/settings/SettingsSelect.svelte`
-- `desktop/src/lib/settings-model-search.ts`
-- `desktop/src/lib/todo-thinking-overrides-settings.ts`
-
 ## Verification
 
 - Config-layer tests for merge and removal.
-- `external/pi-tools-suite/test/todo-thinking-policy.test.ts` covers validation,
-  clamping, sparse supported levels, and impossible ranges.
+- Validation, clamping, sparse supported levels, and impossible ranges.
 - Todo lifecycle tests for forced create/update behavior and thinking switch/restore.
 - Desktop settings helper/component tests cover inherited rows, `null` removal
   markers, wildcard entry UI, and replacement of the generic JSON textarea.
-- `desktop/src/lib/settings-model-search.test.ts` covers opt-in custom patterns,
-  empty catalogs, trimming, and avoiding duplicate known/configured options.
-- `tests/pi-tools-suite-schema.test.ts` accepts ranges/null and rejects string policies.
+- Opt-in custom patterns, empty catalogs, trimming, and avoiding duplicate known/configured options.
+- Accepts ranges/null and rejects string policies.
 - pi-tools-suite deterministic check and host check.
 
 ## Evidence

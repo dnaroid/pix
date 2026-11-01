@@ -177,48 +177,18 @@ or rename persistence across restarts. Raw pre-compaction history and pagination
 are covered separately by deterministic session tests; this slice does not
 certify restart persistence. One live run is not a reliability guarantee.
 
-## Framework layout
+## Framework responsibilities
 
-```text
-test/evals/
-  cases.ts
-  coverage-manifest.ts
-  extension-contracts.test.ts
-  harness.test.ts
-  live-evals.test.ts
-  plan-guidance.ts
-  plan-guidance.test.ts
-  run-evals.ts
-  fixtures/
-    coding-hypotheses/
-    coding-regression/
-    coding-async/
-    plan-guidance/
-  harness/
-    types.ts
-    runner.ts
-    assertions.ts
-    metrics.ts
-    report.ts
-```
+Live cases define behavioral scenarios and machine-checkable assertions. A
+coverage manifest maps extensions and model-facing tools to checks; deterministic
+contracts enforce coverage completeness, registration and validator failure
+controls. Plan checkpoints evaluate current authoring/Run decisions.
 
-The responsibilities are intentionally separated:
-
-- `cases.ts` contains live behavioral scenarios and their assertions.
-- `coverage-manifest.ts` maps every extension and model-facing tool to the tests
-  that cover it.
-- `extension-contracts.test.ts` enforces coverage completeness and fills a few
-  previously missing deterministic registration contracts.
-- `harness.test.ts` tests the eval machinery itself.
-- `plan-guidance.ts` evaluates current plan-authoring/Run decisions;
-  `plan-guidance.test.ts` checks its registration and validator failure controls.
-- `live-evals.test.ts` exposes the live cases through Bun's test runner.
-- `run-evals.ts` runs a matrix and writes JSON/Markdown comparison artifacts.
-- `runner.ts` creates isolated fixture projects, launches Pi, records events,
-  snapshots changed files, and collects metrics.
-- `assertions.ts` converts case expectations into machine-checkable results.
-- `metrics.ts` derives workflow, token, subagent, mutation, and timing metrics.
-- `report.ts` produces the cross-model comparison report.
+The runner creates isolated fixture projects, launches Pi, records events,
+snapshots changed files and collects workflow, token, subagent, mutation and
+timing metrics. The matrix entrypoint writes JSON/Markdown cross-model comparison
+reports; live cases are also available through Bun's test runner. Deterministic
+tests separately check the eval machinery itself.
 
 ## Coverage gate
 

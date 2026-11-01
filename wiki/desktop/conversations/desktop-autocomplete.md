@@ -50,22 +50,9 @@ Give Pix Desktop the same best-effort LLM prompt autocomplete behavior as the TU
   announced as editable content, and a screen-reader status announces that Tab
   can accept it.
 
-## Related files
+## Related behavior
 
 File/folder `@` mentions are a separate feature: see [file mentions](desktop-file-mentions.md).
-
-- `acp/src/acp/autocomplete.ts`
-- `acp/src/acp/pix-config-paths.ts`
-- `schemas/pix-desktop.json`
-- `acp/src/acp/pix-acp-agent.ts`
-- `desktop/src/lib/acp-client.ts`
-- `desktop/src/lib/acp-json-rpc.ts`
-- `desktop/src/lib/acp-pix-extensions.ts`
-- `desktop/src/lib/autocomplete.ts`
-- `desktop/src/components/PromptComposer.svelte`
-- `desktop/src/components/prompt-composer-textarea-controller.svelte.ts`
-- `desktop/src/app/autocomplete.svelte.ts`
-- `desktop/src/app/desktop-session-services.ts`
 
 ## Verification
 
@@ -86,13 +73,5 @@ File/folder `@` mentions are a separate feature: see [file mentions](desktop-fil
 - Confirmed by desktop structure: the composer owns caret, selection, keyboard,
   resize, and scroll behavior; the autocomplete/session services provide the
   ACP request and active-session context through the composition root.
-
-## Implementation
-
-- `desktop/src/lib/autocomplete.ts`
-
-## Tests
-
-- `desktop/src/lib/autocomplete.test.ts`
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"37746817dc3cb78d9acbaf0d53ccce1894fddce3cb6e85cb94315e389c762cd2","checkedAt":"2026-10-31T00:38:12.406Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":64,"reportLanguage":"ru"} -->

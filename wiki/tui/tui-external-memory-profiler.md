@@ -77,15 +77,6 @@ the Pix PID ends that run when necessary (after evidence collection).
 
 Design rationale: [0004 — External TUI incident profiling](../decisions/0004-external-tui-incident-profiling.md).
 
-## Implementation
-
-- `scripts/profile-pix-memory.mjs`
-- `scripts/pix-memory-profiler.mjs`
-
-## Tests
-
-- `tests/pix-memory-profiler.test.ts`
-
 ## Verification
 
 Run `node --import tsx --test tests/pix-memory-profiler.test.ts` for deterministic

@@ -388,35 +388,9 @@ JSONC/task overlay import or fallback.
   initializer cannot expose a version-zero database or replace an existing
   database/task rows; the published database is inspected before success.
 
-## Related files
-
-- `acp/src/registry/service.ts`
-- `acp/src/registry/projects.ts`
-- `acp/src/registry/task-bundle.ts`
-- `acp/test/registry.test.ts`
-- `acp/src/acp/desktop-commands.ts`
-- `acp/test/desktop-commands.test.ts`
-- `desktop/src-tauri/src/lib.rs`
-- `desktop/src/app/registry.svelte.ts`
-- `desktop/src/app/registry-startup.ts`
-- `desktop/src/app/registry-startup.test.ts`
-- `desktop/src/app/desktop-root-effects.svelte.ts`
-- `desktop/src/app/registry-store.test.ts`
-- `desktop/src/lib/registry.ts`
-- `desktop/src/lib/registry-background-sync.ts`
-- `desktop/src/lib/registry-project-sync.ts`
-- `desktop/src/lib/registry-project-sync.test.ts`
-- `desktop/src/components/RegistryPanel.svelte`
-- `desktop/src/components/RegistryProjectStatus.svelte`
-- `desktop/src/components/RegistryCatalog.svelte`
-- `desktop/src/components/RegistryStatusIcon.svelte`
-- `desktop/src/app/registry-project-storage.svelte.ts`
-- `wiki/work-management/tasks/desktop.md`
-- `wiki/desktop/conversations/desktop-attachments.md`
-
 ## Verification
 
-- ACP `test/registry.test.ts` covers project-state push/pull,
+- ACP regression checks cover project-state push/pull,
   portable task attachments, attachment-only status changes, stale remote
   attachment removal, conflicts, and direct workspace-scoped operations.
 - Desktop Rust task persistence tests cover reference-based local attachment

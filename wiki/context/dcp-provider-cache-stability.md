@@ -214,24 +214,6 @@ cache-preserving unsafe deletion.
 - Fork replay is branch-scoped: journal operations outside the selected ancestry
   do not leak into the forked projection.
 
-## Related files
-
-- `external/pi-tools-suite/src/dcp/journal.ts`
-- `external/pi-tools-suite/src/dcp/index.ts`
-- `external/pi-tools-suite/src/dcp/pruner-message-ids.ts`
-- `external/pi-tools-suite/src/dcp/pruner-nudge.ts`
-- `external/pi-tools-suite/src/dcp/pruner.ts`
-- `external/pi-tools-suite/src/dcp/pruner-replay-context.ts`
-- `external/pi-tools-suite/src/dcp/conversation-index.ts`
-- `external/pi-tools-suite/src/dcp/compress-tool.ts`
-- `external/pi-tools-suite/src/dcp/auto-compress.ts`
-- `external/pi-tools-suite/test/dcp-journal-lifecycle.test.ts`
-- `external/pi-tools-suite/test/dcp-marathon-replay.test.ts`
-- `external/pi-tools-suite/test/dcp-auto-compression-projection.test.ts`
-- `external/pi-tools-suite/test/dcp-failed-attempt-replay.test.ts`
-- `tests/dcp-retry-replay.integration.test.ts`
-- `external/pi-tools-suite/test/compress-pruner.test.ts`
-
 ## Verification
 
 Deterministic tests must cover:

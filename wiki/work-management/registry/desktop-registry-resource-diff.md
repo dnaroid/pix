@@ -50,38 +50,6 @@ Diff collection holds the shared cross-process checkout lock described in
 [Registry publication](resource-registry-publication-tags.md), so another ACP
 process cannot reset or replace the checkout during comparison.
 
-## Implementation
-
-- `acp/src/registry/service.ts`
-- `acp/src/registry/cache-lock.ts`
-- `acp/src/registry/diff-service.ts`
-- `acp/src/registry/diff.ts`
-- `acp/src/registry/publication-location.ts`
-- `acp/src/registry/git.ts`
-- `acp/src/acp/desktop-commands.ts`
-- `acp/src/acp/pix-acp-agent.ts`
-- `desktop/src/lib/registry.ts`
-- `desktop/src/lib/acp-pix-extensions.ts`
-- `desktop/src/lib/acp-client.ts`
-- `desktop/src/app/registry.svelte.ts`
-- `desktop/src/components/RegistryPanel.svelte`
-- `desktop/src/components/RegistryCatalog.svelte`
-- `desktop/src/components/RegistryItemActions.svelte`
-- `desktop/src/components/RegistryDiffPanel.svelte`
-- `desktop/src/components/WorkspaceSidebar.svelte`
-- `desktop/src/app/desktop-sidebar-view-model.svelte.ts`
-
-## Tests
-
-- `acp/test/registry-cache.test.ts`
-- `acp/test/registry.test.ts`
-- `acp/test/desktop-commands.test.ts`
-- `acp/test/agent.test.ts`
-- `desktop/src/lib/acp-client.test.ts`
-- `desktop/src/lib/registry.test.ts`
-- `desktop/src/app/registry.test.ts`
-- `desktop/src/components/RegistryPanel.test.ts`
-
 ## Verification
 
 Exercise agent sidecar-only edits/additions/removals and skill-tree changes,

@@ -46,12 +46,6 @@ Render supported Mermaid fenced code blocks as readable Unicode diagrams in chat
 - An unclosed final Mermaid fence is treated as streaming input and may render the dependency's best-effort result.
 - Repeated frame renders reuse a bounded in-memory cache keyed by Mermaid source.
 
-## Related files
-
-- `src/markdown-format.ts`
-- `src/app/rendering/conversation-entry-renderer.ts`
-- `tests/markdown-format.test.ts`
-
 ## Verification
 
 - Regression tests cover complete and streaming diagrams, wide-diagram pagination, extreme-width fallback, parse fallback, and ordinary fences.
@@ -67,13 +61,5 @@ Render supported Mermaid fenced code blocks as readable Unicode diagrams in chat
 
 - Confirmed by code: all user and assistant chat Markdown passes through `renderMarkdownTextLines`.
 - Confirmed by dependency API: `grok-mermaid` returns Unicode rows, semantic spans, and an explicit display width, or `null` when it cannot render.
-
-## Implementation
-
-- `src/markdown-format.ts`
-
-## Tests
-
-- `tests/markdown-format.test.ts`
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"3a6612a1ff2cbf624772182bb97ce64e694dca130e7fad3e020f864c20a805e2","checkedAt":"2026-10-31T00:10:17.439Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":61,"reportLanguage":"ru"} -->

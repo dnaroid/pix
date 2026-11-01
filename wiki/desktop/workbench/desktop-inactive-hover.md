@@ -27,19 +27,6 @@ Historical approaches: [focus on hover](../../decisions/0038-focus-on-hover.md)
 and [inactive forwarding](../../decisions/0036-inactive-window-hover.md).
 Related: [Desktop window state](desktop-window-state.md).
 
-## Implementation
-
-- `desktop/src-tauri/src/startup_theme.rs`
-- `desktop/src-tauri/src/lib.rs`
-- `desktop/src-tauri/Cargo.toml`
-- `desktop/src-tauri/tauri.conf.json`
-
-## Tests
-
-- `desktop/src-tauri/src/startup_theme.rs`
-- `desktop/src/lib/native-window-config.test.ts`
-- `desktop/src/startup-theme.test.ts`
-
 ## Verification
 
 Run Cargo check/tests and the native-window-config/startup-theme Vitest tests.

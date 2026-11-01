@@ -75,25 +75,8 @@ Render the bundled `question` tool as an inline mode of the existing Pix Desktop
 - Root tests cover schema normalization, limits, additive custom answers, carrier validation, result compatibility, cancellation, and TUI interaction.
 - ACP tests cover multi-select carrier mapping, malformed bound rejection, response mapping, and explicit Pi extension arguments.
 - Desktop tests cover request parsing, session ownership/admission matching (including independent pending sessions), single/multi selection state, limits, additive custom answers, serialization, and tab/Preview navigation.
-- `tests/question-recovery.test.ts` covers real SDK persisted-session recovery, original result IDs, continuation, explicit Cancel, deferred start cancellation, and stale answers. ACP and Desktop elicitation tests distinguish interruption from explicit Cancel and preserve ordinary form behavior.
+- Real SDK persisted-session recovery, original result IDs, continuation, explicit Cancel, deferred start cancellation, and stale answers. ACP and Desktop elicitation tests distinguish interruption from explicit Cancel and preserve ordinary form behavior.
 - Run root question tests and typecheck, ACP tests/check, and Desktop tests/check/build:web.
-
-## Related files
-
-- `src/bundled-extensions/question/{contract,types,result,tui,desktop}.ts`
-- `src/bundled-extensions/question/recovery.ts`
-- `src/app/session/session-lifecycle-controller.ts`
-- `acp/src/pi/pix-rpc-entry.js`
-- `acp/src/acp/pix-acp-agent.ts`
-- `acp/src/acp/ui-request-bridge.ts`
-- `desktop/src/lib/question.ts`
-- `desktop/src/components/PromptComposer.svelte`
-- `desktop/src/components/PromptQuestionnairePanel.svelte`
-- `desktop/src/components/prompt-composer-questionnaire-controller.svelte.ts`
-- `desktop/src/app/elicitation.svelte.ts`
-- `desktop/src/app/question-images.ts`
-- `desktop/src/app/question-image-state.ts`
-- `desktop/src/app/question-image-ingest.ts`
 
 ## Evidence
 

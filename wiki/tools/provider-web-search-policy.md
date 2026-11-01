@@ -24,19 +24,6 @@ on model selection and before each turn, and blocks direct execution.
 Sub-agents also exclude this tool in their isolated tool guard. Existing running
 sessions need a suite reload/restart to discard the prior registration.
 
-## Implementation
-
-- `external/pi-tools-suite/src/index.ts`
-- `external/pi-tools-suite/src/claude-code-provider/extensions/pi-claude-code-provider.ts`
-- `external/pi-tools-suite/src/provider-web-search-guard.ts`
-- `external/pi-tools-suite/src/async-subagents/core/tool-guard.ts`
-
-## Tests
-
-- `external/pi-tools-suite/test/provider-web-search-guard.test.ts`
-- `external/pi-tools-suite/test/claude-code-provider/upstream/unit/extension.case.js`
-- `external/pi-tools-suite/test/async-subagents/provider-child-inventory.test.ts`
-
 ## Verification
 
 The provider never exposes/registers the banned tool; a legacy registration is

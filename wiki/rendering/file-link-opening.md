@@ -38,13 +38,6 @@ Open local links in the application appropriate to the current environment witho
 - Content-based MIME detection.
 - Changing link detection or mouse hit-testing.
 
-## Related files
-
-- `src/app/screen/file-links.ts`
-- `src/app/screen/file-link-opener.ts`
-- `tests/file-links.test.ts`
-- `tests/screen-openers.test.ts`
-
 ## Verification
 
 - Unit tests cover Zed text links, range-to-first-line fallback, Zed media links, non-Zed links, and platform fallbacks.
@@ -58,13 +51,5 @@ Open local links in the application appropriate to the current environment witho
 - Confirmed by tests: focused opener tests cover Zed text/media paths and
   platform fallbacks; file-link detection tests cover range anchors degrading
   to their first line before the Zed target is built.
-
-## Implementation
-
-- `src/app/screen/file-link-opener.ts`
-
-## Tests
-
-- `tests/file-links.test.ts`
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"4a946db424e020dce687ccee8ed943e8d1485fd3d5be92a0576b299dea3f12e7","checkedAt":"2026-10-31T00:11:00.101Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":57,"reportLanguage":"ru"} -->

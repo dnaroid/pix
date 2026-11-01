@@ -60,15 +60,6 @@ Let the user resume a transiently failed turn directly from its error toast inst
 - Switching tabs before clicking cannot resume the stale session.
 - Switching tabs while extension binding or message delivery is pending does not update the new active session's status or show a misleading failure there.
 
-## Related files
-
-- `src/ui.ts`
-- `src/app/rendering/toast-controller.ts`
-- `src/app/rendering/toast-renderer.ts`
-- `src/app/screen/mouse-controller.ts`
-- `src/app/session/session-event-controller.ts`
-- `src/app/app.ts`
-
 ## Verification
 
 - Toast renderer tests for action-row reservation and hit bounds.

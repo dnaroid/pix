@@ -72,50 +72,17 @@ Pix Desktop exposes five user-message actions, including Edit and resend, withou
 - Merging or automatically resolving concurrent edits made by another session.
 - Restoring image attachments into the composer after Undo; the selected text is restored and attachments are cleared.
 
-## Related files
-
-- `desktop/src/app/composer-message-edit.svelte.ts`
-- `desktop/src/components/PromptComposer.svelte`
-- `desktop/src/app/prompt-submit.ts`
-- `src/app/input/input-action-controller.ts`
-- `desktop/src/app/edited-message-submit.ts`
-- `desktop/src/app/user-message-context-actions.ts`
-- `src/app/workspace/user-message-edit.ts`
-- `desktop/src/components/TranscriptPane.svelte`
-- `desktop/src/components/transcript-user-message-menu-controller.svelte.ts`
-- `desktop/src/lib/desktop-commands.ts`
-- `desktop/src/app/conversation-branch-actions.ts`
-- `desktop/src/app/conversation-fork-action.ts`
-- `desktop/src/app/user-message-context-actions.ts`
-- `desktop/src/app/prompt-run-lifecycle.svelte.ts`
-- `desktop/src/lib/acp-client.ts`
-- `desktop/src/lib/acp-client-types.ts`
-- `desktop/src/lib/acp-pix-extensions.ts`
-- `desktop/src/lib/transcript.ts`
-- `desktop/src/lib/transcript-local.ts`
-- `desktop/src/lib/transcript-reducer.ts`
-- `desktop/src/lib/transcript-types.ts`
-- `desktop/src-tauri/src/lib.rs`
-- `acp/src/acp/desktop-commands.ts`
-- `acp/src/acp/pix-acp-agent.ts`
-- `acp/src/config.ts`
-- `acp/src/main.ts`
-- `src/bundled-extensions/workspace-undo/index.ts`
-- `src/app/workspace/workspace-actions-controller.ts`
-- `src/app/workspace/workspace-undo.ts`
-- `src/app/session/session-history.ts`
-
 ## Verification
 
-- `desktop/src/app/conversation-fork-action.test.ts` covers running-source preservation, latest transcript/composer ownership, late source updates, stale fork cleanup, and unchanged replacement/history/mutation gates. `desktop/src/components/transcript-user-message-menu-controller.test.ts` covers running-session action permissions, runtime readiness and renderer-only rejection. `desktop/src/app/desktop-workbench-prop-builders.test.ts` covers selected-session automatic/deferred queue guards without altering transcript activity.
-- `desktop/src/app/user-message-context-actions.test.ts` covers exact persisted/bound entry selection with duplicate text, hidden entries and an in-flight user, plus fail-closed unbound/legacy rows. `desktop/src/app/prompt-run-lifecycle.test.ts` covers first-new-entry binding with steering and stale binding rejection.
-- `desktop/src/app/composer-message-edit.test.ts`, `desktop/src/app/edited-message-submit.test.ts`, and `desktop/src/app/user-message-edit-actions.test.ts` cover composer prefill, preparation, removable attachments, draft restoration, ordinary Send, cancelled navigation and stale scope. Composer tests also cover Edit/Cancel/Send while another session runs and rejection while the selected session, operation or history is busy. `tests/user-message-edit.test.ts` covers TUI main-composer cancellation, Send, exact branch navigation and preservation of the old tree.
-- `tests/workspace-undo-extension.test.ts` covers session mutation recording, tool-start ownership, conflict refusal against a later parallel edit, legacy TUI index fallback, and committed-rewind recovery without another navigation, including a real SDK acknowledgement-failure regression and rejection after new context.
-- `tests/workspace-undo.test.ts` covers patch/write rollback, changed-file refusal, path confinement, and transactional rollback after a later failure.
-- `tests/workspace-actions-controller.test.ts` verifies TUI mutations also append portable hidden session entries.
-- `tests/session-history.test.ts` verifies hidden workspace-mutation entries do not render in TUI history.
-- `acp/test/agent.test.ts` covers current-branch entry lookup, duplicate prompt text, abandoned branches, private bridge gating, Copy/Undo ACP behavior, and exact persisted-ID rewind retries with busy/queued guards and authoritative bridge rejection.
-- `desktop/src/lib/acp-client.test.ts` covers Desktop private RPC shapes; `desktop/src/lib/transcript.test.ts` covers binding optimistic rows to Pi entries or renderer-only state.
+- Running-source preservation, latest transcript/composer ownership, late source updates, stale fork cleanup, and unchanged replacement/history/mutation gates. regression checks cover running-session action permissions, runtime readiness and renderer-only rejection. regression checks cover selected-session automatic/deferred queue guards without altering transcript activity.
+- Exact persisted/bound entry selection with duplicate text, hidden entries and an in-flight user, plus fail-closed unbound/legacy rows. regression checks cover first-new-entry binding with steering and stale binding rejection.
+- Composer prefill, preparation, removable attachments, draft restoration, ordinary Send, cancelled navigation and stale scope. Composer tests also cover Edit/Cancel/Send while another session runs and rejection while the selected session, operation or history is busy. regression checks cover TUI main-composer cancellation, Send, exact branch navigation and preservation of the old tree.
+- Session mutation recording, tool-start ownership, conflict refusal against a later parallel edit, legacy TUI index fallback, and committed-rewind recovery without another navigation, including a real SDK acknowledgement-failure regression and rejection after new context.
+- Patch/write rollback, changed-file refusal, path confinement, and transactional rollback after a later failure.
+- TUI mutations also append portable hidden session entries.
+- Hidden workspace-mutation entries do not render in TUI history.
+- Current-branch entry lookup, duplicate prompt text, abandoned branches, private bridge gating, Copy/Undo ACP behavior, and exact persisted-ID rewind retries with busy/queued guards and authoritative bridge rejection.
+- Desktop private RPC shapes; regression checks cover binding optimistic rows to Pi entries or renderer-only state.
 - Root, ACP, Desktop TypeScript/Svelte checks and Rust compilation must remain green.
 
 ## Decisions

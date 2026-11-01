@@ -560,45 +560,6 @@ undo configuration.
 - `autoCompress.enabled` remains opt-in.
 - No live provider quality/cache canary is claimed by this implementation pass.
 
-## Implementation
-
-- `external/pi-tools-suite/src/dcp/index.ts`
-- `external/pi-tools-suite/src/dcp/subagent.ts`
-- `external/pi-tools-suite/src/dcp/context-usage.ts`
-- `external/pi-tools-suite/src/dcp/protected-continuity.ts`
-- `external/pi-tools-suite/src/dcp/test-output-parser.ts`
-- `external/pi-tools-suite/src/dcp/provider-tool-results.ts`
-
-## Tests
-
-- `external/pi-tools-suite/test/async-subagents/dcp.test.ts`
-- `external/pi-tools-suite/test/async-subagents/provider-child-inventory.test.ts`
-- `external/pi-tools-suite/test/dcp-context-usage.test.ts`
-- `external/pi-tools-suite/test/dcp-test-output-parser.test.ts`
-- `tests/dcp-usage-fallback.integration.test.ts`
-- `tests/dcp-provider-evidence.integration.test.ts`
-
-## Related files
-
-- `external/pi-tools-suite/src/dcp/index.ts`
-- `external/pi-tools-suite/src/dcp/defaults.ts`
-- `external/pi-tools-suite/src/dcp/config.ts`
-- `external/pi-tools-suite/src/dcp/state.ts`
-- `external/pi-tools-suite/src/dcp/journal.ts`
-- `external/pi-tools-suite/src/dcp/pruner-emergency.ts`
-- `external/pi-tools-suite/src/dcp/pruner-candidates.ts`
-- `external/pi-tools-suite/src/dcp/stale-observations.ts`
-- `external/pi-tools-suite/src/dcp/regret-signals.ts`
-- `external/pi-tools-suite/src/dcp/pruner-tools.ts`
-- `external/pi-tools-suite/src/dcp/auto-compress.ts`
-- `external/pi-tools-suite/test/auto-compress.test.ts`
-- `external/pi-tools-suite/test/compress-pruner.test.ts`
-- `external/pi-tools-suite/test/dcp-journal-lifecycle.test.ts`
-- `external/pi-tools-suite/test/dcp-marathon-replay.test.ts`
-- `external/pi-tools-suite/test/dcp-lifecycle-marathon.test.ts`
-- `desktop/src/lib/markdown-dcp.ts`
-- `desktop/src/lib/markdown-fences.ts`
-
 ## Verification
 
 Deterministic coverage includes journal validation/replay, new-session

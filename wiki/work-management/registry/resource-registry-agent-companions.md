@@ -35,16 +35,6 @@ Only the named agent's two paths are staged/committed; other agents are not
 included in an agent push or remove. As with other Git-backed Registry trees,
 an empty companion directory alone cannot be transported by Git.
 
-## Implementation
-
-- `acp/src/registry/resource-files.ts`
-- `acp/src/registry/resources.ts`
-- `acp/src/registry/status.ts`
-
-## Tests
-
-- `acp/test/registry.test.ts`
-
 ## Verification
 
 Run the ACP resource registry tests and typecheck. Confirm companion-only

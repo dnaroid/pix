@@ -62,37 +62,6 @@ Pix can optionally expose an `Auto` model choice for a new, still-sessionless dr
 - TUI aborts superseded routing requests and discards completions after input-tab ownership or draft-mode changes.
 - Resumed or already-materialized sessions are never re-routed.
 
-## Related files
-
-- `src/config.ts`
-- `src/default-pix-config.ts`
-- `src/app/model/model-routing.ts`
-- `src/app/input/input-action-controller.ts`
-- `src/app/session/tabs-controller.ts`
-- `src/app/runtime.ts`
-- `src/app/app.ts`
-- `src/app/popup/menu-items-controller.ts`
-- `src/app/popup/popup-action-controller.ts`
-- `src/app/popup/popup-menu-controller.ts`
-- `src/app/rendering/popup-menu-renderer.ts`
-- `acp/src/acp/model-routing.ts`
-- `acp/src/acp/openrouter-jev.ts` (shared stateless Decisions transport;
-  also used by Universal Search intent classification)
-- `acp/src/acp/draft-model-runtime.ts`
-- `acp/src/acp/desktop-commands.ts`
-- `acp/src/acp/pix-acp-agent.ts`
-- `desktop/src/app/model-draft-config.svelte.ts`
-- `desktop/src/app/draft-session.svelte.ts`
-- `desktop/src/app/prompt-submit.ts`
-- `desktop/src/components/ModelThinkingPicker.svelte`
-- `desktop/src/components/settings/DesktopSettingsEditor.svelte`
-- `desktop/src/components/settings/SettingsModelRoutingTiers.svelte`
-- `desktop/src/components/settings/SettingsSelect.svelte`
-- `desktop/src/lib/acp-pix-extensions.ts`
-- `desktop/src/lib/model-thinking.ts`
-- `src/schemas/pix-schema.ts`
-- `src/schemas/pix-desktop-schema.ts`
-
 ## Verification
 
 - Config tests cover disabled defaults, Jev router defaults, semantic tiers, tier thinking, and profile merging.

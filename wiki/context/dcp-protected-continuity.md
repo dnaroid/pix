@@ -110,36 +110,6 @@ does not invoke a summarizer model.
 - Published journal blocks remain immutable. A successful repack publishes a
   new block and soft-deactivates the covered old block.
 
-## Implementation
-
-- `external/pi-tools-suite/src/dcp/test-output-parser.ts`
-
-- `external/pi-tools-suite/src/dcp/protected-continuity.ts`
-- `external/pi-tools-suite/src/dcp/compression-blocks.ts`
-- `external/pi-tools-suite/src/dcp/pruner-candidates.ts`
-- `external/pi-tools-suite/src/dcp/auto-compress.ts`
-- `external/pi-tools-suite/src/dcp/index.ts`
-- `external/pi-tools-suite/src/dcp/pruner-compression-blocks.ts`
-- `external/pi-tools-suite/src/dcp/state.ts`
-- `external/pi-tools-suite/src/dcp/journal.ts`
-- `external/pi-tools-suite/src/dcp/config.ts`
-- `external/pi-tools-suite/src/dcp/defaults.ts`
-- `external/pi-tools-suite/src/dcp/continuity-reference.ts`
-- `external/pi-tools-suite/src/session-recovery/dcp-continuity.ts`
-
-## Tests
-
-- `external/pi-tools-suite/test/dcp-test-output-parser.test.ts`
-
-- `external/pi-tools-suite/test/dcp-protected-continuity.test.ts`
-- `external/pi-tools-suite/test/dcp-protected-continuity-marathon.test.ts`
-- `external/pi-tools-suite/test/dcp-session-reference.test.ts`
-- `external/pi-tools-suite/test/dcp-manual-progress.test.ts`
-- `external/pi-tools-suite/test/compress-pruner.test.ts`
-- `external/pi-tools-suite/test/dcp-marathon-replay.test.ts`
-- `external/pi-tools-suite/test/dcp-lifecycle-marathon.test.ts`
-- `external/pi-tools-suite/test/evals/session-token-efficiency.test.ts`
-
 ## Verification
 
 The protected-continuity tests cover mutation/shell receipt shaping,

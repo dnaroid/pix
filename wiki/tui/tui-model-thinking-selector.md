@@ -53,26 +53,6 @@ Make choosing the model and reasoning effort one staged TUI interaction, includi
 - A draft staged in unresolved `Auto` shows only `Auto` in the status line. The thinking glyph/value is omitted until routing has actually selected a tier.
 - Inline `/model provider/model:level` initializes both staged values. Inline `/thinking level` initializes the staged thinking value while keeping the current model selected. Tab completion canonicalizes an active combined selection as `/model provider/model:level`; `Shift+Tab` is reserved for visibility management while this popup is active.
 
-## Related files
-
-- `src/app/popup/popup-menu-controller.ts`
-- `src/app/popup/popup-action-controller.ts`
-- `src/app/runtime.ts`
-- `src/app/screen/status-controller.ts`
-- `src/app/rendering/status-line-renderer.ts`
-- `src/app/rendering/popup-menu-renderer.ts`
-- `src/app/input/input-controller.ts`
-- `src/app/commands/command-model-actions.ts`
-- `src/app/commands/command-controller.ts`
-- `src/app/screen/mouse-controller.ts`
-- `src/app/types.ts`
-- `src/config.ts`
-- `schemas/pix.json`
-- `tests/popup-menu-controller.test.ts`
-- `tests/popup-action-controller.test.ts`
-- `tests/input-controller.test.ts`
-- `tests/command-model-actions.test.ts`
-
 ## Verification
 
 - Popup tests cover shared `/thinking`/model-menu routing, model-specific thinking clamping, per-model staged/persisted restoration, current-session precedence, left/right staging, direct status-popup behavior, and thinking-row coloring.
@@ -82,13 +62,5 @@ Make choosing the model and reasoning effort one staged TUI interaction, includi
 - Draft menu/action/status tests cover listing and staging model/thinking values without a runtime and exposing model/thinking click targets before the first prompt.
 - Runtime tests cover extension-registered provider models in the UI-only draft catalogue.
 - Root TypeScript checks and the full Pix test suite must pass.
-
-## Implementation
-
-- `src/app/popup/popup-menu-controller.ts`
-
-## Tests
-
-- `tests/popup-menu-controller.test.ts`
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"9b9d90993d3a0f72d4b7d77fb738be6e49a1debaf1e130c42542ef7e98221523","checkedAt":"2026-10-30T23:25:36.039Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":49,"reportLanguage":"ru"} -->

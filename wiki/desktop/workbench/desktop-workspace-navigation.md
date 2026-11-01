@@ -373,100 +373,52 @@ establish compatibility requirements.
 - Focus movement does not alter indicator state or acknowledge a destination;
   acknowledgement remains tied to the view actually becoming visible.
 
-## Implementation
+## Regression coverage
 
-- `desktop/src-tauri/src/project_browser.rs`
-- `desktop/src-tauri/Cargo.toml`
+- HTML eligibility and workspace validation.
 
-- `desktop/src/App.svelte`
-- `desktop/src/app/desktop-project-services.ts`
-- `desktop/src/app/preview-file-io.ts`
-- `desktop/src/components/DesktopSidebar.svelte`
-- `desktop/src/lib/desktop-context-target.ts`
-- `desktop/src/lib/native-context-menu.ts`
-- `desktop/src-tauri/src/project_directory_link.rs`
-- `desktop/src/components/ProjectExplorer.svelte`
-- `desktop/src/components/project-explorer-tree-controller.svelte.ts`
-- `desktop/src/components/project-explorer-operations.svelte.ts`
-- `desktop/src/components/project-explorer-menu-controller.svelte.ts`
-- `desktop/src/lib/project-explorer-native-menu.ts`
-- `desktop/src/components/project-explorer-drag-controller.svelte.ts`
-- `desktop/src/components/WorkspaceSidebar.svelte`
-- `desktop/src/components/WorkspaceSidebarActivityBar.svelte`
-- `desktop/src/components/workspace-sidebar-layout-controller.svelte.ts`
-- `desktop/src/lib/keyboard-navigation.ts`
-- `desktop/src/lib/project-tree.ts`
-- `desktop/src/lib/project-git-decorations.ts`
-- `desktop/src/lib/project-entry-emphasis.ts`
-- `desktop/src/lib/project-git-refresh.ts`
-- `desktop/src/lib/project-files-refresh.ts`
-- `desktop/src/lib/project-git-ignore.ts`
-- `desktop/src/app/desktop-sidebar-view-model.svelte.ts`
-- `desktop/src/lib/project-explorer-expansion.ts`
-- `desktop/src/lib/project-entry-clipboard.ts`
-- `desktop/src/lib/sidebar-indicators.ts`
-- `desktop/src-tauri/src/lib.rs`
-- `desktop/src-tauri/src/git_ignore.rs`
+- Foreground-only polling, focus/visibility resumption, serialized reads, failure retries and teardown during in-flight work. Project Explorer source tests pin the visible-directory refresh and mounted-component lifecycle wiring.
 
-## Tests
+- Composite and type-ahead navigation primitives.
 
-- `desktop/src-tauri/src/project_browser.rs`: HTML eligibility and workspace validation.
+- Visible parent lookup, workspace root naming, nesting, empty/loading rows, and collapse without preference loss.
 
-- `desktop/src/lib/project-files-refresh.test.ts` covers foreground-only polling,
-  focus/visibility resumption, serialized reads, failure retries and teardown during
-  in-flight work. Project Explorer source tests pin the visible-directory refresh
-  and mounted-component lifecycle wiring.
+- Compact per-project expansion persistence, malformed state rejection, and storage bounds.
 
-- `desktop/src/lib/keyboard-navigation.test.ts` covers composite and type-ahead
-  navigation primitives.
-- `desktop/src/lib/project-tree.test.ts` covers visible parent lookup, workspace
-  root naming, nesting, empty/loading rows, and collapse without preference loss.
-- `desktop/src/lib/project-explorer-expansion.test.ts` covers compact per-project
-  expansion persistence, malformed state rejection, and storage bounds.
-- `desktop/src/components/ProjectExplorer.test.ts` covers tree semantics and the
-  keyboard external-editor route and emphasized Pix-entry presentation.
-- `desktop/src/lib/project-entry-emphasis.test.ts` covers canonical entry matching
-  and excluded/unknown paths.
-- `desktop/src/components/project-explorer-operations.test.ts` covers independent
-  mutations during deferred deletion, ancestor/destination conflicts, partially
-  copied output protection, out-of-order completion and workspace/teardown invalidation.
-- `desktop/src/components/project-explorer-tree-controller.test.ts` covers deferred
-  row focus after workspace replacement, teardown and changed focus intent,
-  lazy reverse navigation, pending-list reuse, missing targets and newer reveals,
-  descendant expansion reset on parent/root collapse, persistence and sibling preservation.
-- `desktop/src/app/preview.test.ts` covers directory-link routing without Preview
-  changes and stale classification cancellation.
-- `desktop/src/lib/native-context-menu.test.ts` covers captured tab reveal actions
-  and remote-link actions for project Markdown links.
-- `desktop/src-tauri/src/project_directory_link.rs` tests directory confinement,
-  file/missing-path rejection and symbolic-link rejection.
-- `desktop/src/components/project-explorer-menu-controller.test.ts` covers
-  measured browser-menu bounds, content growth, keyboard anchoring, stale focus
-  work, observer teardown and native host routing/cancellation.
-- `desktop/src/lib/project-explorer-native-menu.test.ts` covers shared command
-  policy, awaited eligibility, OS coordinates, serialized registration, stale
-  callbacks, error reporting and idempotent resource release.
-- `desktop/src/lib/project-entry-clipboard.test.ts` covers shared references,
-  format/path validation, cross-project eligibility, text replacement, failures,
-  out-of-order reads and teardown. Native project-entry/copy tests cover recursive
-  cross-workspace copying, preserved source contents, collision naming, exclusive
-  target creation, unsafe destinations and canonical self/descendant rejection.
-- Native `git_ignore` tests cover real Git eligibility, literal rules, nested
-  ignore files, append preservation, tracked files/folders with unchanged index
-  contents, and unsafe paths.
-- `desktop/src/lib/project-git-ignore.test.ts` covers stale menu/workspace/status
-  reads, teardown invalidation, stable visibility during repeated status refreshes
-  and non-repository failures.
-- `desktop/src/lib/project-git-decorations.test.ts` covers staged/working-tree status, conflicts, ancestor aggregation, rename/copy semantics, and clearing snapshots; `desktop/src/lib/project-git-refresh.test.ts` covers polling, request coalescing, failed reads, and in-flight teardown.
-- `desktop/src/components/WorkspaceSidebar.test.ts` covers Activity Bar composite
-  wiring.
-- Native project-search tests cover path/content hits, case-insensitive ASCII
-  matching, ignored dependency directories, and empty queries. The binary-file
-  fixture is not paired with an explicit binary-skipping assertion; that coverage
-  remains a gap. Project Explorer source tests pin the search command, shortcut,
-  bounded result UI, and matched-line Preview navigation.
+- Tree semantics and the keyboard external-editor route and emphasized Pix-entry presentation.
+
+- Canonical entry matching and excluded/unknown paths.
+
+- Independent mutations during deferred deletion, ancestor/destination conflicts, partially copied output protection, out-of-order completion and workspace/teardown invalidation.
+
+- Deferred row focus after workspace replacement, teardown and changed focus intent, lazy reverse navigation, pending-list reuse, missing targets and newer reveals, descendant expansion reset on parent/root collapse, persistence and sibling preservation.
+
+- Directory-link routing without Preview changes and stale classification cancellation.
+
+- Captured tab reveal actions and remote-link actions for project Markdown links.
+
+- Directory confinement, file/missing-path rejection and symbolic-link rejection.
+
+- Measured browser-menu bounds, content growth, keyboard anchoring, stale focus work, observer teardown and native host routing/cancellation.
+
+- Shared command policy, awaited eligibility, OS coordinates, serialized registration, stale callbacks, error reporting and idempotent resource release.
+
+- Shared references, format/path validation, cross-project eligibility, text replacement, failures, out-of-order reads and teardown. Native project-entry/copy tests cover recursive cross-workspace copying, preserved source contents, collision naming, exclusive target creation, unsafe destinations and canonical self/descendant rejection.
+
+- Native `git_ignore` tests cover real Git eligibility, literal rules, nested ignore files, append preservation, tracked files/folders with unchanged index contents, and unsafe paths.
+
+- Stale menu/workspace/status reads, teardown invalidation, stable visibility during repeated status refreshes and non-repository failures.
+
+- Staged/working-tree status, conflicts, ancestor aggregation, rename/copy semantics, and clearing snapshots; regression checks cover polling, request coalescing, failed reads, and in-flight teardown.
+
+- Activity Bar composite wiring.
+
+- Native project-search tests cover path/content hits, case-insensitive ASCII matching, ignored dependency directories, and empty queries. The binary-file fixture is not paired with an explicit binary-skipping assertion; that coverage remains a gap. Project Explorer source tests pin the search command, shortcut, bounded result UI, and matched-line Preview navigation.
+
 - `npm --prefix desktop test`
+
 - `npm --prefix desktop run check`
+
 - `npm --prefix desktop run build:web`
 
 <!-- pix:wiki-check {"version":1,"status":"attempted","runId":"19234a89-390d-4a92-841c-d7eb9a972182","contentHash":"a80b4aa41073465289d4fdd5cd2bb6f6a8e860f89ad06ea28eacdc258659ce36","checkedAt":"2026-10-31T13:56:44.925Z","maxDocumentChars":128000} -->

@@ -91,123 +91,29 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - The workbench tablist does not require every tab to be reachable by repeated Tab presses; arrow navigation owns movement inside the composite.
 - New Conversation remains a separate control outside the roving-focus sequence.
 
-## Implementation
-
-- `desktop/src/app/draft-model-display.svelte.ts`
-- `desktop/src/app/model-draft-config.svelte.ts`
-- `desktop/src/app/model-config.svelte.ts`
-
-- `desktop/src/lib/session-tab-model.ts`
-- `desktop/src/app/session-tab-model-state.svelte.ts`
-- `desktop/src/app/project-workspace.svelte.ts`
-- `desktop/src/app/session-tabs-state.svelte.ts`
-- `desktop/src/app/desktop-lifecycle-services.ts`
-- `desktop/src/app/desktop-status-bar-view-model.svelte.ts`
-- `desktop/src/app/desktop-shell-view-model-services.ts`
-- `desktop/src/app/session-runtime-loading.ts`
-- `desktop/src/app/session-runtime-options.ts`
-
-- `desktop/src/components/StatusBar.svelte`
-- `desktop/src/components/TranscriptPane.svelte`
-- `desktop/src/components/WorkbenchTabs.svelte`
-- `desktop/src/components/SessionStartView.svelte`
-- `desktop/src/components/SessionSelector.svelte`
-- `desktop/src/components/SavedSessionRow.svelte`
-- `desktop/src/lib/saved-session-tree.ts`
-- `desktop/src/components/PromptComposer.svelte`
-- `desktop/src/components/PromptComposerActionsMenu.svelte`
-- `desktop/src/lib/workbench-tabs.ts`
-- `desktop/src/lib/session-tabs.ts`
-- `desktop/src/lib/model-thinking.ts`
-- `desktop/src/lib/acp-client.ts`
-- `desktop/src/lib/acp-pix-extensions.ts`
-- `desktop/src/app/draft-session.svelte.ts`
-- `desktop/src/app/composer-drafts.ts`
-- `desktop/src/app/attachment-draft-ownership.ts`
-- `desktop/src/app/session-tab-controller.ts`
-- `desktop/src/app/session-tab-selection.ts`
-- `desktop/src/app/session-history.svelte.ts`
-- `desktop/src/app/session-tab-closure.ts`
-- `desktop/src/app/workbench-controller.ts`
-- `desktop/src/app/desktop-root-effects.svelte.ts`
-- `desktop/src/app/session-coordinator.ts`
-- `desktop/src/app/session-handoff.svelte.ts`
-- `desktop/src/app/session-handoff-prompts.ts`
-- `desktop/src/app/prompt-run-lifecycle.svelte.ts`
-- `desktop/src/app/prompt-runtime.svelte.ts`
-- `desktop/src/app/desktop-command-controller.svelte.ts`
-- `desktop/src/app/desktop-prompt-action-services.ts`
-- `desktop/src/app/desktop-workbench-prop-builders.ts`
-- `desktop/src/app/desktop-workbench-view-model-services.ts`
-- `desktop/src/lib/desktop-commands.ts`
-- `desktop/src/app/session-activity.svelte.ts`
-- `desktop/src/app/desktop-presentation-state.svelte.ts`
-- `acp/src/acp/desktop-commands.ts`
-- `acp/src/acp/draft-model-runtime.ts`
-- `acp/src/acp/pix-acp-agent.ts`
-
 ## Related specifications
 
 - `wiki/desktop/workbench/desktop-workbench-tabs.md`
 - `wiki/desktop/conversations/desktop-session-parity.md`
 - `wiki/desktop/workbench/desktop-project-titlebar.md`
 
-## Tests
-
-- `desktop/src/app/model-draft-config.test.ts`
-- `desktop/src/app/model-config.test.ts`
-
-- `desktop/src/lib/session-tab-model.test.ts`
-- `desktop/src/app/status-bar-model-restore.test.ts`
-- `desktop/src/app/project-workspace.test.ts`
-
-- `desktop/src/components/SessionStartView.test.ts`
-- `desktop/src/components/SessionSelector.test.ts`
-- `desktop/src/components/SavedSessionRow.test.ts`
-- `desktop/src/lib/saved-session-tree.test.ts`
-- `desktop/src/app/session-tab-history.test.ts`
-- `desktop/src/app/attachment-draft-ownership.test.ts`
-- `desktop/src/components/DesktopVisualRegressions.test.ts`
-- `desktop/src/components/ComposerActivity.test.ts`
-- `desktop/src/lib/composer-activity.test.ts`
-- `desktop/src/lib/composer-activity-hold.test.ts`
-- `desktop/src/lib/session-tabs.test.ts`
-- `desktop/src/app/session-tabs-state.test.ts`
-- `desktop/src/lib/workbench-tabs.test.ts`
-- `desktop/src/app/workbench-model.test.ts`
-- `desktop/src/components/WorkbenchTabs.test.ts`
-- `desktop/src/app/session-tab-closure.test.ts`
-- `desktop/src/app/workbench-controller.test.ts`
-- `desktop/src/app/session-history.test.ts`
-- `desktop/src/app/session-coordinator.test.ts`
-- `desktop/src/app/prompt-submit.test.ts`
-- `desktop/src/app/draft-tab-selection.test.ts`
-- `desktop/src/app/prompt-submit-opening.test.ts`
-- `desktop/src/app/desktop-workbench-prop-builders.test.ts`
-- `desktop/src/app/session-runtime-loading.test.ts`
-- `desktop/src/app/desktop-project-action-services.test.ts`
-- `desktop/src/app/session-handoff.test.ts`
-- `desktop/src/app/prompt-run-lifecycle.test.ts`
-- `desktop/src/app/desktop-prompt-handoff.test.ts`
-- `desktop/src/lib/desktop-commands.test.ts`
-
 ## Verification
 
-- `desktop/src/app/session-tab-history.test.ts` uses deferred history responses to verify retry after interrupted/failed hydration, partial live-cache preservation, hydration of a never-opened tab whose cache holds only a background queued run (history supersedes the live copy without duplicates), retention of items arriving during that hydration, stale deferred tool-result settlement, retained submit-owned hydration on tab re-entry, and reuse of successfully loaded empty history.
-- `desktop/src/app/attachment-draft-ownership.test.ts` verifies image drafts across real/draft tab switches and deferred ownership reconciliation, stale async attachment rejection, workspace clearing, and first-submit ownership retargeting.
-- `desktop/src/components/DesktopVisualRegressions.test.ts` verifies ordinary composer borders and no transcript-bottom spinner.
-- `desktop/src/components/ComposerActivity.test.ts` verifies composer-dock placement, neutral announcements, and reduced-motion markup; `desktop/src/lib/composer-activity.test.ts` covers current-turn selection, concurrent actions, history/draft/runtime gating, settlement, and pending input; `desktop/src/lib/composer-activity-hold.test.ts` covers the one-second latest-wins hold (immediate first display, coalescing, immediate hide, session reset, dispose).
-- `desktop/src/lib/session-tabs.test.ts` covers session membership/restoration/replacement, Desktop-owned tab snapshot parsing/serialization, stale TUI rejection, explicit-empty restore, active-session fallback, plus deterministic fork-tree sibling, nested, malformed/orphan, and flat-search row behavior independently of UI-only workbench tabs.
-- `desktop/src/app/session-tabs-state.test.ts` covers persistence after open/close mutations, independent two-window ordered tabs/active pointers and model/thinking display metadata across restart, captured write ownership, per-window project switching, closed-tab metadata pruning, corrupt metadata/storage-write fallback, rejection of ambiguous legacy snapshots, and explicit empty Desktop snapshots suppressing stale TUI tabs across restart.
+- Uses deferred history responses to verify retry after interrupted/failed hydration, partial live-cache preservation, hydration of a never-opened tab whose cache holds only a background queued run (history supersedes the live copy without duplicates), retention of items arriving during that hydration, stale deferred tool-result settlement, retained submit-owned hydration on tab re-entry, and reuse of successfully loaded empty history.
+- Image drafts across real/draft tab switches and deferred ownership reconciliation, stale async attachment rejection, workspace clearing, and first-submit ownership retargeting.
+- Ordinary composer borders and no transcript-bottom spinner.
+- Composer-dock placement, neutral announcements, and reduced-motion markup; regression checks cover current-turn selection, concurrent actions, history/draft/runtime gating, settlement, and pending input; regression checks cover the one-second latest-wins hold (immediate first display, coalescing, immediate hide, session reset, dispose).
+- Session membership/restoration/replacement, Desktop-owned tab snapshot parsing/serialization, stale TUI rejection, explicit-empty restore, active-session fallback, plus deterministic fork-tree sibling, nested, malformed/orphan, and flat-search row behavior independently of UI-only workbench tabs.
+- Persistence after open/close mutations, independent two-window ordered tabs/active pointers and model/thinking display metadata across restart, captured write ownership, per-window project switching, closed-tab metadata pruning, corrupt metadata/storage-write fallback, rejection of ambiguous legacy snapshots, and explicit empty Desktop snapshots suppressing stale TUI tabs across restart.
 - Model display tests cover validated scalar snapshots without a catalog, immediate disabled startup display, saved active-pointer membership, session/project/draft isolation, live-config precedence and authoritative empty-config removal. Runtime-loading tests verify accepted configuration publication and rejection of stale owners before persistence.
-- `desktop/src/lib/workbench-tabs.test.ts` covers mixed workbench ordering without changing session identity.
-- `desktop/src/app/workbench-model.test.ts` covers fork metadata propagation into workbench session tabs.
-- `desktop/src/components/WorkbenchTabs.test.ts` covers unified roving tab semantics and kind-specific close dispatch.
-- `desktop/src/app/session-tab-closure.test.ts` controls ACP close completion to verify immediate optimistic removal and fallback/draft navigation before teardown, no global operation lock, per-session duplicate guarding, retained rollback snapshots, and stale-completion isolation. `desktop/src/app/workbench-controller.test.ts` verifies that delayed close consent cannot overwrite later workbench navigation and that conversation-change selection policy preserves auxiliary fallbacks. `desktop/src/app/session-history.test.ts` covers rollback hydration/cursor metadata; `desktop/src/app/session-coordinator.test.ts` covers late-update exclusion and fresh attachment.
+- Mixed workbench ordering without changing session identity.
+- Fork metadata propagation into workbench session tabs.
+- Unified roving tab semantics and kind-specific close dispatch.
+- Controls ACP close completion to verify immediate optimistic removal and fallback/draft navigation before teardown, no global operation lock, per-session duplicate guarding, retained rollback snapshots, and stale-completion isolation. regression checks cover that delayed close consent cannot overwrite later workbench navigation and that conversation-change selection policy preserves auxiliary fallbacks. regression checks cover rollback hydration/cursor metadata; regression checks cover late-update exclusion and fresh attachment.
 - Desktop draft/concurrency and ACP-client coverage verifies that draft config is loaded without `session/new`, a staged model selection is kept local, and the override is carried only when first-prompt materialization happens.
-- `desktop/src/app/prompt-submit.test.ts` verifies that the first draft user message renders and clears the composer before materialization resolves and is still sent to the materialized session after another conversation is selected; `desktop/src/app/draft-tab-selection.test.ts` verifies that background materialization does not steal active-session state or discard the created session.
-- `desktop/src/app/prompt-submit-opening.test.ts`, `desktop/src/app/desktop-workbench-prop-builders.test.ts`, `desktop/src/app/session-history.test.ts`, and `desktop/src/app/session-runtime-loading.test.ts` cover immediate existing-session editing/optimistic send, captured target and attachments, duplicate-submit rejection without consuming fresh input, invalidated ownership, and history merge/empty-history preservation.
-- `desktop/src/app/desktop-project-action-services.test.ts` verifies that launching a project task from the active UI-only draft deactivates/preserves that draft, transfers composer ownership, and foregrounds the created real task session.
+- That the first draft user message renders and clears the composer before materialization resolves and is still sent to the materialized session after another conversation is selected; regression checks cover that background materialization does not steal active-session state or discard the created session.
+- Immediate existing-session editing/optimistic send, captured target and attachments, duplicate-submit rejection without consuming fresh input, invalidated ownership, and history merge/empty-history preservation.
+- That launching a project task from the active UI-only draft deactivates/preserves that draft, transfers composer ownership, and foregrounds the created real task session.
 - Handoff tests cover eligibility/action wiring, completion-marker validation, source queue holding, ownership invalidation/cancellation/error paths, off-screen target preparation before tab replacement, preserved source draft/history, continuation failure leaving the new session available, and fresh-session activity while continuation is pending without unnecessary history hydration.
 - `npm --prefix desktop test`
 - `npm --prefix desktop run check`

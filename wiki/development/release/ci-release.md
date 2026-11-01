@@ -158,61 +158,13 @@ remain true when CI or UI-QA tests change.
 - Release smoke isolates HOME/config/secrets and places a failing system-Node
   sentinel ahead of OS tools; success must come from the bundled runtime.
 
-## Implementation
-
-- `.github/workflows/check.yml`
-- `scripts/check-ci.mjs`
-- `external/pi-tools-suite/package.json`
-- `external/pi-tools-suite/test/evals/session-token-efficiency.ts`
-- `.github/workflows/publish.yml`
-- `scripts/release/smoke.mjs`
-- `scripts/ci-preflight.mjs`
-- `scripts/ci-test-contracts.mjs`
-- `scripts/ci-history-report.mjs`
-- `scripts/release/smoke-desktop.mjs`
-- `package.json`
-- `acp/package.json`
-- `acp/package-lock.json`
-- `desktop/package.json`
-- `desktop/package-lock.json`
-- `package-lock.json`
-- `bin/pix.mjs`
-- `tests/node-version.test.ts`
-- `tests/voice-controller.test.ts`
-- `acp/test/git-assistant.test.ts`
-- `external/pi-tools-suite/test/async-subagents/ui-qa-runner.test.ts`
-- `external/pi-tools-suite/test/async-subagents/browser-qa-runner.test.ts`
-- `acp/test/registry.test.ts`
-- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/backends/tui.mjs`
-- `external/pi-tools-suite/src/async-subagents/agents/ui-qa/browser/scripts/browser-qa-runner.mjs`
-
 ## Verification
 
-- `node --import tsx --test tests/ci-gate.test.ts`
-- `node --import tsx --test tests/ci-preflight.test.ts tests/ci-test-contracts.test.ts tests/ci-history-report.test.ts`
 - `npm run check:ci:preflight`
 - `npm run check:ci` (after installing native-host prerequisites)
-- `node --import tsx --test tests/node-version.test.ts`
 - `npm run check`
 - `npm run test:release`
 - `npm run test:tools-suite` with an isolated `HOME` when reproducing CI defaults locally
 - `git diff --check`
-
-## Tests
-
-- `scripts/release/test/workflow.test.mjs`
-- `tests/ci-gate.test.ts`
-- `tests/ci-preflight.test.ts`
-- `tests/ci-test-contracts.test.ts`
-- `tests/ci-history-report.test.ts`
-- `external/pi-tools-suite/test/evals/compress-schema.test.ts`
-- `external/pi-tools-suite/test/comment-checker.test.ts`
-- `external/pi-tools-suite/test/evals/session-token-efficiency.test.ts`
-- `tests/node-version.test.ts`
-- `tests/voice-controller.test.ts`
-- `acp/test/git-assistant.test.ts`
-- `external/pi-tools-suite/test/async-subagents/ui-qa-runner.test.ts`
-- `external/pi-tools-suite/test/async-subagents/browser-qa-runner.test.ts`
-- `acp/test/registry.test.ts`
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"ec6f497e2d6a7796cf64c88ceee96b6e1cf7b9af3211e7d240b4c59f272c0078","checkedAt":"2026-10-31T00:24:28.126Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":50,"reportLanguage":"ru"} -->

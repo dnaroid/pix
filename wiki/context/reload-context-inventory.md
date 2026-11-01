@@ -35,17 +35,6 @@ After `/reload` and other resource-reload flows, report loaded context file path
 - Duplicate skills, tools, and agent names are removed before display.
 - Desktop inventory text escapes Markdown-significant underscores in skill, tool, and agent identifiers before it reaches `MarkdownText`, so names such as `repo_inspect` remain visually literal instead of being parsed as emphasis across neighbouring names.
 
-## Related files
-
-- `src/app/commands/reload-context-inventory.ts`
-- `src/app/commands/command-session-actions.ts`
-- `acp/src/acp/context-inventory.ts`
-- `acp/src/pi/context-inventory-host.js`
-- `acp/src/pi/pix-rpc-entry.js`
-- `tests/reload-context-inventory.test.ts`
-- `acp/test/context-inventory.test.ts`
-- `acp/test/context-inventory-host.test.ts`
-
 ## Verification
 
 - Focused reload-context tests cover lowercase tools, PascalCase model-tool aliases, shell aliases, inactive file access, and missing sub-agent catalogs.
@@ -53,22 +42,5 @@ After `/reload` and other resource-reload flows, report loaded context file path
 - ACP formatting tests cover Markdown-safe display of underscored identifiers in Desktop model/reload inventory messages.
 - Context file tests cover loader order/deduplication, inactive file-access tools, legacy/malformed inventories, and Markdown-safe paths. RPC host tests cover refreshed loader paths after reload, replacement-session ownership, empty lists, unrelated widgets, and graceful loader failure without exposing file contents.
 - Root TypeScript typecheck passes.
-
-## Implementation
-
-- `src/app/commands/reload-context-inventory.ts`
-- `acp/src/acp/context-inventory.ts`
-- `src/app/extensions/subagent-catalog-state.ts`
-- `external/pi-tools-suite/src/context-inventory.ts`
-- `external/pi-tools-suite/src/async-subagents/index.ts`
-
-## Tests
-
-- `tests/reload-context-inventory.test.ts`
-- `tests/command-session-actions.test.ts`
-- `tests/extension-actions-controller.test.ts`
-- `acp/test/context-inventory.test.ts`
-- `external/pi-tools-suite/test/context-inventory.test.ts`
-- `acp/test/agent.test.ts`
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"7d71a16e9ee9dbbe0f0a1d2e760efe1e7ec2a347c637814e2b021d7cd034bc16","checkedAt":"2026-10-30T23:17:08.832Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":71,"reportLanguage":"ru"} -->

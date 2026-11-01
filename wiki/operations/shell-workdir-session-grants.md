@@ -32,21 +32,6 @@ existing grants remain in memory and apply again when the restriction returns.
 - While the restriction is on, everything else outside the workspace remains denied with `Working directory escapes workspace`; the message names both the session grant and the user setting. This is a *working-directory restriction*, **not** a filesystem sandbox: shell commands can themselves access other paths.
 - The grant applies to the model-tools `shell` alias, not the raw terminal, built-in Bash or other tools. If the model-tools extension is not loaded, the slash command is unavailable.
 
-## Implementation
-
-- `external/pi-tools-suite/src/model-tools/index.ts::runShellAlias`
-- `external/pi-tools-suite/src/model-tools/shell-workdir.ts::registerShellWorkdir`
-- `external/pi-tools-suite/src/model-tools/path-utils.ts::isPathInside`
-- `external/pi-tools-suite/src/config.ts::loadPiToolsSuiteConfig` (`restrictShellWorkdir`, user layers only)
-- `acp/src/acp/pix-acp-agent.ts::handleExtensionUiRequest`
-
-## Tests
-
-- `external/pi-tools-suite/test/shell-workdir.test.ts`
-- `external/pi-tools-suite/test/model-tools.test.ts`
-- `external/pi-tools-suite/test/config.test.ts`
-- `acp/test/agent.test.ts`
-
 ## Verification
 
 Run suite typecheck, suite tests and smoke, plus the Pix root check and suite integration test. The deterministic shell alias tests exercise grant/revoke, canonical descendant and link behavior, denied paths, missing directories, and session/runtime boundaries.

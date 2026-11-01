@@ -23,9 +23,9 @@ suite setting `pruneHistoricalThinking` (default `false`;
   `config-read-failed` warning and leaves the context unchanged.
 - Registered after `dcp`, so DCP accounting sees the full transcript.
 
-## Tests
+## Regression coverage
 
-`external/pi-tools-suite/test/historical-thinking-prune.test.ts`: pruning,
-current tool loop kept, steer boundary, prefix stability, no-op cases.
+Coverage includes pruning, preservation of the current tool loop, steer
+boundaries, prefix stability and no-op cases.
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"864ddc617b554fb8c37f9703ebfabfb2594f2c454492ce96446e1573fc2d29ac","checkedAt":"2026-10-30T23:14:53.135Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":51,"reportLanguage":"ru"} -->

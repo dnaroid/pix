@@ -270,22 +270,7 @@ after the session was linked or started. See the
   symlinks and nonregular files. The canonical `.pi/tasks.sqlite` and
   immutable attachment blobs continue to require exactly one link.
 
-## Implementation and verification
-
-- `desktop/src/components/WorkspaceSidebarTasksPanel.svelte`
-- `desktop/src/components/TaskFieldSelect.svelte`
-- `desktop/src/components/TaskProjectLinkInput.svelte`
-- `desktop/src/components/WorkspaceSidebarTaskModelControl.svelte`
-- `desktop/src/components/ModelThinkingPicker.svelte`
-- `desktop/src/components/WorkspaceSidebar.svelte`
-- `desktop/src/app/project-tasks.svelte.ts`
-- `desktop/src/app/project-actions.svelte.ts`
-- `desktop/src-tauri/src/project_tasks_sqlite.rs`
-- `desktop/src-tauri/src/lib.rs`
-- `desktop/src/components/WorkspaceSidebarTasksPanel.test.ts`
-- `desktop/src/components/WorkspaceSidebar.test.ts`
-- `desktop/src/app/project-actions.test.ts`
-- `desktop/src-tauri/src/lib.rs` native SQLite/revision/blob/Registry tests
+## Verification and limits
 
 The API restriction does **not** sandbox all OS file tools: independently
 privileged code could still open `.pi/tasks.sqlite` directly. The sanctioned

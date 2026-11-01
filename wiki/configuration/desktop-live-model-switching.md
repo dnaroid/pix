@@ -43,45 +43,6 @@ Keep Desktop model and thinking selection available while the agent is running, 
 - Model-specific resource reload is not forced in the middle of an active run. TUI explicitly skips `session.reload()` while streaming, and Desktop continues to use the existing ACP/Pi model-change path rather than introducing a separate reload or cancellation flow.
 - Existing guards still prevent live-session model changes when the Desktop session runtime is unavailable, another config change is in progress, or a conflicting Desktop operation is running. The runtime-availability guard is intentionally replaced by draft-config availability while the UI-only draft is active.
 
-## Implementation
-
-- `desktop/src/app/model-config.svelte.ts`
-- `desktop/src/app/model-config-actions.ts`
-- `desktop/src/app/model-draft-config.svelte.ts`
-- `desktop/src/app/model-picker-state.svelte.ts`
-- `desktop/src/app/session-runtime-config.svelte.ts`
-- `desktop/src/components/StatusBar.svelte`
-- `desktop/src/components/ModelProviderIcon.svelte`
-- `desktop/src/components/ModelThinkingPicker.svelte`
-- `desktop/src/lib/acp-client.ts`
-- `desktop/src/lib/acp-pix-extensions.ts`
-- `desktop/src/lib/model-thinking.ts`
-- `desktop/src/lib/model-display.ts`
-- `desktop/src/lib/model-thinking-preferences.ts`
-- `desktop/src/lib/model-picker-navigation.ts`
-- `desktop/src/lib/model-picker-popover.ts`
-- `src/config.ts`
-- `schemas/pix-desktop.json`
-- `acp/src/acp/config-options.ts`
-- `acp/src/acp/draft-model-runtime.ts`
-- `acp/src/acp/pix-acp-agent.ts`
-- `src/app/commands/command-model-actions.ts`
-
-## Tests
-
-- `desktop/src/components/ModelThinkingPicker.test.ts`
-- `desktop/src/components/DesktopModelThinkingPreferences.test.ts`
-- `desktop/src/app/model-draft-config.test.ts`
-- `desktop/src/app/model-picker-state.test.ts`
-- `desktop/src/app/session-metadata.test.ts`
-- `desktop/src/lib/model-thinking-preferences.test.ts`
-- `desktop/src/lib/model-display.test.ts`
-- `desktop/src/lib/model-picker-navigation.test.ts`
-- `desktop/src/lib/model-picker-popover.test.ts`
-- `tests/command-model-actions.test.ts`
-- `acp/test/config-options.test.ts`
-- `acp/test/agent.test.ts`
-
 ## Verification
 
 - Desktop source-level regression coverage verifies that `promptRunning` does not disable or reject the combined model/thinking selector.
@@ -92,6 +53,6 @@ Keep Desktop model and thinking selection available while the agent is running, 
 - ACP agent tests cover the `thinking_level_changed` → `config_option_update` push: notification content and session id, burst coalescing through the generation guard, and skipping the push when pi state discovery fails.
 - Desktop metadata-store coverage applies a pushed `config_option_update` to the active session state and the per-session runtime map (background sessions update only the runtime map).
 - Desktop model-display tests cover the Claude Code provider's Anthropic glyph and color mapping.
-- `desktop/src/lib/model-picker-navigation.test.ts` covers current/Auto initialization, search, and supported-effort arrow cycling. `desktop/src/lib/model-picker-popover.test.ts` covers popup placement, dismissal, focus and listener cleanup; `desktop/src/app/model-picker-state.test.ts` covers repeat activation and late opening completion. `desktop/src/components/ModelThinkingPicker.test.ts` guards keyboard/confirmation wiring and stale Apply completion.
+- Current/Auto initialization, search, and supported-effort arrow cycling. regression checks cover popup placement, dismissal, focus and listener cleanup; regression checks cover repeat activation and late opening completion. `desktop/src/components/ModelThinkingPicker.test.ts` guards keyboard/confirmation wiring and stale Apply completion.
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"4c441c704378fbf6575e10c6e507c1bda8752524fe209fc7690cd1eec3caacdc","checkedAt":"2026-10-30T23:06:57.860Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":57,"reportLanguage":"ru"} -->

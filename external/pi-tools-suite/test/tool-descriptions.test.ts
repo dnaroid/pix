@@ -129,7 +129,11 @@ describe("tool descriptions", () => {
 		expect(text).toContain("knowledge-auditor");
 		expect(text).toContain("primary spec");
 		expect(text).toContain("semantic drift");
-		expect(text).toContain("specs/TEMPLATE.md");
+		expect(text).toContain("project's documentation location, authoring rules and spec template");
+		expect(text).toContain("Describe behavior, constraints and verification outcomes");
+		expect(text).toContain("do not add routine Implementation, Related files or Tests catalogues of source paths");
+		expect(text).toContain("documented action, contract or historical evidence");
+		expect(text).not.toContain("list project-root-relative paths under Implementation and Tests");
 		expect(text).toContain("kind: spec");
 		expect(text).toContain("ask before creating one");
 		expect(text).toContain("read linked decision records");

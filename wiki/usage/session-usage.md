@@ -256,50 +256,6 @@ blocks further BTW inference until reload rather than silently losing known spen
   the nested `get_tree` response, which cannot be JSON-serialized once a linear
   session chain grows past the RPC process stack limit.
 
-## Implementation
-
-- `src/app/session/session-usage.ts`
-- `src/app/session/session-usage-pricing.ts`
-- `src/app/session/session-subagent-usage.ts`
-- `src/app/session/session-subagent-changes.ts`
-- `src/app/screen/mouse-controller.ts`
-- `src/app/model/model-usage-controller.ts`
-- `external/pi-tools-suite/src/async-subagents/core/usage.ts`
-- `external/pi-tools-suite/src/async-subagents/core/statistics.ts`
-- `external/pi-tools-suite/src/async-subagents/tools/spawn.ts`
-- `acp/src/acp/desktop-commands.ts`
-- `acp/src/acp/pix-acp-agent.ts`
-- `desktop/src/lib/acp-client.ts`
-- `desktop/src/lib/acp-client-types.ts`
-- `desktop/src/lib/acp-response-parsers.ts`
-- `desktop/src/lib/session-usage.ts`
-- `desktop/src/lib/subagent-usage.ts`
-- `desktop/src/lib/subagent-usage-parser.ts`
-- `desktop/src/lib/project-path-navigation.ts`
-- `desktop/src/lib/validated-project-path.ts`
-- `desktop/src/app/session-runtime-status.svelte.ts`
-- `desktop/src/components/RuntimeStatusBarItems.svelte`
-- `desktop/src/components/SubagentUsageDialog.svelte`
-- `desktop/src/components/ValidatedProjectPath.svelte`
-
-## Tests
-
-- `tests/session-usage.test.ts`
-- `tests/session-subagent-usage.test.ts`
-- `tests/session-subagent-changes.test.ts`
-- `tests/mouse-controller.test.ts`
-- `external/pi-tools-suite/test/async-subagents-usage.test.ts`
-- `external/pi-tools-suite/test/async-subagents-statistics.test.ts`
-- `acp/test/agent.test.ts`
-- `desktop/src/lib/acp-client.test.ts`
-- `desktop/src/lib/session-usage.test.ts`
-- `desktop/src/lib/subagent-usage.test.ts`
-- `desktop/src/lib/project-path-navigation.test.ts`
-- `desktop/src/lib/validated-project-path.test.ts`
-- `desktop/src/components/SubagentUsageDialog.test.ts`
-- `desktop/src/app/session-runtime-status.test.ts`
-- `desktop/src/components/StatusBarHover.test.ts`
-
 ## Verification
 
 - Shared unit tests cover provider/model grouping, merging parent and async-agent

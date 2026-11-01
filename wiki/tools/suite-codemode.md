@@ -41,23 +41,9 @@ transcript tool-result messages. The SDK owns VM limits and script-state storage
   SDK `codemode`/`deferred` exposure retains its upstream semantics.
 - No new model routing policy, custom renderer, MCP setup or live config watcher.
 
-## Implementation
+## Regression coverage
 
-- `external/pi-tools-suite/src/codemode/index.ts`
-- `external/pi-tools-suite/src/module-catalog.ts`
-- `external/pi-tools-suite/src/default-pi-tools-suite-config.ts`
-- `external/pi-tools-suite/src/config.ts`
-- `desktop/src/components/settings/ToolsSuiteSettingsEditor.svelte`
-- `desktop/src/components/settings/SettingsModuleVisibility.svelte`
-- `desktop/src/lib/tools-suite-module-visibility.ts`
-
-## Tests
-
-- `external/pi-tools-suite/test/codemode.test.ts`
-- `external/pi-tools-suite/test/codemode-sdk.case.ts` (`npm --prefix external/pi-tools-suite run test:sdk`)
-- `external/pi-tools-suite/test/evals/extension-contracts.test.ts`
-- `external/pi-tools-suite/test/evals/coverage-manifest.ts`
-- `desktop/src/lib/tools-suite-module-visibility.test.ts`
+- `npm --prefix external/pi-tools-suite run test:sdk`
 
 ## Verification
 

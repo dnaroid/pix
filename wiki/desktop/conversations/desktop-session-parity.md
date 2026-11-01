@@ -85,19 +85,6 @@ Show the same project sessions in Pix Desktop that Pix TUI discovers while keepi
 - A refresh requested while the startup listing for the same connection and workspace is pending (session selector, native discovery) joins that listing instead of superseding it, so startup never loses its response and always restores a session or opens the draft.
 - If native discovery fails, mapped ACP sessions remain available.
 
-## Related files
-
-- `acp/src/acp/pix-acp-agent.ts`
-- `acp/src/acp/session-map.ts`
-- `acp/src/acp/tui-tabs.ts`
-- `desktop/src/app/session-catalog.svelte.ts`
-- `desktop/src/app/session-tabs-state.svelte.ts`
-- `desktop/src/app/session-tab-controller.ts`
-- `desktop/src/app/desktop-presentation-state.svelte.ts`
-- `desktop/src/lib/acp-client.ts`
-- `src/app/session/tabs-controller.ts`
-- `wiki/tui/tui-session-tabs.md`
-
 ## Verification
 
 - ACP tests cover native discovery, stable mapping, cwd filtering, fallback, and safe fork-parent/tab metadata.

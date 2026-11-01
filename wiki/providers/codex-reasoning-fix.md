@@ -132,16 +132,6 @@ Under `node_modules/@earendil-works/pi-ai/dist/` (inspection only; never patch):
   `getCachedWebSocketInputDelta`, `buildCachedWebSocketRequestBody`, and the
   independently converted `lastResponseItems` in `processWebSocketStream`.
 
-## Implementation
-
-- `external/pi-tools-suite/src/codex-reasoning-fix/index.ts`
-- `external/pi-tools-suite/src/index.ts::MODULES`
-
-## Tests
-
-- `external/pi-tools-suite/test/codex-reasoning-fix.test.ts`
-- `external/pi-tools-suite/test/codex-reasoning-sdk-replay.test.ts`
-
 ## Verification
 
 Reproduce from the repository root (the first four commands run inside the

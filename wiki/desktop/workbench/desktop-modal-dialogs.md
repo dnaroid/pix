@@ -43,25 +43,6 @@ Keep true modal UI limited to bounded decisions, configuration and search, with 
 - Adding a custom focus-trap library.
 - Changing backend elicitation, project-setting persistence, model config, or command execution semantics.
 
-## Implementation
-
-- `desktop/src/lib/modal-dialog.ts`
-- `desktop/src/lib/confirm-deletion.ts`
-- `desktop/src/components/DeleteConfirmationDialog.svelte`
-- `desktop/src/components/DeleteConfirmationHost.svelte`
-- `desktop/src/App.svelte` (window-level host)
-- `desktop/src/components/ElicitationDialog.svelte`
-- `desktop/src/components/ProjectSettingsDialog.svelte`
-- `desktop/src/components/CommandPicker.svelte`
-- `desktop/src/components/UniversalSearch.svelte`
-
-## Tests
-
-- `desktop/src/lib/modal-dialog.test.ts`
-- `desktop/src/lib/confirm-deletion.test.ts`
-- `desktop/src/components/DeleteConfirmationDialog.test.ts`
-- `desktop/src/components/DesktopModalDialogs.test.ts`
-
 ## Verification
 
 - Component source tests verify native dialog usage, shared lifecycle usage, semantic default forms, and combobox/listbox focus ownership.

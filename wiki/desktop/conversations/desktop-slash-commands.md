@@ -93,43 +93,6 @@ accessible “Improving prompt” status. Success and failure release the lock;
 other sessions remain usable, and stale completions cannot unlock a newer
 request or overwrite another context's draft.
 
-## Implementation
-
-- `desktop/src/app/conversation-session-actions.ts`
-- `desktop/src/app/desktop-workbench-prop-builders.ts`
-- `desktop/src/components/PromptComposer.svelte`
-- `desktop/src/components/PromptComposerControls.svelte`
-
-## Tests
-
-- `desktop/src/app/conversation-session-actions.test.ts`
-- `desktop/src/app/desktop-workbench-prop-builders.test.ts`
-- `desktop/src/components/PromptComposerControls.test.ts`
-- `desktop/src/components/prompt-composer-slash-controller.test.ts`
-
-## Related files
-
-- `acp/src/acp/slash-commands.ts`
-- `acp/src/acp/pix-acp-agent.ts`
-- `acp/src/acp/config-options.ts`
-- `acp/src/pi/pi-rpc-client.ts`
-- `desktop/src/lib/fuzzy.ts`
-- `desktop/src/lib/model-display.ts`
-- `desktop/src/lib/model-thinking.ts`
-- `desktop/src/lib/command-interactions.ts`
-- `desktop/src/lib/slash-commands.ts`
-- `desktop/src/components/CommandPicker.svelte`
-- `desktop/src/components/ModelThinkingPicker.svelte`
-- `desktop/src/components/PromptComposer.svelte`
-- `desktop/src/components/prompt-composer-slash-controller.svelte.ts`
-- `desktop/src/components/SessionSelector.svelte`
-- `desktop/src/components/StatusBar.svelte`
-- `desktop/src/styles.css`
-- `desktop/src/app/model-config-actions.ts`
-- `desktop/src/app/conversation-branch-actions.ts`
-- `desktop/src/app/desktop-prompt-action-services.ts`
-- `desktop/src/app/desktop-command-controller.svelte.ts`
-
 ## Verification
 
 - ACP tests cover catalog ordering and collisions, dynamic commands, built-in execution, renderer-command rejection, no-agent-run commands, and lifecycle races.

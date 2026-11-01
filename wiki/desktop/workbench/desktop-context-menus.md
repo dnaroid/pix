@@ -181,69 +181,34 @@ app-wide. Native registration is serialized so a late obsolete IPC creation
 cannot overwrite newer callbacks. Callbacks are invalidated on replacement or
 disposal, and link actions capture their URL rather than reading a later target.
 
-## Implementation
+## Regression coverage
 
-- `desktop/src/lib/desktop-context-menu.ts`
-- `desktop/src/lib/desktop-context-target.ts`
-- `desktop/src/lib/native-context-menu.ts`
-- `desktop/src/lib/image-context-actions.ts`
-- `desktop/src/components/PreviewPane.svelte`
-- `desktop/src/components/AttachmentGrid.svelte`
-- `desktop/src/components/markdown-content-action.ts`
-- `desktop/src/components/WorkbenchTabs.svelte`
-- `desktop/src/lib/workbench-tab-move.ts`
-- `desktop/src/lib/workbench-tabs.ts`
-- `desktop/src/app/workbench-model.ts`
-- `desktop/src-tauri/src/preview_file_action.rs`
-- `desktop/src-tauri/src/project_browser.rs`: shared default HTTPS browser
-  opening for project HTML and local Markdown file-link actions.
-- `desktop/src-tauri/src/lib.rs`: Preview file action command registration and
-  approved, size-bounded `read_attachment_base64` for local image copying.
-- `desktop/src-tauri/Cargo.toml`: native pasteboard API flags and PNG decoding.
-- `desktop/src/lib/project-explorer-native-menu.ts`
-- `desktop/src/components/ProjectExplorer.svelte`
-- `desktop/src/components/project-explorer-menu-controller.svelte.ts`
+- Actual Tauri clipboard payload decoding from PNG bytes to RGBA and invalid-byte rejection, without modifying the system clipboard. Run with `cargo test --manifest-path desktop/src-tauri/Cargo.toml --test image_clipboard` on macOS.
 
-## Tests
+- Command policies, password and read-only safety, link actions, Rename Session and Move Tab composition, stale/detached guards, failures, inactive callbacks and Linux dispatch.
 
-- `desktop/src-tauri/tests/image_clipboard.rs`: actual Tauri clipboard payload
-  decoding from PNG bytes to RGBA and invalid-byte rejection, without modifying
-  the system clipboard. Run with `cargo test --manifest-path
-  desktop/src-tauri/Cargo.toml --test image_clipboard` on macOS.
-- `desktop/src/lib/native-context-menu.test.ts`: command policies, password and
-  read-only safety, link actions, Rename Session and Move Tab composition,
-  stale/detached guards, failures, inactive callbacks and Linux dispatch.
-- `desktop/src/app/session-rename.test.ts` and
-  `desktop/src/components/DesktopModalDialogs.test.ts`: rename targeting,
-  validation, cancellation and modal behavior.
-- `desktop/src/lib/workbench-tab-move.test.ts`: menu-initiated placement,
-  keyboard selection, cancellation and lifecycle cleanup.
-- `desktop/src/lib/project-explorer-native-menu.test.ts`: file-menu preparation,
-  OS coordinates, serialized registration, stale callbacks and resource teardown.
-- `desktop/src/lib/image-context-actions.test.ts`: image pixel copying, approved
-  local-byte re-decoding, embedded data preservation, local/remote opening,
-  conversion bounds, stale read/decode/copy/cache completions and decode cleanup.
-- `desktop/src/lib/desktop-context-target.test.ts`: trusted local path resolution,
-  source references, utility-tab move registration routing and stale callbacks.
-- `desktop/src/app/workbench-model.test.ts`: Preview tab file metadata.
-- `desktop/src-tauri/src/preview_file_action.rs`: closed action policy and local
-  existing-file validation tests.
-- `desktop/scripts/context-menu-smoke.mjs`: real DOM media/tab routing and
-  keyboard invocation, preserving editable-field precedence, origin-tainted
-  canvas reproduction, approved-byte PNG conversion and video file-copy dispatch
-  (native IPC stubbed).
-- `desktop/src/lib/desktop-context-menu.test.ts`: suppression, focus/coordinates,
-  generation races, resource replacement, unmount and failure handling.
-- `npm --prefix desktop run test:context-menu`: real Chromium DOM selection,
-  focus, propagation, Svelte message-controller precedence, target/protocol
-  filtering, Shift+F10 and listener teardown. Native IPC is stubbed; this is not
-  proof of native popup appearance or clipboard delivery.
-- `npm --prefix desktop test`, `npm --prefix desktop run check`,
-  `npm --prefix desktop run build:web` and Cargo check/test.
-- Native acceptance: right-click blank chrome, selected transcript, draft,
-  read-only/password inputs, links and running/stopped terminals; verify no
-  browser menu, correct clipboard content, undo after paste, image paste,
-  Escape/focus return and secondary-window behavior. Windows/Linux must be
-  checked on their own hosts; browser mocks do not establish OS behavior.
+- Rename targeting, validation, cancellation and modal behavior.
+
+- Menu-initiated placement, keyboard selection, cancellation and lifecycle cleanup.
+
+- File-menu preparation, OS coordinates, serialized registration, stale callbacks and resource teardown.
+
+- Image pixel copying, approved local-byte re-decoding, embedded data preservation, local/remote opening, conversion bounds, stale read/decode/copy/cache completions and decode cleanup.
+
+- Trusted local path resolution, source references, utility-tab move registration routing and stale callbacks.
+
+- Preview tab file metadata.
+
+- Closed action policy and local existing-file validation tests.
+
+- Real DOM media/tab routing and keyboard invocation, preserving editable-field precedence, origin-tainted canvas reproduction, approved-byte PNG conversion and video file-copy dispatch (native IPC stubbed).
+
+- Suppression, focus/coordinates, generation races, resource replacement, unmount and failure handling.
+
+- `npm --prefix desktop run test:context-menu`: real Chromium DOM selection, focus, propagation, Svelte message-controller precedence, target/protocol filtering, Shift+F10 and listener teardown. Native IPC is stubbed; this is not proof of native popup appearance or clipboard delivery.
+
+- `npm --prefix desktop test`, `npm --prefix desktop run check`, `npm --prefix desktop run build:web` and Cargo check/test.
+
+- Native acceptance: right-click blank chrome, selected transcript, draft, read-only/password inputs, links and running/stopped terminals; verify no browser menu, correct clipboard content, undo after paste, image paste, Escape/focus return and secondary-window behavior. Windows/Linux must be checked on their own hosts; browser mocks do not establish OS behavior.
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"1dac771e9dd049d8caf23cbd31dc62450a854e418f1c2fcc80c6fbea081130a7","checkedAt":"2026-10-31T00:36:27.333Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":56,"reportLanguage":"ru"} -->

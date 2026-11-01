@@ -130,24 +130,9 @@ while Pix TUI and Pix Desktop keep their existing renderer/bridge ownership.
 - Adding a new persistent native widget requires an explicit clean-Pi use case
   and the same Pix-host guard; merely having a tool is not sufficient.
 
-## Related files
-
-- `external/pi-tools-suite/src/lib/native-pi-tui.ts`
-- `external/pi-tools-suite/src/todo/native-tui.ts`
-- `external/pi-tools-suite/src/async-subagents/native-tui.ts`
-- `external/pi-tools-suite/src/dcp/native-tui.ts`
-- `external/pi-tools-suite/src/question/`
-- `external/pi-tools-suite/src/index.ts`
-- `src/app/runtime.ts`
-- `wiki/usage/desktop-runtime-status.md`
-- `wiki/desktop/conversations/desktop-question-tool.md`
-- `wiki/context/dcp-statistics.md`
-
 ## Verification
 
-- `external/pi-tools-suite/test/native-pi-tui.test.ts` pins clean-Pi detection,
-  Pix exclusion, widget placement/rendering, DCP no-fake-free-space semantics,
-  and clean-Pi-only question registration.
+- Pins clean-Pi detection, Pix exclusion, widget placement/rendering, DCP no-fake-free-space semantics, and clean-Pi-only question registration.
 - Existing todo, async-subagent, DCP context-map, config, and context-inventory
   suites cover state/lifecycle regressions around the new presentation hooks.
 - Root runtime and bundled-question tests verify Pix still owns its question

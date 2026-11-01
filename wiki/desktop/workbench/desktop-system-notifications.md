@@ -52,28 +52,11 @@ Notify the user when a Pix Desktop agent needs attention. The default is native 
 - Desktop support is macOS only; Windows/Linux notification activation is not a delivery requirement.
 - Rationale: [Native notification activation routing](../../decisions/0016-native-notification-activation.md).
 
-## Related files
-
-- `desktop/src/lib/desktop-notifications.ts`
-- `desktop/src-tauri/src/desktop_notification_sound.rs`
-- `desktop/src/App.svelte`
-- `desktop/src/app/prompt-run-lifecycle.svelte.ts`
-- `desktop/src/app/prompt-agent-control.svelte.ts`
-- `desktop/src/app/elicitation.svelte.ts`
-- `desktop/src/app/session-activity.svelte.ts`
-- `desktop/src-tauri/src/lib.rs`
-- `desktop/src-tauri/src/desktop_notification.rs`
-- `desktop/src-tauri/Cargo.toml`
-- `desktop/src-tauri/Cargo.lock`
-- `desktop/src-tauri/capabilities/default.json`
-- `acp/src/acp/desktop-commands.ts`
-- `acp/src/acp/pix-acp-agent.ts`
-
 ## Verification
 
-- `desktop/src/lib/desktop-notifications.test.ts` covers foreground suppression, permission reuse, throttled denial re-check without re-prompting, once-per-streak failure logging, completion/error/cancel policy, active-subagent deferral, stale-completion cancellation, older-notification routing, subscribe-before-send, retry, teardown races, sound-only mode without popups or OS permission, mode switching, and disposal while preferences are pending.
-- `desktop/src/lib/desktop-notification-transport.test.ts` uses the real Tauri frontend APIs with mocked IPC to verify native command delivery, matching `WebviewWindow` subscription targets for main/project windows, owning-session activation, and unsubscribe even when the host `Notification` constructor has no EventTarget methods.
-- `desktop/src-tauri/src/desktop_notification.rs` contains native metadata/activation and ownership regressions: out-of-order delivery, multiple windows, body clicks versus dismissal/actions, reused window labels, stale queued sends, and shutdown.
+- Foreground suppression, permission reuse, throttled denial re-check without re-prompting, once-per-streak failure logging, completion/error/cancel policy, active-subagent deferral, stale-completion cancellation, older-notification routing, subscribe-before-send, retry, teardown races, sound-only mode without popups or OS permission, mode switching, and disposal while preferences are pending.
+- Uses the real Tauri frontend APIs with mocked IPC to verify native command delivery, matching `WebviewWindow` subscription targets for main/project windows, owning-session activation, and unsubscribe even when the host `Notification` constructor has no EventTarget methods.
+- Contains native metadata/activation and ownership regressions: out-of-order delivery, multiple windows, body clicks versus dismissal/actions, reused window labels, stale queued sends, and shutdown.
 - Prompt-run lifecycle tests cover auto-queue generation gating and dedicated prompt-error signaling.
 - Elicitation tests verify agent-originated pending requests notify while Desktop-local text input does not.
 - ACP tests verify continuation returns its settled stop reason.

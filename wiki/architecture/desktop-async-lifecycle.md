@@ -58,71 +58,27 @@ Keep Desktop connection teardown authoritative and yield between bounded portion
 - Native process ownership, queue bounds, and shutdown are specified separately in `wiki/architecture/desktop-native-process-lifecycle.md`; session persistence and cross-process file concurrency are outside this contract.
 - Already-running native operations are not synchronously cancelled by JavaScript; late completions are either ignored or cleaned up using their captured resource identity.
 
-## Implementation
-
-- `desktop/src/app/connection.svelte.ts`
-- `desktop/src/app/session-coordinator.ts`
-- `desktop/src/app/session-update-batcher.ts`
-- `desktop/src/app/session-history.svelte.ts`
-- `desktop/src/app/session-activity.svelte.ts`
-- `desktop/src/app/session-runtime-status.svelte.ts`
-- `desktop/src/app/session-runtime-loading.ts`
-- `desktop/src/app/session-tab-closure.ts`
-- `desktop/src/app/session-tab-controller.ts`
-- `desktop/src/app/workspace-session-startup.ts`
-- `desktop/src/lib/tauri-transport.ts`
-- `desktop/src/lib/acp-json-rpc.ts`
-- `desktop/src/lib/acp-client.ts`
-- `acp/src/acp/pix-acp-agent.ts`
-- `acp/src/acp/session-state-bridge.ts`
-
 ## Related specifications
 
 - `wiki/desktop/conversations/desktop-session-parity.md`
 - `wiki/desktop/workbench/desktop-workbench-tabs.md`
 - `wiki/desktop/integrations/desktop-package-scripts.md`
 
-## Tests
-
-- `desktop/src/app/connection.test.ts`
-- `desktop/src/lib/tauri-transport.test.ts`
-- `desktop/src/lib/acp-json-rpc.test.ts`
-- `desktop/src/app/session-update-batcher.test.ts`
-- `desktop/src/app/session-history-concurrency.test.ts`
-- `desktop/src/app/session-history.test.ts`
-- `desktop/src/app/session-coordinator.test.ts`
-- `desktop/src/app/session-runtime-status.test.ts`
-- `desktop/src/app/session-activity.test.ts`
-- `desktop/src/app/session-runtime-loading.test.ts`
-- `desktop/src/app/git-assist-workflow.test.ts`
-- `desktop/src/app/conversation-fork-action.test.ts`
-- `desktop/src/app/session-tab-closure.test.ts`
-- `desktop/src/app/workspace-session-startup.test.ts`
-- `desktop/src/lib/acp-client.test.ts`
-- `acp/test/agent.test.ts`
-
 ## Verification
 
-- `desktop/src/app/connection.test.ts` exercises overlapping initialization, reconnect/disposal, stale completion, retries, and post-exit callback ownership.
-- `desktop/src/lib/tauri-transport.test.ts` exercises partial subscription failure, cancellation during registration/native start, early event ordering, and serialized restart.
-- `desktop/src/lib/acp-json-rpc.test.ts` exercises shared disposal, pending-request rejection, and late incoming-request completion.
-- `desktop/src/app/session-update-batcher.test.ts` controls animation frames explicitly and checks multi-frame ordering, completion timing, reset, session removal, and terminal disposal.
-- `desktop/src/app/session-history-concurrency.test.ts` controls promise completion order to cover cancel/restart, generation replacement, duplicate hydration, obsolete success/failure, session switches, and old cursor completion racing with a new page request.
-- `desktop/src/app/session-history.test.ts` verifies rollback of incomplete history and older cursors without reviving retired requests. `desktop/src/app/session-coordinator.test.ts` controls frame delivery to verify that late notifications cannot recreate a closed transcript, and that fresh attachment resumes updates.
-- `desktop/src/app/session-runtime-status.test.ts` covers owner replacement, late responses, and bounded closed-session metadata; `desktop/src/app/session-activity.test.ts` and history concurrency tests cover late notifications and cursor pruning.
-- `desktop/src/app/session-runtime-loading.test.ts` covers same-owner deduplication, immediate replacement after client/workspace changes, stale success/failure after reset or forget with the same ID/client/workspace, activity retention on stale failure, current-owner failure, and bounded pending metadata across many closed IDs.
-- `desktop/src/app/conversation-reload.test.ts` covers reload isolation from other tabs, joining the pending reload on re-entry/send, target-only config-generation invalidation, stale completion rejection, and failure cleanup/reporting.
-- `desktop/src/app/git-assist-workflow.test.ts` covers orphan creation and same-ID reattachment during deferred close; `desktop/src/app/conversation-fork-action.test.ts` covers failed direct source restoration ownership, including same-ID replacement.
-- `desktop/src/app/session-tab-closure.test.ts` covers local background
-  close/delete ownership and stale workspace completion;
-  `desktop/src/app/workspace-session-startup.test.ts` covers same-owner
-  coalescing, workspace owner replacement, and that a tab selected, draft
-  opened, or composer text typed while the startup listing is pending wins
-  over the restored selection (startup then leaves the selection alone).
-- `desktop/src/app/session-catalog.test.ts` covers a catalog refresh requested
-  while the startup listing is pending: it joins that listing instead of
-  superseding it, so startup always receives its response.
-- `desktop/src/lib/acp-client.test.ts` and `acp/test/agent.test.ts` cover attachment metadata, startup ownership, and cached activity replay on live-runtime reattachment.
+- Overlapping initialization, reconnect/disposal, stale completion, retries, and post-exit callback ownership.
+- Partial subscription failure, cancellation during registration/native start, early event ordering, and serialized restart.
+- Shared disposal, pending-request rejection, and late incoming-request completion.
+- Controls animation frames explicitly and checks multi-frame ordering, completion timing, reset, session removal, and terminal disposal.
+- Controls promise completion order to cover cancel/restart, generation replacement, duplicate hydration, obsolete success/failure, session switches, and old cursor completion racing with a new page request.
+- Rollback of incomplete history and older cursors without reviving retired requests. `desktop/src/app/session-coordinator.test.ts` controls frame delivery to verify that late notifications cannot recreate a closed transcript, and that fresh attachment resumes updates.
+- Owner replacement, late responses, and bounded closed-session metadata; `desktop/src/app/session-activity.test.ts` and history concurrency tests cover late notifications and cursor pruning.
+- Same-owner deduplication, immediate replacement after client/workspace changes, stale success/failure after reset or forget with the same ID/client/workspace, activity retention on stale failure, current-owner failure, and bounded pending metadata across many closed IDs.
+- Reload isolation from other tabs, joining the pending reload on re-entry/send, target-only config-generation invalidation, stale completion rejection, and failure cleanup/reporting.
+- Orphan creation and same-ID reattachment during deferred close; regression checks cover failed direct source restoration ownership, including same-ID replacement.
+- Local background close/delete ownership and stale workspace completion; regression checks cover same-owner coalescing, workspace owner replacement, and that a tab selected, draft opened, or composer text typed while the startup listing is pending wins over the restored selection (startup then leaves the selection alone).
+- A catalog refresh requested while the startup listing is pending: it joins that listing instead of superseding it, so startup always receives its response.
+- Attachment metadata, startup ownership, and cached activity replay on live-runtime reattachment.
 - `npm --prefix desktop test`
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`

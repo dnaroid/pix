@@ -125,14 +125,9 @@ values, resolve chains/reversals/conflicts, re-evaluate on a **new** independent
 control set, and test global ranking with distractor sessions. This baseline is not
 an accepted solution to stale search results. Full CI and real UI QA are not claimed.
 
-## Implementation and tests
+## Regression coverage
 
-- `scripts/session-revision-eval/core.mjs`: extraction, candidate selection, scoring, overlay.
-- `scripts/session-revision-eval/prompts.mjs`: frozen classifier and gate contract.
-- `scripts/session-revision-eval/runtime.mjs`: opt-in provider, accounting and replay cache.
-- `scripts/session-revision-eval/run.mjs`: CLI, pre-run plan and reports.
-- `scripts/session-revision-eval/fixtures.json`: durable control set and provenance.
-- `scripts/session-revision-eval/test.mjs`: deterministic extraction, scoring, temporal,
-  scope-isolation, gate, query-overlay and cache/error invariants.
+Deterministic checks cover extraction, scoring, temporal and scope isolation,
+gate behavior, query overlays, caching and error invariants.
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"030a37a570619d083054d3cb099b246eee61da9d0112296cc060631a98a6496b","checkedAt":"2026-10-31T00:24:58.311Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":59,"reportLanguage":"ru"} -->

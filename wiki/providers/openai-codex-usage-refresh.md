@@ -72,18 +72,16 @@ still stored by pi core and break subsequent model requests.
   “keep previous value” path remains active.
 - Run `npm run check` and `npm run test:tools-suite`.
 
-## Implementation
+## Refresh ownership
 
-- `src/app/model/model-usage-status.ts` — host-side implementation.
-  `refreshPiOAuthCredential` delegates to pi core via
-  `ModelRuntime.create({ authPath }).getAuth("openai-codex")`, which owns the
-  file-backed `AuthStorage` refresh and rotation lock. `[confirmed by code]`
+Host-side credential refresh delegates to Pi core, which owns file-backed
+credential refresh and the rotation lock. `[confirmed by code]`
 
-## Tests
+## Regression coverage
 
-- `tests/model-usage-status.test.ts` — refresh/rotation and usage-request
-  regression coverage.
-- `tests/model-usage-controller.test.ts` — controller retention/refresh behavior.
+- Refresh/rotation and usage-request regression coverage.
+
+- Controller retention/refresh behavior.
 
 ## Related code
 

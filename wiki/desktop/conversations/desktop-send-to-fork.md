@@ -49,46 +49,6 @@ status: active
 
 [0035 — Background queued forks](../../decisions/0035-background-queued-forks.md).
 
-## Implementation
-
-- `acp/src/acp/pix-acp-agent.ts`
-- `acp/src/acp/desktop-commands.ts`
-- `acp/src/acp/queue-store.ts`
-- `acp/src/acp/desktop-fork-queue.ts`
-- `acp/src/acp/desktop-fork-snapshot.ts`
-- `acp/src/acp/desktop-fork-snapshot-worker.js`
-- `acp/src/pi/pi-rpc-client.ts`
-- `acp/src/pi/pix-rpc-entry.js`
-- `desktop/src/components/PromptComposer.svelte`
-- `desktop/src/components/PromptComposerActionsMenu.svelte`
-- `desktop/src/components/QueuedMessagesPanel.svelte`
-- `desktop/src/app/prompt-queue-actions.svelte.ts`
-- `desktop/src/app/background-fork.ts`
-- `desktop/src/app/session-history.svelte.ts`
-- `desktop/src/app/connection.svelte.ts`
-- `desktop/src/app/desktop-connection-services.ts`
-- `desktop/src/app/desktop-prompt-action-services.ts`
-- `desktop/src/app/desktop-workbench-prop-builders.ts`
-- `desktop/src/App.svelte`
-- `desktop/src/lib/acp-client.ts`
-- `desktop/src/lib/acp-client-types.ts`
-- `desktop/src/lib/acp-pix-extensions.ts`
-- `desktop/src/lib/acp-response-parsers.ts`
-
-## Tests
-
-- `desktop/src/app/background-fork.test.ts`
-- `desktop/src/app/prompt-queue-actions.test.ts`
-- `desktop/src/app/session-history.test.ts`
-- `desktop/src/lib/acp-client.test.ts`
-- `desktop/src/components/QueuedMessagesPanel.test.ts`
-- `acp/test/agent.test.ts`
-- `acp/test/queue-store.test.ts`
-- `acp/test/desktop-commands.test.ts`
-- `acp/test/desktop-fork-queue.test.ts`
-- `acp/test/desktop-fork-snapshot.test.ts`
-- `acp/test/pix-rpc-entry.test.ts`
-
 ## Verification
 
 Focused Desktop/ACP tests, Desktop check and web build, ACP typecheck. Boundary,

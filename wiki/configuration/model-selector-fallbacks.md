@@ -56,33 +56,6 @@ Every persisted or user-facing **singular model selector** has an ordered fallba
 - Existing DCP multi-entry `summarizerModel` configurations remain valid; `summarizerFallbackModels` extends that ordered list.
 - Existing async-subagent modern `models` chains retain their meaning and are not rewritten into a primary-plus-fallback object.
 
-## Related files
-
-- `src/config.ts`
-- `src/default-pix-config.ts`
-- `src/app/runtime.ts`
-- `src/app/input/autocomplete-controller.ts`
-- `src/app/input/prompt-enhancer-controller.ts`
-- `src/app/commands/command-git-actions.ts`
-- `src/bundled-extensions/session-title/`
-- `acp/src/acp/default-model.ts`
-- `acp/src/acp/pix-settings.ts`
-- `acp/src/acp/autocomplete.ts`
-- `acp/src/acp/prompt-enhancer.ts`
-- `acp/src/acp/git-assistant.ts`
-- `acp/src/acp/pix-acp-agent.ts`
-- `external/pi-tools-suite/src/config.ts`
-- `external/pi-tools-suite/src/coding-discipline/index.ts`
-- `external/pi-tools-suite/src/dcp/`
-- `external/pi-tools-suite/src/async-subagents/core/`
-- `src/schemas/pix-schema.ts`
-- `src/schemas/pix-desktop-schema.ts`
-- `src/schemas/pi-tools-suite-schema.ts`
-- `desktop/src/components/settings/SettingsModelSelect.svelte`
-- `desktop/src/components/settings/SettingsModelList.svelte`
-- `desktop/src/components/settings/SettingsModelVisibility.svelte`
-- `desktop/src/lib/settings-model-search.ts`
-
 ## Verification
 
 - Config tests assert default and legacy selectors resolve with explicit arrays.

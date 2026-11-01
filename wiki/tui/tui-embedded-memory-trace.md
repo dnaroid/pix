@@ -64,22 +64,6 @@ automatically deleted.
 
 Decision: [0006 — Embedded opt-in TUI incident trace](../decisions/0006-embedded-tui-incident-trace.md).
 
-## Implementation
-
-- `src/app/diagnostics/tui-memory-trace.ts`
-- `src/app/diagnostics/tui-memory-trace-worker.ts`
-- `src/app/diagnostics/memory-watchdog.ts`
-- `src/app/app.ts`
-- `scripts/pix-memory-profiler.mjs`
-- `scripts/profile-pix-memory.mjs`
-- `package.json`
-
-## Tests
-
-- `tests/tui-memory-trace.test.ts`
-- `tests/memory-watchdog.test.ts`
-- `tests/pix-memory-profiler.test.ts`
-
 ## Verification
 
 Run focused tests and `npm run build:pix`. A non-UI blocked Node component can

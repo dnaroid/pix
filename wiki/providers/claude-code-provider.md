@@ -350,28 +350,6 @@ Native input avoids the file-mention filter, not Claude Code or service image
 count, dimension, request-size or preprocessing limits; no legacy @file fallback
 is attempted if native input is rejected.
 
-## Implementation
-
-- `external/pi-tools-suite/src/claude-code-provider/`
-- `external/pi-tools-suite/src/module-catalog.ts`
-- `external/pi-tools-suite/src/async-subagents/core/provider-extensions.ts`
-- `scripts/migrate-claude-provider.mjs`
-- `scripts/sync-pi-tools-suite.mjs`
-- `src/app/runtime.ts`
-- `acp/src/acp/draft-model-runtime.ts`
-- `acp/src/acp/pix-acp-agent.ts`
-
-## Tests
-
-- `external/pi-tools-suite/test/claude-code-provider/`
-- `external/pi-tools-suite/test/claude-code-provider/native-images.test.ts`
-- `external/pi-tools-suite/test/claude-code-provider/image-read-provider.test.ts`
-- `external/pi-tools-suite/test/async-subagents/provider-extensions.test.ts`
-- `external/pi-tools-suite/test/async-subagents/provider-offline.test.ts`
-- `tests/claude-provider-migration.test.ts`
-- `tests/claude-provider-registration.test.ts`
-- `acp/test/agent.test.ts`
-
 ## Verification
 
 Run the suite provider, configuration, search-policy and async-child offline

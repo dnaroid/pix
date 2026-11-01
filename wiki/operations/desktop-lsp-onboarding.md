@@ -93,19 +93,6 @@ workbench tab.
   it is an approved global registration and stale UI completion is ignored.
 - Session teardown clears that session's visible or pause-pending suggestion.
 
-## Related files
-
-- `external/pi-tools-suite/src/lsp/onboarding.ts`
-- `external/pi-tools-suite/src/lib/lsp.ts`
-- `external/pi-tools-suite/test/lsp-onboarding.test.ts`
-- `desktop/src-tauri/src/lsp_install.rs`
-- `desktop/src/lib/lsp-onboarding.ts`
-- `desktop/src/app/lsp-onboarding.svelte.ts`
-- `desktop/src/components/TranscriptPane.svelte`
-- `desktop/src/components/LspInstallPane.svelte`
-- `desktop/src/lib/workbench-tabs.ts`
-- `desktop/src/app/workbench-model.ts`
-
 ## Verification
 
 - pi-tools-suite onboarding tests cover catalog matching, registered-server

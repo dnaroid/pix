@@ -1284,107 +1284,49 @@ session mutation/startup from the viewer.
 - Spawns one `pi --mode rpc` child per task; SIGTERM primary, SIGKILL fallback. `[confirmed by code]`
 - Sets `PI_MODEL_SUITABLE_TOOLS_PRESERVE_SELECTION`, `PI_TERMINAL_BELL_DISABLED`, `PI_TOOLS_SUITE_DISABLED_MODULES` in child env. `[confirmed by code]`
 
-## Implementation
+## Regression coverage
 
-- `external/pi-tools-suite/src/async-subagents/completion-delivery.ts`
-- `external/pi-tools-suite/src/async-subagents/completion-receipts.ts`
-- `external/pi-tools-suite/src/async-subagents/index.ts`
-- `external/pi-tools-suite/src/async-subagents/polling.ts`
-- `external/pi-tools-suite/src/async-subagents/tools/wait.ts`
-- `external/pi-tools-suite/src/async-subagents/tools/subagents.ts`
-- `external/pi-tools-suite/src/async-subagents/core/spawn.ts`
-- `external/pi-tools-suite/src/async-subagents/core/child-tools.ts`
-- `external/pi-tools-suite/src/dcp/subagent.ts`
-- `external/pi-tools-suite/src/async-subagents/work-tools.ts`
-- `external/pi-tools-suite/src/ast-grep/tool.ts`
-- `external/pi-tools-suite/src/web-search/index.ts`
-- `external/pi-tools-suite/src/async-subagents/agents/research.md`
-- `external/pi-tools-suite/src/async-subagents/agents/implement.md`
-- `external/pi-tools-suite/src/async-subagents/agents/implement-core.md`
-- `external/pi-tools-suite/src/async-subagents/agents/mechanical.md`
-- `external/pi-tools-suite/src/async-subagents/agents/knowledge-auditor.md`
-- `external/pi-tools-suite/src/todo/subagent.ts`
-- `external/pi-tools-suite/src/repo-discovery/subagent.ts`
-- `external/pi-tools-suite/src/todo/todo.ts`
-- `external/pi-tools-suite/src/todo/state/store.ts`
-- `external/pi-tools-suite/src/todo/state/replay.ts`
-- `external/pi-tools-suite/src/async-subagents/core/owned-launch/`
-- `external/pi-tools-suite/src/async-subagents/core/owned-launch-integration.ts`
-- `external/pi-tools-suite/src/async-subagents/core/owned-retirement.ts`
-- `external/pi-tools-suite/src/async-subagents/core/config.ts`
-- `external/pi-tools-suite/src/async-subagents/core/agents-dir.ts`
-- `external/pi-tools-suite/src/async-subagents/core/agent-catalog.ts`
-- `external/pi-tools-suite/src/async-subagents/core/routing.ts`
-- `external/pi-tools-suite/src/async-subagents/core/ultrawork-auto.ts`
-- `external/pi-tools-suite/src/async-subagents/core/model-selection.ts`
-- `external/pi-tools-suite/src/async-subagents/core/ui-qa.ts`
-- `external/pi-tools-suite/src/async-subagents/core/model-fallback.ts`
-- `external/pi-tools-suite/src/async-subagents/core/retry.ts`
-- `external/pi-tools-suite/src/async-subagents/core/concurrency.ts`
-- `external/pi-tools-suite/src/async-subagents/core/state.ts`
-- `external/pi-tools-suite/src/async-subagents/core/cleanup.ts`
-- `external/pi-tools-suite/src/async-subagents/core/stop.ts`
-- `external/pi-tools-suite/src/async-subagents/core/process.ts`
-- `external/pi-tools-suite/src/async-subagents/core/attachment-bridge.ts`
-- `external/pi-tools-suite/src/async-subagents/core/structured-result.ts`
-- `external/pi-tools-suite/src/async-subagents/tools/spawn.ts`
-- `external/pi-tools-suite/src/async-subagents/delegated-evidence.ts`
-- `external/pi-tools-suite/src/async-subagents/commands.ts`
-- `external/pi-tools-suite/src/async-subagents/agents/ui-qa.md`
+- Command-free child DCP, lifecycle activation, disabled configuration and actual compression under an in-memory (`SessionManager.inMemory()`) host without journal/session writes or raw-history mutation. Real async children are persisted and journal normally.
 
-## Tests
+- Optional policy, CLI removals, project replacements, read-only lifecycle/call guard, AST preview-only execution and actual SDK inventories for Claude/Codex models.
 
-- `external/pi-tools-suite/test/async-subagents/dcp.test.ts`: command-free child DCP, lifecycle activation, disabled configuration and actual compression under an in-memory (`SessionManager.inMemory()`) host without journal/session writes or raw-history mutation. Real async children are persisted and journal normally.
+- Existing search/apply behavior.
 
-- `external/pi-tools-suite/test/async-subagents/work-tools.test.ts`: optional
-  policy, CLI removals, project replacements, read-only lifecycle/call guard,
-  AST preview-only execution and actual SDK inventories for Claude/Codex models.
-- `external/pi-tools-suite/test/ast-grep.test.ts`: existing search/apply behavior.
-- `external/pi-tools-suite/test/web-search.test.ts`: credential/provider,
-  fallback, timeout and cancellation behavior reused by child web tools.
-- `external/pi-tools-suite/test/async-subagents/todo.test.ts`: child-local state,
-  unchanged parent persistence, CLI restrictions, compaction and branch replay.
-- `external/pi-tools-suite/test/async-subagents/provider-child-inventory.test.ts`:
-  real offline child startup exposes todo and gated repo queries for default,
-  restricted and empty selections.
-- `external/pi-tools-suite/test/async-subagents/repo-tools.test.ts`: common repo
-  registration, no setup, prerequisite gates, lifecycle selection and adapters.
-- `tests/heads-up-delegated.test.ts`: cross-package report bridge, launch ownership,
-  provenance labels, redaction and duplicate suppression.
-- `external/pi-tools-suite/test/async-subagents/completion-delivery.test.ts`:
-  tool-result/follow-up arbitration and reservation lifecycle regressions.
-- `external/pi-tools-suite/test/async-subagents/completion-sdk.test.ts`:
-  real SDK tool hooks, settlement continuation and provider-request counts
-  with a deterministic offline provider.
-- `external/pi-tools-suite/test/async-subagents/owned-launch/`: launcher
-  transport/parser units, real pipe/socket backpressure regression, and opt-in
-  native launchd crash/recovery tests.
-- `external/pi-tools-suite/test/async-subagents/owned-runtime.test.ts` and
-  `external/pi-tools-suite/test/async-subagents/owned-runtime-early.test.ts`:
-  mocked receipt recovery, pending state, and fail-closed retirement/deletion.
-- `external/pi-tools-suite/test/async-subagents/provider-owned-launch.test.ts`
-  and `external/pi-tools-suite/test/async-subagents/provider-owned-runtime.test.ts`:
-  opt-in real Pi/unmodified-provider offline lifecycle matrices, using a local
-  protocol fixture rather than live inference.
-- `external/pi-tools-suite/test/async-subagents/core.test.ts`: config/profile
-  loading, semaphore behavior, process lifecycle, retry, model fallback, running
-  stop behavior, structured results, and project-agent definitions.
-- `external/pi-tools-suite/test/async-subagents/knowledge-auditor.test.ts`: default
-  task-audit and explicit spec-review modes, tools, visibility and boundaries.
-- `external/pi-tools-suite/test/async-subagents/tools.test.ts`: public tool
-  validation and spawn/status/wait/result/stop integration.
-- `external/pi-tools-suite/test/async-subagents/routing.test.ts`: explicit and
-  automatic role routing, parent-model/project gates, unknown-role failures,
-  and confirmation that `browser-qa` has no built-in alias.
-- `external/pi-tools-suite/test/async-subagents/model-pools.test.ts` and
-  `external/pi-tools-suite/test/async-subagents/model-pool-contract.test.ts`: role candidate ordering, parent-provider policy,
-  runtime availability, and session fallback behavior.
-- `external/pi-tools-suite/test/async-subagents/ui.test.ts`: task normalization,
-  live-state tracking/rendering, polling, and slash-command UI.
-- `external/pi-tools-suite/test/async-subagents/selection-e2e.test.ts`: opt-in LLM
-  routing selection without spawning a real child.
-- `external/pi-tools-suite/test/async-subagents/e2e.test.ts`: opt-in real
-  subprocess workflows.
+- Credential/provider, fallback, timeout and cancellation behavior reused by child web tools.
+
+- Child-local state, unchanged parent persistence, CLI restrictions, compaction and branch replay.
+
+- Real offline child startup exposes todo and gated repo queries for default, restricted and empty selections.
+
+- Common repo registration, no setup, prerequisite gates, lifecycle selection and adapters.
+
+- Cross-package report bridge, launch ownership, provenance labels, redaction and duplicate suppression.
+
+- Tool-result/follow-up arbitration and reservation lifecycle regressions.
+
+- Real SDK tool hooks, settlement continuation and provider-request counts with a deterministic offline provider.
+
+- Launcher transport/parser units, real pipe/socket backpressure regression, and opt-in native launchd crash/recovery tests.
+
+- Mocked receipt recovery, pending state, and fail-closed retirement/deletion.
+
+- Opt-in real Pi/unmodified-provider offline lifecycle matrices, using a local protocol fixture rather than live inference.
+
+- Config/profile loading, semaphore behavior, process lifecycle, retry, model fallback, running stop behavior, structured results, and project-agent definitions.
+
+- Default task-audit and explicit spec-review modes, tools, visibility and boundaries.
+
+- Public tool validation and spawn/status/wait/result/stop integration.
+
+- Explicit and automatic role routing, parent-model/project gates, unknown-role failures, and confirmation that `browser-qa` has no built-in alias.
+
+- Role candidate ordering, parent-provider policy, runtime availability, and session fallback behavior.
+
+- Task normalization, live-state tracking/rendering, polling, and slash-command UI.
+
+- Opt-in LLM routing selection without spawning a real child.
+
+- Opt-in real subprocess workflows.
 
 ## Gaps / risks
 1. **pid-check race**: `process.kill(pid,0)` is point-in-time; a process exiting

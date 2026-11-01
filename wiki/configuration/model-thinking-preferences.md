@@ -51,24 +51,6 @@ Remember the user's last applied thinking level independently for each model in 
 - Escape/cancel does not persist merely highlighted or staged model/thinking changes.
 - A preference-write failure does not roll back an already successful model/thinking change. The UI reports the persistence failure best-effort while preserving the applied session/draft state.
 
-## Related files
-
-- `src/config.ts`
-- `src/default-pix-config.ts`
-- `schemas/pix.json`
-- `schemas/pix-desktop.json`
-- `src/app/app.ts`
-- `src/app/popup/popup-menu-controller.ts`
-- `src/app/popup/popup-action-controller.ts`
-- `desktop/src/app/model-preferences.svelte.ts`
-- `desktop/src/app/model-draft-config.svelte.ts`
-- `desktop/src/app/model-config-actions.ts`
-- `desktop/src/app/model-picker-state.svelte.ts`
-- `desktop/src/components/ModelThinkingPicker.svelte`
-- `desktop/src/lib/model-thinking-preferences.ts`
-- `wiki/tui/tui-model-thinking-selector.md`
-- `wiki/configuration/desktop-live-model-switching.md`
-
 ## Verification
 
 - Root config tests cover parsing, normalization, JSONC-preserving persistence, and rejection of project overrides.

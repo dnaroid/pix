@@ -96,13 +96,9 @@ selection, not model routing.
 
 ## Verification
 
-- `test/async-subagents/routing.test.ts`: explicit bypass and validation,
-  omitted/mixed tasks, disabled/unavailable routing, invalid/partial responses,
-  provider errors, fallback models, cancellation, and project Markdown roles.
-- `test/async-subagents/tools.test.ts`: public and internal spawn errors are
-  visible and create no run state; explicit spawns still apply their profiles
-  with the router disabled.
-- `test/tool-descriptions.test.ts`: parent catalog and tool guidance agree.
+- Explicit bypass and validation, omitted/mixed tasks, disabled/unavailable routing, invalid/partial responses, provider errors, fallback models, cancellation, and project Markdown roles.
+- Public and internal spawn errors are visible and create no run state; explicit spawns still apply their profiles with the router disabled.
+- Parent catalog and tool guidance agree.
 - Opt-in live selection evals verify the parent-first boundary in both
   directions: a targeted root-cause investigation and a compact already-specified
   implementation stay in the parent without a `subagents` call, while an

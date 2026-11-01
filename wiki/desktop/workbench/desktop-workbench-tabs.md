@@ -79,74 +79,39 @@ Present conversations, file/media Preview, Source Control Git Diff, interactive 
 - Opening multiple independent Preview tabs; Preview keeps one history-bearing work surface.
 - Converting bounded settings, elicitation, or model-selection flows into workbench tabs.
 
-## Implementation
-
-- `desktop/src/app/workbench-model.ts`
-- `desktop/src/app/workbench-controller.ts`
-- `desktop/src/app/desktop-presentation-state.svelte.ts`
-- `desktop/src/app/preview-state.svelte.ts`
-- `desktop/src/app/preview.svelte.ts`
-- `desktop/src/app/preview-file-io.ts`
-- `desktop/src/components/glb-viewer-action.ts`
-- `desktop/src/lib/glb.ts`
-- `desktop/src/lib/glb-scene.ts`
-- `desktop/src/lib/glb-controls.ts`
-- `desktop/src/lib/glb-source.ts`
-- `desktop/src/styles/glb-viewer.css`
-- `desktop/src/app/project-documents.svelte.ts`
-- `desktop/src/app/desktop-project-services.ts`
-- `desktop/src/app/session-tab-controller.ts`
-- `desktop/src/app/workbench-terminal.svelte.ts`
-- `desktop/src/app/desktop-command-controller.svelte.ts`
-- `desktop/src/app/desktop-workbench-prop-builders.ts`
-- `desktop/src/App.svelte`
-- `desktop/src/components/DesktopWorkbenchSurface.svelte`
-- `desktop/src/components/WorkbenchTerminalPane.svelte`
-- `desktop/src/components/WorkbenchTabs.svelte`
-- `desktop/src/components/SessionTabStatusIcon.svelte`
-- `desktop/src/components/PreviewPane.svelte`
-- `desktop/src/components/preview-editor-controller.svelte.ts`
-- `desktop/src/components/preview-file-search-controller.svelte.ts`
-- `desktop/src/components/preview-scroll-controller.svelte.ts`
-- `desktop/src/components/preview-markdown-controller.svelte.ts`
-- `desktop/src/components/GitDiffPane.svelte`
-- `desktop/src/components/LspInstallPane.svelte`
-- `desktop/src/app/lsp-onboarding.svelte.ts`
-- `desktop/src/lib/workbench-tabs.ts`
-- `desktop/src/lib/workbench-tab-order.ts`
-- `desktop/src/lib/workbench-tab-move.ts`
-- `desktop/src/lib/session-tabs.ts`
-- `desktop/src/lib/session-tab-status.ts`
-- `desktop/src/lib/preview-history.ts`
-- `desktop/src/lib/file-search.ts`
-- `desktop/src/lib/desktop-commands.ts`
-
 ## Related specs
 
 - `wiki/desktop/conversations/desktop-session-tabs.md`
 - `wiki/desktop/conversations/desktop-session-parity.md`
 
-## Tests
+## Regression coverage
 
-- `desktop/src/components/glb-viewer-action.test.ts`
-- `desktop/src/lib/glb.test.ts`
-- `desktop/src/lib/glb-scene.test.ts`
-- `desktop/src/lib/glb-controls.test.ts`
-- `desktop/src/lib/glb-source.test.ts`
+- Mixed insertion, session-id separation, close fallback, and stale-active normalization.
 
-- `desktop/src/lib/workbench-tabs.test.ts` covers mixed insertion, session-id separation, close fallback, and stale-active normalization.
-- `desktop/src/lib/workbench-tab-order.test.ts` covers workspace-lifetime visual ordering, canonical neighbor insertion, and pruning removed tabs.
-- `desktop/src/lib/workbench-tab-move.test.ts` covers explicit menu-initiated placement, keyboard positioning, cancellation, listener ownership, and lifecycle cleanup.
-- `desktop/src/components/WorkbenchTabs.test.ts` covers the unified roving tablist, shrink-wrapped non-growing tablist/action layout, tab preferred-width/flex-basis consistency, semantic session-status icon set, and kind-specific close dispatch.
-- `desktop/src/components/DesktopEditorSurfaces.test.ts` covers top-level editor surfaces, `!!` Terminal routing, Preview edit/find wiring, and active-Preview shortcut gating.
-- `desktop/src/app/workbench-terminal.test.ts` covers Terminal tab reuse, opener anchoring, and close/reset state.
-- `desktop/src/lib/session-tabs.test.ts` and `desktop/src/app/session-tabs-state.test.ts` cover real-session membership, restore precedence, and persistence; `desktop/src/app/draft-tab-selection.test.ts` covers selection behavior during UI-only draft materialization.
-- `desktop/src/app/workbench-model.test.ts` covers propagation of fork metadata into the session-tab presentation model; `desktop/src/lib/session-tab-status.test.ts` covers status precedence and unseen-completion semantics.
-- `desktop/src/app/preview.test.ts`, `desktop/src/app/project-documents.test.ts`, and `desktop/src/components/preview-editor-controller.test.ts` use controlled promises to verify late-load/save ownership, same-file write serialization, and preservation of newer drafts.
-- `desktop/src/lib/file-search.test.ts` covers literal match offsets, ASCII-case-insensitive behavior, non-overlapping navigation data, and match bounds; `desktop/src/components/DesktopEditorSurfaces.test.ts` pins active-tab shortcut gating, find UI, navigation, and highlight wiring.
-- `desktop/src/app/desktop-workbench-prop-builders.test.ts` covers Preview/Git Diff/Terminal surface props, project/config editability, and visibility derived from workbench selection.
+- Workspace-lifetime visual ordering, canonical neighbor insertion, and pruning removed tabs.
+
+- Explicit menu-initiated placement, keyboard positioning, cancellation, listener ownership, and lifecycle cleanup.
+
+- The unified roving tablist, shrink-wrapped non-growing tablist/action layout, tab preferred-width/flex-basis consistency, semantic session-status icon set, and kind-specific close dispatch.
+
+- Top-level editor surfaces, `!!` Terminal routing, Preview edit/find wiring, and active-Preview shortcut gating.
+
+- Terminal tab reuse, opener anchoring, and close/reset state.
+
+- Real-session membership, restore precedence, and persistence; regression checks cover selection behavior during UI-only draft materialization.
+
+- Propagation of fork metadata into the session-tab presentation model; regression checks cover status precedence and unseen-completion semantics.
+
+- Late-load/save ownership, same-file write serialization, and preservation of newer drafts.
+
+- Literal match offsets, ASCII-case-insensitive behavior, non-overlapping navigation data, and match bounds; regression checks cover active-tab shortcut gating, find UI, navigation, and highlight wiring.
+
+- Preview/Git Diff/Terminal surface props, project/config editability, and visibility derived from workbench selection.
+
 - `npm --prefix desktop test`
+
 - `npm --prefix desktop run check`
+
 - `npm --prefix desktop run build:web`
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"29a9e39c17349c7a336f6a24f8b6a221b993b8f604086d6dcb79361ff3d935d3","checkedAt":"2026-10-31T01:00:06.969Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":55,"reportLanguage":"ru"} -->

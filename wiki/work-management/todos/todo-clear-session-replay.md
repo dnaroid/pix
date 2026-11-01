@@ -36,13 +36,6 @@ Keep live todo state authoritative after pix reloads or resumes the current sess
 - A valid custom snapshot supersedes earlier `todo` tool results; malformed or unrelated custom entries are ignored.
 - Existing sessions without custom snapshots continue to replay from `todo` tool results.
 
-## Related files
-
-- `external/pi-tools-suite/src/todo/state/replay.ts`
-- `external/pi-tools-suite/src/todo/index.ts`
-- `external/pi-tools-suite/src/todo/todo.ts`
-- `external/pi-tools-suite/test/todo.test.ts`
-
 ## Verification
 
 - Replay regression test with an older non-empty tool result followed by an empty clear snapshot.

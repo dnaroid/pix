@@ -369,60 +369,13 @@ user message bubbles and restored composer drafts.
   quota inside one WebView process. Do not describe this as a hardened
   multi-process isolation boundary.
 
-## Implementation
-
-- `desktop/sandbox-engines.vite.ts`, `desktop/vite.config.ts`,
-  `desktop/tsconfig.node.json`, `desktop/src/sandbox-virtual-modules.d.ts`,
-  `desktop/package.json`, `desktop/package-lock.json`: pinned offline bundles.
-- `desktop/src/lib/html-sandbox-engines.ts`: fixed marker allowlist and lazy imports.
-- `desktop/src/lib/html-sandbox-run.ts`: pending-run cancellation/ownership.
-- `desktop/src/lib/html-sandbox-autorun.svelte.ts`: HTML-value-owned autorun,
-  with untracked startup and cleanup only on changed HTML or destruction.
-- `desktop/src/lib/html-sandbox.ts`: fence extraction, CSP document,
-  encoded guest scripts, scrollbar styling, guest height reporting, bounded
-  submission parsing and ACP formatting; also segments valid `pix-actions`
-  fences for Desktop rendering.
-- `desktop/src/lib/choice-actions.ts` and
-  `desktop/src/components/ChoiceActions.svelte`: checklist parsing, eligibility
-  support, and the checkbox/submit UI for quick-choice actions.
-- `desktop/src/lib/html-sandbox-layout.ts`: validated content-size packets,
-  bounded auto-fit height calculation and legacy viewport-hint stripping.
-- `desktop/src/components/HtmlSandbox.svelte`: Automatic startup and Run/Stop/Restart UI with
-  scoped message listener, theme syncing, width monitoring and auto-fit.
-- `desktop/src/components/MarkdownText.svelte`:
-  opt-in content segmentation; raw HTML never enters the ordinary
-  Markdown renderer.
-- `desktop/src/components/TranscriptPane.svelte`: assistant-only enablement.
-- `desktop/src/app/prompt-submit.ts` and
-  `desktop/src/app/desktop-workbench-prop-builders.ts`: scoped ACP delivery
-  for sandbox and quick-choice submissions.
-- `desktop/src/App.svelte`, `desktop/src/app/desktop-prompt-action-services.ts`,
-  `desktop/src/app/prompt-payload.ts`, `desktop/src/app/prompt-queue-actions.svelte.ts`:
-  measured snapshot passed into agent-facing prototype prompts.
-- `desktop/src-tauri/tauri.conf.json`: explicit `data:` script CSP allowance.
-- `desktop/src-tauri/src/startup_theme.rs`: native navigation allowlist
-  for main windows and sandbox frames.
-- `src/bundled-extensions/html-sandbox/index.ts` and
-  `src/bundled-extensions/html-sandbox/guide.ts`,
-  `src/bundled-extensions/html-sandbox/engine-reference.ts`:
-  short per-turn capability advertisement plus on-demand model-facing guide.
-- `acp/src/config.ts`, `acp/src/main.ts`,
-  `acp/src/acp/pix-acp-agent.ts`, `desktop/src-tauri/src/backend_runtime.rs`:
-  Desktop-only extension configuration, client gate and native packaging.
-
 ## Verification
 
-- `npm --prefix desktop test -- src/lib/html-sandbox.test.ts src/lib/html-sandbox-layout.test.ts src/app/prompt-submit-html-sandbox.test.ts`
-- `npm --prefix desktop test -- src/lib/choice-actions.test.ts`
 - Native Desktop regression: render a valid checklist, verify its checked
   defaults and formatting, confirm only the latest settled assistant message is
   interactive, and verify malformed/incomplete fences remain code.
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`
-- `node --import tsx --test tests/html-sandbox-extension.test.ts`
-- `node --import tsx --test acp/test/config.test.ts acp/test/agent.test.ts`
-- `npm --prefix desktop test -- src/lib/html-sandbox-engines.test.ts src/lib/html-sandbox-run.test.ts`
-- `npm --prefix desktop test -- src/lib/html-sandbox-autorun.test.ts src/components/HtmlSandbox.test.ts`
 - Native engine regression: run the guide's Phaser and Three.js examples offline,
   verify animation/input, resize, Stop/Restart, and that host globals remain absent.
   Check both engines together, a plain prototype, and blocked remote requests.
@@ -432,19 +385,8 @@ user message bubbles and restored composer drafts.
   scrollbar, verify a growing and shrinking page's automatic height, and
   verify network and Pix IPC are not available inside the guest iframe.
 
-## Tests
+## Regression coverage
 
-- `desktop/src/lib/html-sandbox-autorun.test.ts`: compiled client-runes
-  regression for equal-HTML wrapper updates, changed HTML, manual Stop,
-  untracked runtime state and destruction cleanup.
-
-- `desktop/src/lib/html-sandbox.test.ts`
-- `desktop/src/lib/html-sandbox-engines.test.ts`
-- `desktop/src/lib/html-sandbox-run.test.ts`
-- `desktop/src/lib/html-sandbox-layout.test.ts`
-- `desktop/src/app/prompt-submit-html-sandbox.test.ts`
-- `tests/html-sandbox-extension.test.ts`
-- `acp/test/config.test.ts`
-- `acp/test/agent.test.ts`
+- Compiled client-runes regression for equal-HTML wrapper updates, changed HTML, manual Stop, untracked runtime state and destruction cleanup.
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"0bac3d56141be91c8b0a0443ca8786261a742fb8b4119f2a9384231948f07fb7","checkedAt":"2026-10-31T14:58:59.241Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":65,"reportLanguage":"ru"} -->

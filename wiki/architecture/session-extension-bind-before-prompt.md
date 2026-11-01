@@ -31,13 +31,6 @@ Prevent the first user prompt from bypassing extension input handlers while a ne
 3. A prompt targeting a non-active session does not wait on the active runtime's bind.
 4. Existing prompt options and queue handling remain unchanged.
 
-## Related files
-
-- `src/app/session/queued-message-controller.ts`
-- `src/app/session/session-lifecycle-controller.ts`
-- `src/app/app.ts`
-- `tests/queued-message-controller.test.ts`
-
 ## Verification
 
 - Regression test holds extension binding open and verifies the first prompt remains blocked.

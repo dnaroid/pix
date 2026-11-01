@@ -21,26 +21,6 @@ See [the removal decision](../decisions/0023-remove-workspace-tool.md), which
 supersedes the [rebinding](../decisions/0014-conversation-workspace-rebinding.md)
 and [handoff](../decisions/0021-transparent-workspace-handoff.md) decisions.
 
-## Implementation
-
-- `src/app/runtime.ts`
-- `src/app/app.ts`
-- `src/app/session/session-lifecycle-controller.ts`
-- `acp/src/pi/pix-rpc-entry.js`
-- `acp/src/acp/pix-acp-agent.ts`
-- `acp/src/acp/session-state-bridge.ts`
-- `acp/src/acp/session-map.ts`
-- `desktop/src/app/session-coordinator.ts`
-- `desktop/src/app/desktop-session-orchestration.ts`
-
-## Tests
-
-- `tests/bundled-question-extension.test.ts`
-- `tests/session-lifecycle-controller.test.ts`
-- `acp/test/agent.test.ts`
-- `acp/test/session-state-bridge.test.ts`
-- `desktop/src/app/session-coordinator.test.ts`
-
 ## Verification
 
 Root, ACP and Desktop typechecks plus targeted bundled extension, session

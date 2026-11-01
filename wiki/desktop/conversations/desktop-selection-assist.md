@@ -53,46 +53,8 @@ Desktop `pix-desktop.jsonc` supports a `selectionAssist` object with `modelRef`,
 
 The model setup wizard provides `selection-assist` (“Explain & translate”, fast role, Assistant group) and `selection-assist-fallback` slots. It writes these selections only when the config already contains a `selectionAssist` object. Settings > Assistant exposes the feature in Feature models and provides an “Explain & translate language” field.
 
-## Related files
+## Regression coverage
 
-- `acp/src/acp/selection-assist.ts`
-- `acp/src/acp/assist-model-runner.ts`
-- `acp/src/acp/document-translation.ts`
-- `acp/src/acp/translation-cache.ts`
-- `acp/src/acp/file-annotation.ts`
-- `acp/src/acp/file-explanation-parser.ts`
-- `acp/src/acp/project-json-cache.ts`
-- `acp/src/acp/desktop-commands.ts`
-- `acp/src/acp/pix-acp-agent.ts`
-- `acp/src/acp/model-setup.ts`
-- `src/schemas/pix-desktop-schema.ts`
-- `schemas/pix-desktop.json`
-- `desktop/src/lib/default-desktop-config.ts`
-- `desktop/src/lib/acp-pix-extensions.ts`
-- `desktop/src/lib/selection-assist-target.ts`
-- `desktop/src/app/selection-assist.svelte.ts`
-- `desktop/src/components/SelectionAssistPopover.svelte`
-- `desktop/src/components/PreviewPane.svelte`
-- `desktop/src/components/preview-translation-controller.svelte.ts`
-- `desktop/src/components/preview-annotation-controller.svelte.ts`
-- `desktop/src/lib/preview-annotations.ts`
-- `desktop/src/lib/syntax-highlight.ts`
-- `desktop/src/styles.css`
-- `desktop/src/app/desktop-workbench-prop-builders.ts`
-- `desktop/src-tauri/src/lib.rs` (`.pi/translations` and `.pi/explanations` are canonical)
-- `desktop/src/components/settings/DesktopSettingsEditor.svelte`
-
-## Tests
-
-- `acp/test/selection-assist.test.ts`
-- `acp/test/document-translation.test.ts`
-- `acp/test/file-annotation.test.ts`
-- `acp/test/file-explanation-parser.test.ts`
-- `desktop/src/lib/selection-assist.test.ts`
-- `desktop/src/components/preview-translation-controller.test.ts`
-- `desktop/src/components/preview-annotation-controller.test.ts`
-- `desktop/src/lib/preview-annotations.test.ts`
-- `desktop/src/lib/syntax-highlight.test.ts`
-- `desktop/src-tauri/src/lib.rs` (`project_pi_cleanup_preserves_translation_and_explanation_caches`)
+- Project cleanup preserves translation and explanation caches.
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"15b9c9f1443bf948539685892ac4de6629de3ab54b16070445d8dfaa3bd8a8e5","checkedAt":"2026-10-31T00:41:49.787Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":68,"reportLanguage":"ru"} -->

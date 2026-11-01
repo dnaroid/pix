@@ -43,23 +43,6 @@ Render file-edit results and `git diff` shell output as readable inline diffs in
 - Syntax highlighting inside changed lines.
 - Detecting arbitrary commands that happen to print diff-like text; shell detection mirrors the TUI's `git diff` command rule.
 
-## Related files
-
-- `desktop/src/lib/diff.ts`
-- `desktop/src/lib/transcript.ts`
-- `desktop/src/lib/transcript-content.ts`
-- `desktop/src/lib/transcript-reducer.ts`
-- `desktop/src/lib/transcript-types.ts`
-- `desktop/src/components/DiffView.svelte`
-- `desktop/src/components/ToolResult.svelte`
-- `desktop/src/components/TranscriptPane.svelte`
-- `desktop/src/components/GitDiffPane.svelte`
-- `desktop/src/lib/git-diff-chunks.ts` (tested by `git-diff-chunks.test.ts`)
-- `desktop/src/components/WorkbenchTabs.svelte`
-- `desktop/src/app/git-assist.ts`
-- `desktop/src/app/desktop-workbench-prop-builders.ts`
-- `desktop/src/App.svelte`
-
 ## Verification
 
 - Unit tests cover structured diffs, unified hunk numbering, ANSI removal, marker classification, shell command detection, and ACP transcript preservation.

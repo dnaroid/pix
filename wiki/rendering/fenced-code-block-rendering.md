@@ -42,13 +42,6 @@ Show fenced code as a visually distinct code block without exposing Markdown fen
 - Empty and just-opened streaming blocks retain one visually styled blank line.
 - Source fallback for an unsupported Mermaid block remains visible as an ordinary code block, without raw fence markers.
 
-## Related files
-
-- `src/markdown-format.ts`
-- `src/app/rendering/conversation-entry-renderer.ts`
-- `tests/markdown-format.test.ts`
-- `tests/conversation-entry-renderer.test.ts`
-
 ## Verification
 
 - Regression tests cover complete, empty, unsupported-language, tilde, and streaming fences.
@@ -59,13 +52,5 @@ Show fenced code as a visually distinct code block without exposing Markdown fen
 
 - Terminal applications cannot select a different font family, so visual separation uses theme colors.
 - Fence markers intentionally remain part of the stored source even though they are absent from rendered/copy-selected output.
-
-## Implementation
-
-- `src/markdown-format.ts`
-
-## Tests
-
-- `tests/markdown-format.test.ts`
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"b69efaa81a34502d3fd92fb45f3af2b5d170193f24ff69639d93c3e006c75827","checkedAt":"2026-10-31T00:10:01.706Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":61,"reportLanguage":"ru"} -->

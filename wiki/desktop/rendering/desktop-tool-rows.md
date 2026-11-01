@@ -64,33 +64,6 @@ Render Pix Desktop chat tool rows with the same compact headers and mutation out
 - Activity-group summaries show no lifecycle status, settled outcome, or aggregate status icon — only the muted per-entry icon trail and elapsed time on one line. They do not inherit failed/success outcome color or LSP warning/error attention from child tool rows; those signals, including the failed status icon, stay on the concrete child call that produced them.
 - LSP headers/alerts, error lines, warning lines, hints, and clean diagnostic lines receive semantic colors; comment-checker headings use the warning role.
 
-## Related files
-
-- `acp/src/acp/event-translator.ts`
-- `acp/src/acp/session-replay.ts`
-- `desktop/src/lib/transcript.ts`
-- `desktop/src/lib/transcript-content.ts`
-- `desktop/src/lib/transcript-deferred.ts`
-- `desktop/src/lib/transcript-presentation.ts`
-- `desktop/src/lib/transcript-reducer.ts`
-- `desktop/src/lib/transcript-types.ts`
-- `desktop/src/lib/tool-presentation.ts`
-- `desktop/src/lib/tool-output.ts`
-- `desktop/src/lib/tool-input.ts`
-- `desktop/src/lib/syntax-highlight.ts`
-- `desktop/src/lib/syntax-highlight.test.ts`
-- `desktop/src/lib/gdscript-highlight.ts`
-- `desktop/src/lib/tool-input.test.ts`
-- `desktop/src/components/ToolResult.test.ts`
-- `desktop/src/components/TranscriptPane.svelte`
-- `desktop/src/components/TranscriptActivityGroup.svelte`
-- `desktop/src/app/session-history.svelte.ts`
-- `desktop/src/app/session-history-concurrency.test.ts`
-- `desktop/scripts/transcript-activity-smoke.mjs`
-- `desktop/src/components/ToolResult.svelte`
-- `desktop/src/components/ToolStatusIcon.svelte`
-- `desktop/src/styles.css`
-
 ## Verification
 
 - ACP tests cover programmatic names for live and replayed tool calls.

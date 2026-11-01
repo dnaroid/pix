@@ -30,17 +30,6 @@ paste handling; text plus Enter must not be sent as a single paste to execute a
 command. Asynchronous path insertion and bracketed paste must not land in a
 different active input scope. Classification does not bypass those guards.
 
-## Implementation
-
-- `src/app/input/input-paste-handler.ts`
-- `src/app/input/input-controller.ts`
-- `src/input-editor-files.ts`
-
-## Tests
-
-- `tests/input-paste-handler.test.ts`
-- `tests/input-controller.test.ts`
-
 ## Verification
 
 Run the input paste and controller tests. In the real TUI, enter the provider

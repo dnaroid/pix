@@ -95,23 +95,6 @@ Show image and video attachments in the desktop composer and transcript, while k
 - If image prompting is not advertised, pasted images remain usable as cached
   resource links.
 
-## Related files
-
-- `desktop/src/app/attachment-drafts.ts`
-- `desktop/src/app/prompt-payload.ts`
-- `desktop/src/app/prompt-submit.ts`
-- `desktop/src/app/transcript-attachments.ts`
-- `desktop/src/components/PromptComposer.svelte`
-- `desktop/src/components/TranscriptPane.svelte`
-- `desktop/src/lib/attachments.ts`
-- `desktop/src/lib/transcript.ts`
-- `desktop/src/lib/transcript-content.ts`
-- `desktop/src/lib/transcript-local.ts`
-- `desktop/src/lib/transcript-types.ts`
-- `desktop/src-tauri/src/lib.rs`
-- `acp/src/acp/session-replay.ts`
-- `acp/src/acp/pix-acp-agent.ts`
-
 ## Verification
 
 - Unit tests cover media classification, data-URL decoding, file-URI markers,

@@ -182,38 +182,6 @@ request or control is implemented.
   five minutes), not instantly. This passive view offers no redemption action or
   additional refresh-on-open request.
 
-## Implementation
-
-- `desktop/src/components/QuotaResetCalendar.svelte`
-
-- `desktop/src/components/UsageLimitBars.svelte`
-- `desktop/src/components/ModelUsageDonut.svelte`
-- `desktop/src/components/ResetCreditsSection.svelte`
-- `desktop/src/components/RuntimeStatusBarItems.svelte`
-- `src/app/model/model-usage-status.ts`
-- `src/app/model/model-usage-reset-credits.ts`
-- `acp/src/acp/desktop-commands.ts`
-- `desktop/src/lib/acp-client-types.ts`
-- `desktop/src/lib/acp-response-parsers.ts`
-- `desktop/src/lib/quota-calendar.ts`
-- `desktop/src/lib/runtime-status.ts`
-
-## Tests
-
-- `desktop/src/components/QuotaResetCalendar.test.ts`
-
-- `desktop/src/components/UsageLimitBars.test.ts`
-- `desktop/src/components/ModelUsageDonut.test.ts`
-- `desktop/src/components/ResetCreditsSection.test.ts`
-- `desktop/src/lib/quota-calendar.test.ts`
-- `desktop/src/lib/acp-response-parsers.test.ts`
-- `desktop/src/components/StatusBarHover.test.ts`
-- `desktop/src/components/DesktopVisualRegressions.test.ts`
-- `desktop/src/lib/runtime-status.test.ts`
-- `desktop/src/app/session-runtime-status.test.ts`
-- `tests/model-usage-status.test.ts`
-- `tests/anthropic-reset-credits.test.ts`
-
 ## Verification
 
 Focused Desktop Vitest, including a DST-observing timezone run for date helpers;

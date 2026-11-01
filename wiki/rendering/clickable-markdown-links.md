@@ -39,13 +39,6 @@ Keep assistant and user markdown links clickable even when their destinations ar
 - Continue detecting plain file paths and plain web URLs from visible row text.
 - Leave links inside inline code and unsupported URL schemes literal.
 
-## Related files
-
-- `src/markdown-format.ts`
-- `src/app/rendering/conversation-entry-renderer.ts`
-- `src/app/rendering/render-controller.ts`
-- `src/app/screen/mouse-controller.ts`
-
 ## Verification
 
 - Unit-test markdown parsing and wrapped range propagation.
@@ -63,13 +56,5 @@ Keep assistant and user markdown links clickable even when their destinations ar
 - Confirmed by code: markdown anchors were rendered literally and wrapped before per-row link detection.
 - Confirmed by reproduction: the supplied long destinations split across 6–10 rows and produced zero detected links at widths 80, 120, and 180.
 - Confirmed by environment: direct `zed --existing path:line:column` opening succeeds.
-
-## Implementation
-
-- `src/markdown-format.ts`
-
-## Tests
-
-- `tests/markdown-format.test.ts`
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"8f67593bfe47950160c843acc7b39add7276e5409394f6139f538e9b4ae8e732","checkedAt":"2026-10-31T11:04:37.815Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":62,"reportLanguage":"ru"} -->

@@ -25,48 +25,48 @@ extension commands, prompt templates and `/skill:*` pass through to pi.
 Zed (Agent Panel)  <--ACP JSON-RPC over stdio-->  pix-acp  <--JSONL RPC over stdio-->  pi RPC entry
 ```
 
-- `src/main.ts` — entry point; wires stdio streams, config, logger.
+- Entry point; wires stdio streams, config, logger.
 - `src/acp/pix-acp-agent.ts` — ACP method handlers, the session registry
   (one ACP session → one `pi` process), and the prompt-run lifecycle
   (`agent_start`/`agent_end`/`agent_settled` → ACP stop reason).
-- `src/acp/event-translator.ts` — stateful translation of pi
+- Stateful translation of pi
   `JsonAgentSessionEvent`s into ACP `session/update` notifications
   (message/thought chunks, tool calls with titles/kinds/locations, structured
   edit/write diffs).
-- `src/acp/session-update-coalescer.ts` — coalesces adjacent streamed text
+- Coalesces adjacent streamed text
   chunks and content-only tool progress updates per session. Synchronous bursts
   flush at the end of the current microtask (without timer latency); clients may
   receive fewer, larger text chunks than the underlying pi deltas.
-- `src/acp/ui-request-bridge.ts` — maps pi `extension_ui_request` dialogs to
+- Maps pi `extension_ui_request` dialogs to
   ACP form elicitations and the answers back to `extension_ui_response`
   lines on pi's stdin. Extension `notify` feedback from commands and background
   warning/error notifications (including startup failures) becomes live system
   transcript rows. Background info/status/widget updates are ignored except for
   Pix's structured state channels.
-- `src/acp/session-map.ts` — persistent ACP↔pi session map
+- Persistent ACP↔pi session map
   (`~/.pi/agent/pix-acp/sessions.json` by default) backing
   `session/list`/`load`/`resume`/`fork`/`delete` across adapter restarts.
-- `src/acp/config-options.ts` — pi model & thinking level surfaced as ACP
+- Pi model & thinking level surfaced as ACP
   `configOptions` (grouped provider/model select, thought-level select) and
   applied via `session/set_config_option`.
-- `src/acp/session-replay.ts` — replays persisted pi history on
+- Replays persisted pi history on
   `session/load` as `user_message_chunk`/`agent_message_chunk` updates plus
   `tool_call`/`tool_call_update` pairs with their results.
-- `src/acp/slash-commands.ts` — interception of pi TUI built-in slash
+- Interception of pi TUI built-in slash
   commands (`/compact`, `/name`, `/export`, `/autocompact`, `/steering`,
   `/follow-up`, `/model`, `/thinking`) inside `session/prompt`; anything
   else starting with `/` (extension commands, templates, `/skill:*`) is
   forwarded to pi unchanged.
-- `src/pi/pi-rpc-client.ts` — thin wrapper around the SDK `RpcClient`
+- Thin wrapper around the SDK `RpcClient`
   (`@earendil-works/pi-coding-agent`) that spawns its Node-readable RPC entry.
-- `src/pi/rpc-stdout.ts` / `src/pi/jsonl-reader.ts` — retain SDK RPC parsing,
+- Retain SDK RPC parsing,
   request correlation and timeouts while replacing SDK 1.4.0's quadratic stdout
   line framing with LF-delimited, linear chunk scanning. Startup synchronously
   takes over the SDK reader before its first await so startup output is not
   missed; the private SDK fields and startup ordering are a compatibility seam
   to recheck on SDK upgrades. The reader handles UTF-8 chunk boundaries, CRLF,
   final unterminated records, and stream disposal/close.
-- `src/config.ts` / `src/logging.ts` — env config and stderr-only logging.
+- Env config and stderr-only logging.
 
 **stdout is reserved for the protocol stream**; all diagnostics go to stderr.
 

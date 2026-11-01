@@ -40,34 +40,11 @@ Make a packaged Pix Desktop usable on a clean computer without requiring a syste
 - **Codex ChatGPT OAuth:** first-run may detect file-backed OAuth metadata but does not copy access/refresh tokens into Pi. Codex and Pi can refresh/rotate OAuth credentials independently, so duplicating the token record would create two mutable auth stores. Pi must authenticate that provider through its own supported auth flow until a shared-source bridge exists.
 - Bootstrap responses and UI messages may contain paths, provider IDs, import statuses, and versions, but never API keys, access tokens, or refresh tokens.
 
-## Related files
-
-- scripts/release/bootstrap.mjs
-- scripts/release/node-runtime.mjs
-- scripts/release/prepare.mjs
-- desktop/src-tauri/src/backend_runtime.rs
-- desktop/src-tauri/src/desktop_bootstrap.rs
-- desktop/src-tauri/src/lib.rs
-- desktop/src/lib/desktop-bootstrap.ts
-- desktop/src/components/DesktopBootstrapDialog.svelte
-- desktop/src/App.svelte
-- external/pi-tools-suite/src/opencode-import/importer.ts
-
 ## Verification
 
 - Release bootstrap tests use isolated HOME/agent/OpenCode/Codex directories, verify OAuth secrets are absent from bootstrap output, exercise Codex API-key import, and exercise the real tools-suite OpenCode importer with non-overwrite assertions.
 - Rust tests verify bundled/development runtime resolution.
 - Desktop typecheck and Vitest cover the surrounding frontend contracts; the full Desktop Rust suite remains the native gate.
 - Release packaging/smoke must continue to validate actual native artifacts on each supported target.
-
-## Implementation
-
-- `desktop/src-tauri/src/desktop_bootstrap.rs`
-- `scripts/release/bootstrap.mjs`
-
-## Tests
-
-- `desktop/src-tauri/src/desktop_bootstrap.rs`
-- `scripts/release/test/bootstrap.test.mjs`
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"38194677253e5872b7dff24b090fddf90b620bf88af8ad5b1b4408e4e972c5c2","checkedAt":"2026-10-30T23:07:51.152Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":56,"reportLanguage":"ru"} -->
