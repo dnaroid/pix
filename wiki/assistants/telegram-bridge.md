@@ -26,31 +26,81 @@ messages written in a topic go to that session as user messages.
 
 ## Setup
 
-1. Create a bot with [@BotFather](https://t.me/BotFather) and copy its token.
-2. Create a **private group**, enable **Topics** in its settings, add the bot
-   and make it an administrator with the *Manage topics* right.
-3. Write the credentials to `~/.config/pi/telegram-bridge.jsonc` (keep it
-   private, e.g. `chmod 600`):
+Telegram UI labels are given in English with the Russian client wording in
+parentheses.
+
+### 1. Create the bot
+
+1. Open [@BotFather](https://t.me/BotFather), send `/newbot`, choose a display
+   name and a username ending in `bot`. Copy the token
+   (`123456789:AA…`). Anyone with the token controls the bot: never commit it.
+2. Turn off group privacy: `/setprivacy` → select the bot → **Disable**. An
+   administrator bot already receives all group messages, but this removes the
+   "has no access to messages" (*не имеет доступа к сообщениям*) restriction
+   explicitly. The change applies only to groups the bot joins **afterwards**:
+   if the bot is already in the group, remove it and add it again.
+3. Optional: `/setcommands` with
+   `sessions - running Pix sessions`, `stop - stop the current run`,
+   `status - session state`, `id - chat and user ids`, `help - help`.
+
+### 2. Create the forum group
+
+1. Create a new **group** (not a channel) with only yourself, e.g. "Pix".
+2. Group settings (✏️ Edit / *Изменить*) → enable **Topics** (*Темы*). This
+   turns the group into a forum supergroup; the topic list replaces the chat.
+   Telegram shows the *Manage topics* admin right only after topics are on.
+3. Add the bot as a member, then **Administrators** (*Администраторы*) → **Add
+   admin** (*Добавить администратора*) → the bot. Required right:
+   **Manage topics** (*Управление темами*). Nothing else is needed: profile
+   changes, deleting/pinning messages, bans, invite links, stories, video
+   chats, tags, anonymity and adding admins can all stay off.
+4. Keep the group private and do not invite other people: every member listed
+   in `allowedUserIds` can make the agent act in your projects.
+
+### 3. Get the ids and write the credentials
+
+1. Create `~/.config/pi/telegram-bridge.jsonc` with only the token, and enable
+   the module (step 4). Open any Pix session so a broker starts.
+2. In the group's **General** topic send `/id`. The bot answers
+   `chat id: -100… (forum)` and `your user id: …`. If `(forum)` is missing,
+   topics are not enabled. If the bot does not answer, check `/telegram` in a
+   Pix session and the bot's admin right/privacy setting.
+3. Complete the file and protect it (`chmod 600 ~/.config/pi/telegram-bridge.jsonc`):
 
    ```jsonc
    {
-     "botToken": "123456:ABC…",
-     "chatId": -1001234567890,     // the forum group
-     "allowedUserIds": [11111111]  // who may drive sessions
+     "botToken": "123456789:AA…",
+     "chatId": -1001234567890,     // the forum group from /id
+     "allowedUserIds": [11111111]  // your user id from /id
    }
    ```
 
-   To find the ids, enable the module with only `botToken` set, then send `/id`
-   in the group: the bot answers with the chat id and your user id.
-4. Enable the module in `~/.config/pi/pi-tools-suite.jsonc` (or in Desktop
-   Settings → tools suite modules) and restart the sessions or `/reload`:
+4. Restart the open sessions (or run `/reload` in each). A topic appears per
+   running session; send `/sessions` in General to check.
 
-   ```jsonc
-   "modules": { "telegram-bridge": true }
-   ```
+There is no Desktop editor for this file: it holds a secret and is
+deliberately separate from the synced `pi-tools-suite.jsonc`.
 
-**Disabling:** set `"telegram-bridge": false` in the same `modules` map (or
-untoggle it in Settings). `"enabled": false` in `telegram-bridge.jsonc` also
+### 4. Enable the module
+
+**In Pix Desktop:** open **Settings** in the sidebar → **Tools Suite** →
+**General** → **Modules**, check **telegram-bridge** and save. The setting is
+written to `~/.config/pi/pi-tools-suite.jsonc` as
+`"modules": { "telegram-bridge": true }`. Already running sessions load
+extensions at start, so reopen them or run `/reload` in each session.
+
+**In a config file (TUI or Desktop):** add to `~/.config/pi/pi-tools-suite.jsonc`
+and restart/`/reload` the sessions:
+
+```jsonc
+"modules": { "telegram-bridge": true }
+```
+
+Run `/telegram` in a session to see whether the bridge is connected, whether
+this process is the broker and which setup step is missing.
+
+**Disabling:** uncheck **telegram-bridge** in Settings → Tools Suite → General
+→ Modules, or set `"telegram-bridge": false` in the same `modules` map. `"enabled": false` in `telegram-bridge.jsonc` also
 deactivates it without removing the credentials. Environment overrides:
 `PIX_TELEGRAM_BOT_TOKEN`, `PIX_TELEGRAM_CHAT_ID`,
 `PIX_TELEGRAM_ALLOWED_USER_IDS` (comma-separated), `PIX_TELEGRAM_BRIDGE_CONFIG`
