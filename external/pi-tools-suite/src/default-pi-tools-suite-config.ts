@@ -38,6 +38,9 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
     // the session after changing module switches.
     "codemode": true,
     "credential-firewall": false,
+    // Telegram bridge: one forum topic per running Pix session. Needs bot
+    // credentials in ~/.config/pi/telegram-bridge.jsonc; set true to enable.
+    "telegram-bridge": false,
     // Safe non-store cleanup: removes only SDK truncation metadata text proven
     // to duplicate the already-visible result. Set false to disable it.
     "truncation-metadata-normalizer": true

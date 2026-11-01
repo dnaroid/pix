@@ -40,6 +40,7 @@ export the full Pi parent prompt, `coding-discipline`, DCP or other
 
 - `src/coding-discipline` — injects a deduplicated silent-mode and quality-discipline block at the very top of the main-session per-turn system prompt for GLM main-session models only (`isGlmModel`) immediately before the LLM request; text-only GLM models get the `lookup` bridge while vision-capable `zai/glm-5.3-flash` inspects images directly; non-GLM models are left untouched; disabled for async sub-agents
 - `src/credential-firewall` — opt-in secret firewall for high-confidence outbound/session credential redaction; disabled by default
+- `src/telegram-bridge` — opt-in Telegram bot bridge: one forum topic per running Desktop/TUI session across projects, final answers out, messages in; disabled by default, see [the bridge contract](../assistants/telegram-bridge.md)
 - `src/ast-grep` — `ast_grep` / `ast_apply`
 - `src/background-shell` — background shell jobs: `run_in_background` on `Bash`/`bash`/`shell`, `shell_output` (lists jobs when `job_id` is omitted)/`shell_kill` (Claude aliases `BashOutput`/`KillShell`), `/background-jobs`, per-session process-group lifecycle, orphan detection, exit notices and the Desktop/TUI job indicator; see [the background shell contract](background-shell.md)
 - `src/brainstorm` — `/brainstorm [--mode auto|brainstorm|audit] <topic>` forwards to the explicit `brainstorm` skill; five-round council via ordinary `subagents` and a deterministic helper, with reviewed parent synthesis and no implementation. Protocol files live under configured council storage (default `.pi/brainstorms/`). No dedicated tool, ACP host or Desktop council UI. See [the council contract](../assistants/brainstorm.md).
@@ -1268,6 +1269,7 @@ pi-tools-suite/
     prompt-commands/
     resource-registry/
     credential-firewall/
+    telegram-bridge/
     codex-reasoning-fix/
   docs/
   licenses/
