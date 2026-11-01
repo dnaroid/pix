@@ -6,7 +6,7 @@ import { publishRpcSessionState } from "../lib/rpc-session-state.js";
 import { diagnosticErrorType, suiteDiagnostics } from "../lib/suite-diagnostics.js";
 import { brokerSocketPath, TelegramBridgeBrokerHost } from "./broker-host.js";
 import { TelegramBridgeClient, type BridgeClientOptions } from "./client.js";
-import { loadTelegramBridgeConfig, type TelegramBridgeConfig } from "./config.js";
+import { loadTelegramBridgeConfig, writeTelegramBridgeConfigTemplate, type TelegramBridgeConfig, type TelegramBridgeConfigResult } from "./config.js";
 import type { BrokerMessage, NotifyKind } from "./protocol.js";
 
 /** Structured-state channel ACP turns into a live user row in Desktop. */
@@ -50,6 +50,7 @@ interface Runtime {
 
 export interface TelegramBridgeExtensionDeps {
 	loadConfig?: typeof loadTelegramBridgeConfig;
+	writeConfigTemplate?: (path: string) => boolean;
 	createClient?: (options: BridgeClientOptions) => BridgeClient;
 	env?: Env;
 }
@@ -108,25 +109,38 @@ function registerTelegramBridge(pi: ExtensionAPI, deps: TelegramBridgeExtensionD
 		}
 	}
 
+	function loadConfig(): TelegramBridgeConfigResult {
+		return (deps.loadConfig ?? loadTelegramBridgeConfig)({ env });
+	}
+
+	function setupProblem(loaded: TelegramBridgeConfigResult): string | undefined {
+		if (!loaded.ok) return `${loaded.detail} (${loaded.path})`;
+		return loaded.config.chatId === undefined ? "chatId is not set: send /id in your forum group to get it" : undefined;
+	}
+
 	function ensureRuntime(cwd: string): Runtime | undefined {
 		if (runtime) return runtime;
-		const loaded = (deps.loadConfig ?? loadTelegramBridgeConfig)({ env });
-		if (!loaded.ok) {
-			const problem = `${loaded.detail} (${loaded.path})`;
-			// An enabled module without credentials is a setup problem worth one record.
-			if (configProblem !== problem) report("warn", "config-unavailable", {}, cwd);
-			configProblem = problem;
-			return undefined;
-		}
-		configProblem = loaded.config.chatId === undefined ? "chatId is not set: send /id in your forum group to get it" : undefined;
+		const loaded = loadConfig();
+		const problem = setupProblem(loaded);
+		// An enabled module without credentials is a setup problem worth one record.
+		if (!loaded.ok && configProblem !== problem) report("warn", "config-unavailable", {}, cwd);
+		configProblem = problem;
+		if (!loaded.ok) return undefined;
 		const config = loaded.config;
 		const client = (deps.createClient ?? ((options) => new TelegramBridgeClient(options)))({
 			socketPath: brokerSocketPath(config.stateDir),
 			onMessage: handleBrokerMessage,
 			tryBecomeBroker: async () => {
+				// Fresh credentials: the previous broker may have stopped because they changed.
+				const current = loadConfig();
+				if (!current.ok || current.config.stateDir !== config.stateDir) return false;
 				try {
-					return Boolean(await TelegramBridgeBrokerHost.tryAcquire(config, {
+					return Boolean(await TelegramBridgeBrokerHost.tryAcquire(current.config, {
 						report: (level, event, fields) => report(level, event, fields, cwd),
+						reloadConfig: () => {
+							const next = loadConfig();
+							return next.ok ? next.config : undefined;
+						},
 					}));
 				} catch (error) {
 					report("warn", "broker-start-failed", { errorType: diagnosticErrorType(error) }, cwd);
@@ -136,6 +150,22 @@ function registerTelegramBridge(pi: ExtensionAPI, deps: TelegramBridgeExtensionD
 		});
 		runtime = { config, client };
 		return runtime;
+	}
+
+	function activate(context: ExtensionContext): void {
+		if (!isBridgeEligible(context, env)) return;
+		const active = ensureRuntime(context.cwd);
+		const id = context.sessionManager.getSessionId();
+		if (!active || !id) return;
+		sessionId = id;
+		const title = pi.getSessionName();
+		active.client.send({
+			t: "register",
+			sessionId: id,
+			project: basename(context.cwd) || context.cwd,
+			cwd: context.cwd,
+			...(title ? { title } : {}),
+		});
 	}
 
 	async function teardown(): Promise<void> {
@@ -150,19 +180,7 @@ function registerTelegramBridge(pi: ExtensionAPI, deps: TelegramBridgeExtensionD
 		ctx = context;
 		lastAnswer = undefined;
 		lastError = undefined;
-		if (!isBridgeEligible(context, env)) return;
-		const active = ensureRuntime(context.cwd);
-		const id = context.sessionManager.getSessionId();
-		if (!active || !id) return;
-		sessionId = id;
-		const title = pi.getSessionName();
-		active.client.send({
-			t: "register",
-			sessionId: id,
-			project: basename(context.cwd) || context.cwd,
-			cwd: context.cwd,
-			...(title ? { title } : {}),
-		});
+		activate(context);
 	});
 
 	pi.on("session_info_changed", (event) => {
@@ -203,15 +221,44 @@ function registerTelegramBridge(pi: ExtensionAPI, deps: TelegramBridgeExtensionD
 	});
 
 	pi.registerCommand("telegram", {
-		description: "Show Telegram bridge status for this session.",
+		description: "Telegram bridge status; creates the credentials template and activates the bridge after setup.",
 		handler: async (_args, context) => {
+			if (!isBridgeEligible(context, env)) {
+				context.ui.notify("Telegram bridge is inactive for this kind of session.", "warning");
+				return;
+			}
+			let loaded = loadConfig();
+			if (!loaded.ok && loaded.fileMissing) {
+				const path = loaded.path;
+				try {
+					if ((deps.writeConfigTemplate ?? writeTelegramBridgeConfigTemplate)(path)) {
+						context.ui.notify([
+							`Created ${path}.`,
+							"Paste the bot token from @BotFather into \"botToken\", save, and run /telegram again.",
+						].join("\n"), "info");
+						return;
+					}
+					loaded = loadConfig();
+				} catch (error) {
+					report("warn", "config-template-failed", { errorType: diagnosticErrorType(error) }, context.cwd);
+					context.ui.notify(`Could not create ${path}. Create it by hand (see the Telegram bridge wiki page).`, "warning");
+					return;
+				}
+			}
+			// Activate without /reload once credentials exist, and apply edits in this process's broker now.
+			if (!runtime) {
+				ctx ??= context;
+				activate(ctx);
+			}
+			TelegramBridgeBrokerHost.current()?.refreshConfig();
+			configProblem = setupProblem(loaded);
 			const host = TelegramBridgeBrokerHost.current();
 			const lines = runtime
 				? [
 					`Telegram bridge: ${runtime.client.isConnected ? "connected" : "connecting"}${host ? " (this process is the broker)" : ""}.`,
 					...(configProblem ? [`Setup: ${configProblem}.`] : []),
 				]
-				: [`Telegram bridge is inactive${configProblem ? `: ${configProblem}` : isBridgeEligible(context, env) ? "." : " for this kind of session."}`];
+				: [`Telegram bridge is inactive${configProblem ? `: ${configProblem}` : "."}`];
 			context.ui.notify(lines.join("\n"), runtime && !configProblem ? "info" : "warning");
 		},
 	});

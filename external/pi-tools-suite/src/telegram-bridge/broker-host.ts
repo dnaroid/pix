@@ -19,6 +19,8 @@ export interface BrokerHostOptions {
 	closeGraceMs?: number;
 	/** Disable polling (tests drive updates directly). */
 	poll?: boolean;
+	/** Re-read credentials; undefined keeps the current ones (missing/invalid file). */
+	reloadConfig?: () => TelegramBridgeConfig | undefined;
 }
 
 /** Unix socket on macOS/Linux; per-user named pipe on Windows. */
@@ -63,7 +65,8 @@ function loadState(file: string): BrokerState {
 				}
 			}
 		}
-		return { offset: Number.isSafeInteger(raw.offset) ? raw.offset! : 0, topics };
+		return { offset: Number.isSafeInteger(raw.offset) ? raw.offset! : 0,
+			...(Number.isSafeInteger(raw.chatId) ? { chatId: raw.chatId! } : {}), topics };
 	} catch {
 		return { offset: 0, topics: {} };
 	}
@@ -89,7 +92,7 @@ export class TelegramBridgeBrokerHost {
 	private polling: Promise<void> | undefined;
 
 	private constructor(
-		private readonly config: TelegramBridgeConfig,
+		private config: TelegramBridgeConfig,
 		private readonly paths: { lock: string; socket: string; state: string },
 		private readonly state: BrokerState,
 		private readonly call: TelegramCall,
@@ -216,6 +219,7 @@ export class TelegramBridgeBrokerHost {
 			await this.call("deleteWebhook", { drop_pending_updates: false }, signal);
 		} catch { /* getUpdates reports any real problem. */ }
 		while (!signal.aborted) {
+			if (this.refreshConfig() === "restarting") return;
 			try {
 				const updates = await this.call<TelegramUpdate[]>("getUpdates", {
 					offset: this.state.offset,
@@ -241,6 +245,28 @@ export class TelegramBridgeBrokerHost {
 				await sleep(delay, signal);
 			}
 		}
+	}
+
+	/**
+	 * Pick up edits of telegram-bridge.jsonc (checked before every poll, i.e.
+	 * at most every poll timeout). A new token or state directory restarts the
+	 * broker: clients reconnect and the next owner starts with fresh config.
+	 */
+	refreshConfig(): "unchanged" | "updated" | "restarting" {
+		if (this.disposed) return "restarting";
+		const next = this.options.reloadConfig?.();
+		if (!next) return "unchanged";
+		if (next.botToken !== this.config.botToken || next.stateDir !== this.config.stateDir) {
+			this.options.report?.("info", "broker-restart-config");
+			void this.dispose();
+			return "restarting";
+		}
+		const sameUsers = next.allowedUserIds.length === this.config.allowedUserIds.length
+			&& next.allowedUserIds.every((id, index) => id === this.config.allowedUserIds[index]);
+		if (next.chatId === this.config.chatId && sameUsers) return "unchanged";
+		this.config = next;
+		this.broker.reconfigure({ ...(next.chatId !== undefined ? { chatId: next.chatId } : {}), allowedUserIds: next.allowedUserIds });
+		return "updated";
 	}
 
 	private scheduleSave(): void {
