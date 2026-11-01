@@ -59,13 +59,19 @@ parentheses.
 
 ### 3. Get the ids and write the credentials
 
-1. Create `~/.config/pi/telegram-bridge.jsonc` with only the token, and enable
-   the module (step 4). Open any Pix session so a broker starts.
-2. In the group's **General** topic send `/id`. The bot answers
+Enable the module first (step 4), then in any Pix session:
+
+1. Run `/telegram`. When `~/.config/pi/telegram-bridge.jsonc` does not exist,
+   it is created from a commented template (mode 0600, never overwritten) and
+   the path is shown.
+2. Paste the bot token into `"botToken"`, save, and run `/telegram` again. The
+   bridge activates without a reload and reports `chatId is not set` (setup
+   mode, the broker only answers `/id`).
+3. In the group's **General** topic send `/id`. The bot answers
    `chat id: -100… (forum)` and `your user id: …`. If `(forum)` is missing,
-   topics are not enabled. If the bot does not answer, check `/telegram` in a
-   Pix session and the bot's admin right/privacy setting.
-3. Complete the file and protect it (`chmod 600 ~/.config/pi/telegram-bridge.jsonc`):
+   topics are not enabled. If the bot does not answer, see
+   [troubleshooting](#troubleshooting).
+4. Complete the file:
 
    ```jsonc
    {
@@ -75,8 +81,14 @@ parentheses.
    }
    ```
 
-4. Restart the open sessions (or run `/reload` in each). A topic appears per
-   running session; send `/sessions` in General to check.
+5. Run `/telegram` once more (or wait up to 30 s): the broker re-reads the
+   file before every poll, so `chatId`/`allowedUserIds` edits apply without
+   restarting sessions, and topics appear for every running session. A changed
+   `botToken` restarts the broker. Send `/sessions` in General to check.
+
+The file can also be created by hand with the same content. Sessions that
+started before the file existed activate on their next `/telegram`, `/reload`
+or restart.
 
 There is no Desktop editor for this file: it holds a secret and is
 deliberately separate from the synced `pi-tools-suite.jsonc`.
@@ -98,6 +110,19 @@ and restart/`/reload` the sessions:
 
 Run `/telegram` in a session to see whether the bridge is connected, whether
 this process is the broker and which setup step is missing.
+
+### Troubleshooting
+
+- **No `/telegram` command:** the module is not loaded. Check the Modules
+  checkbox and `/reload`; a Desktop build older than the module does not have
+  it.
+- **`inactive: …`:** the message names the config problem and the file path.
+- **Bot silent while `/telegram` says connected:** check the shared log,
+  `grep -h 'suite.telegram' ~/.config/pi/logs/*.jsonl | tail`. `poll-failed`
+  at error level means the token was rejected; `poll-conflict` means another
+  process (or a webhook) polls the same bot.
+- Desktop may restore session tabs without starting their runtime; send a
+  message or `/telegram` in a session so at least one process runs the broker.
 
 **Disabling:** uncheck **telegram-bridge** in Settings → Tools Suite → General
 → Modules, or set `"telegram-bridge": false` in the same `modules` map. `"enabled": false` in `telegram-bridge.jsonc` also

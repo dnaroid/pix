@@ -1,6 +1,6 @@
-import { readFileSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readFileSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parse as parseJsonc } from "jsonc-parser";
 
 /**
@@ -22,7 +22,7 @@ export interface TelegramBridgeConfig {
 
 export type TelegramBridgeConfigResult =
 	| { ok: true; config: TelegramBridgeConfig }
-	| { ok: false; reason: "missing" | "invalid"; detail: string; path: string };
+	| { ok: false; reason: "missing" | "invalid"; detail: string; path: string; fileMissing?: boolean };
 
 type Env = Record<string, string | undefined>;
 
@@ -63,6 +63,7 @@ export function loadTelegramBridgeConfig(options: LoadTelegramBridgeConfigOption
 	const path = telegramBridgeConfigPath(env, home);
 	const read = options.readFile ?? ((file: string) => readFileSync(file, "utf8"));
 	let raw: Record<string, unknown> = {};
+	let fileMissing = false;
 	try {
 		const parsed = parseJsonc(read(path)) as unknown;
 		if (parsed !== undefined && (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))) {
@@ -73,11 +74,15 @@ export function loadTelegramBridgeConfig(options: LoadTelegramBridgeConfigOption
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
 			return { ok: false, reason: "invalid", detail: "config file is unreadable", path };
 		}
+		fileMissing = true;
 	}
 	if (raw.enabled === false) return { ok: false, reason: "missing", detail: "disabled by \"enabled\": false", path };
 
 	const botToken = (env.PIX_TELEGRAM_BOT_TOKEN?.trim() || (typeof raw.botToken === "string" ? raw.botToken.trim() : ""));
-	if (!botToken) return { ok: false, reason: "missing", detail: "botToken is not configured", path };
+	if (!botToken) {
+		return { ok: false, reason: "missing", detail: fileMissing ? "config file does not exist" : "botToken is not configured", path,
+			...(fileMissing ? { fileMissing } : {}) };
+	}
 	if (!/^\d{3,20}:[A-Za-z0-9_-]{20,}$/.test(botToken)) return { ok: false, reason: "invalid", detail: "botToken has an unexpected format", path };
 
 	const chatSource = env.PIX_TELEGRAM_CHAT_ID?.trim() || raw.chatId;
@@ -98,4 +103,32 @@ export function loadTelegramBridgeConfig(options: LoadTelegramBridgeConfigOption
 			stateDir: telegramBridgeStateDir(env, home),
 		},
 	};
+}
+
+export const TELEGRAM_BRIDGE_CONFIG_TEMPLATE = `{
+  // Pix Telegram bridge. Setup guide: wiki/assistants/telegram-bridge.md
+  // 1. Paste the token from @BotFather, then run /telegram in a Pix session.
+  "botToken": "",
+  // 2. Send /id in the General topic of your forum group and copy both ids:
+  // "chatId": -1001234567890,
+  "allowedUserIds": []
+  // Set "enabled": false to pause the bridge without removing credentials.
+}
+`;
+
+/**
+ * Create the credentials template (0600) when absent. Never overwrites:
+ * returns false when the file already exists.
+ */
+export function writeTelegramBridgeConfigTemplate(path: string): boolean {
+	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+	let fd: number;
+	try {
+		fd = openSync(path, "wx", 0o600);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+		throw error;
+	}
+	try { writeSync(fd, TELEGRAM_BRIDGE_CONFIG_TEMPLATE); } finally { closeSync(fd); }
+	return true;
 }

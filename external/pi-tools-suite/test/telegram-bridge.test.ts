@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { TelegramBridgeBroker, type BrokerConnection, type BrokerState } from "../src/telegram-bridge/broker.js";
 import { acquireLock, TelegramBridgeBrokerHost } from "../src/telegram-bridge/broker-host.js";
 import { TelegramBridgeClient } from "../src/telegram-bridge/client.js";
-import { loadTelegramBridgeConfig, type TelegramBridgeConfig } from "../src/telegram-bridge/config.js";
+import { loadTelegramBridgeConfig, TELEGRAM_BRIDGE_CONFIG_TEMPLATE, writeTelegramBridgeConfigTemplate, type TelegramBridgeConfig } from "../src/telegram-bridge/config.js";
 import { parseCommand, projectIconColor, splitMessage, topicLink, topicName } from "../src/telegram-bridge/format.js";
 import { assistantText, createTelegramBridgeExtension, isBridgeEligible, TELEGRAM_INBOUND_CHANNEL } from "../src/telegram-bridge/index.js";
 import { LineDecoder, parseClientMessage, type BrokerMessage, type ClientMessage } from "../src/telegram-bridge/protocol.js";
@@ -127,6 +127,17 @@ describe("telegram-bridge config", () => {
 			homeDir: "/home/me", readFile: read(file),
 		});
 		expect(overridden.ok && overridden.config).toMatchObject({ chatId: -1009, allowedUserIds: [1, 2], stateDir: "/state" });
+	});
+
+	test("flags a missing file and writes a template that never overwrites", () => {
+		expect(loadTelegramBridgeConfig({ env: {}, homeDir: "/h", readFile: read(undefined) })).toMatchObject({ fileMissing: true, detail: "config file does not exist" });
+		const file = join(tempDir(), "nested", "telegram-bridge.jsonc");
+		expect(writeTelegramBridgeConfigTemplate(file)).toBe(true);
+		expect(writeTelegramBridgeConfigTemplate(file)).toBe(false);
+		const parsed = loadTelegramBridgeConfig({ env: { PIX_TELEGRAM_BRIDGE_CONFIG: file }, homeDir: "/h" });
+		expect(parsed).toMatchObject({ ok: false, reason: "missing", detail: "botToken is not configured" });
+		expect("fileMissing" in parsed).toBe(false);
+		if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
 	});
 
 	test("rejects malformed values and honors enabled:false", () => {
@@ -354,6 +365,49 @@ describe("telegram-bridge broker", () => {
 	});
 });
 
+describe("telegram-bridge broker reconfiguration", () => {
+	test("setup mode creates topics for live sessions once chatId is configured", async () => {
+		const { broker, telegram, state } = makeBroker({ chatId: undefined });
+		const a = connection();
+		broker.handleClientMessage(a, register("s1", "/work/pix"));
+		await broker.idle();
+		expect(telegram.calls).toEqual([]);
+		broker.reconfigure({ chatId: CHAT, allowedUserIds: [USER] });
+		await broker.idle();
+		expect(telegram.calls.map((call) => call.method)).toEqual(["createForumTopic"]);
+		expect(state.chatId).toBe(CHAT);
+		broker.handleUpdate(topicMessage(100, "now routed"));
+		expect(a.messages).toEqual([expect.objectContaining({ t: "prompt", text: "now routed" })]);
+	});
+
+	test("a different chat starts a fresh topic map; a legacy state keeps its topics", async () => {
+		const { broker, telegram, state } = makeBroker();
+		const a = connection();
+		broker.handleClientMessage(a, register("s1", "/work/pix"));
+		await broker.idle();
+		broker.reconfigure({ chatId: -100999, allowedUserIds: [USER] });
+		await broker.idle();
+		expect(telegram.calls.filter((call) => call.method === "createForumTopic").map((call) => call.params.chat_id)).toEqual([CHAT, -100999]);
+		expect(state).toMatchObject({ chatId: -100999, topics: { s1: { threadId: 101 } } });
+
+		const legacy: BrokerState = { offset: 0, topics: { old: { threadId: 5, name: "x", closed: true, updatedAt: 0 } } };
+		new TelegramBridgeBroker({ chatId: CHAT, allowedUserIds: [], send: telegram.send, state: legacy, saveState: () => {} });
+		expect(legacy).toMatchObject({ chatId: CHAT, topics: { old: { threadId: 5 } } });
+	});
+
+	test("an updated allowlist applies to the next message", async () => {
+		const { broker } = makeBroker();
+		const a = connection();
+		broker.handleClientMessage(a, register("s1", "/work/pix"));
+		await broker.idle();
+		broker.handleUpdate(topicMessage(100, "first", 777));
+		expect(a.messages).toEqual([]);
+		broker.reconfigure({ chatId: CHAT, allowedUserIds: [USER, 777] });
+		broker.handleUpdate(topicMessage(100, "second", 777));
+		expect(a.messages).toHaveLength(1);
+	});
+});
+
 describe("telegram-bridge host and client", () => {
 	function hostConfig(stateDir: string): TelegramBridgeConfig {
 		return { botToken: TOKEN, chatId: CHAT, allowedUserIds: [USER], stateDir };
@@ -408,6 +462,23 @@ describe("telegram-bridge host and client", () => {
 		expect(received[0]).toMatchObject({ t: "prompt", sessionId: "s1", text: "from phone" });
 	});
 
+	test.skipIf(process.platform === "win32")("the broker picks up edited credentials and restarts on a new token", async () => {
+		const dir = tempDir();
+		let current: TelegramBridgeConfig | undefined = { ...hostConfig(dir), chatId: undefined as never };
+		delete (current as { chatId?: number }).chatId;
+		const host = await TelegramBridgeBrokerHost.tryAcquire(current, { call: silentCall, poll: false, pid: 3001, reloadConfig: () => current });
+		hosts.push(host!);
+		expect(host!.refreshConfig()).toBe("unchanged");
+		current = hostConfig(dir);
+		expect(host!.refreshConfig()).toBe("updated");
+		current = undefined;
+		expect(host!.refreshConfig()).toBe("unchanged");
+		current = { ...hostConfig(dir), botToken: "999999:ZYXWVUTSRQPONMLKJIHGFEDCBA_zyx" };
+		expect(host!.refreshConfig()).toBe("restarting");
+		expect(TelegramBridgeBrokerHost.current()).toBeUndefined();
+		await until(() => !existsSync(join(dir, "broker.lock")), "lock release");
+	});
+
 	test("a second process defers to a live broker", async () => {
 		const dir = tempDir();
 		writeFileSync(join(dir, "broker.lock"), "424242");
@@ -432,15 +503,17 @@ describe("telegram-bridge extension", () => {
 		expect(assistantText({ role: "assistant", content: [], stopReason: "error", errorMessage: "429" })).toEqual({ text: "", error: "429" });
 	});
 
-	function harness(options: { idle?: boolean } = {}) {
+	function harness(options: { idle?: boolean; configFile?: string } = {}) {
 		const handlers = new Map<string, (event: any, ctx: any) => unknown>();
+		const commands = new Map<string, (args: string, ctx: any) => Promise<void>>();
+		const notices: Array<{ text: string; level: string }> = [];
 		const userMessages: Array<{ text: unknown; options: unknown }> = [];
 		const widgets: unknown[] = [];
 		let aborted = 0;
 		let idle = options.idle ?? true;
 		const pi = {
 			on: (name: string, handler: (event: any, ctx: any) => unknown) => { handlers.set(name, handler); },
-			registerCommand: () => {},
+			registerCommand: (name: string, command: { handler: (args: string, ctx: any) => Promise<void> }) => { commands.set(name, command.handler); },
 			getSessionName: () => "Auth",
 			sendUserMessage: (text: unknown, opts?: unknown) => { userMessages.push({ text, options: opts }); },
 		};
@@ -451,11 +524,17 @@ describe("telegram-bridge extension", () => {
 			sessionManager: { getSessionId: () => "s1" },
 			isIdle: () => idle,
 			abort: () => { aborted++; },
-			ui: { setWidget: (_key: string, lines: unknown) => widgets.push(lines) },
+			ui: {
+				setWidget: (_key: string, lines: unknown) => widgets.push(lines),
+				notify: (text: string, level: string) => notices.push({ text, level }),
+			},
 		};
+		const env = { PIX_ACP_SESSION_STATE_BRIDGE: "1", ...(options.configFile ? { PIX_TELEGRAM_BRIDGE_CONFIG: options.configFile } : {}) };
 		createTelegramBridgeExtension({
-			env: { PIX_ACP_SESSION_STATE_BRIDGE: "1" },
-			loadConfig: () => ({ ok: true, config: { botToken: TOKEN, chatId: CHAT, allowedUserIds: [USER], stateDir: "/unused" } }),
+			env,
+			loadConfig: options.configFile
+				? () => loadTelegramBridgeConfig({ env: { ...env, PIX_TELEGRAM_BRIDGE_DIR: "/unused" } })
+				: () => ({ ok: true, config: { botToken: TOKEN, chatId: CHAT, allowedUserIds: [USER], stateDir: "/unused" } }),
 			createClient: (clientOptions) => {
 				onMessage = clientOptions.onMessage;
 				return { send: (message: ClientMessage) => { sent.push(message); }, dispose: () => {}, isConnected: true };
@@ -463,7 +542,8 @@ describe("telegram-bridge extension", () => {
 		})(pi as never);
 		const emit = (name: string, event: unknown = {}) => handlers.get(name)?.({ type: name, ...(event as object) }, ctx);
 		return {
-			emit, sent, userMessages, widgets,
+			emit, sent, userMessages, widgets, notices,
+			command: (name: string) => commands.get(name)!("", ctx),
 			deliver: (message: BrokerMessage) => onMessage!(message),
 			setIdle: (value: boolean) => { idle = value; },
 			get aborted() { return aborted; },
@@ -513,5 +593,27 @@ describe("telegram-bridge extension", () => {
 			if (previous === undefined) delete process.env.PIX_ACP_SESSION_STATE_BRIDGE;
 			else process.env.PIX_ACP_SESSION_STATE_BRIDGE = previous;
 		}
+	});
+
+	test("/telegram creates the credentials template, then activates without a reload", async () => {
+		const file = join(tempDir(), "pi", "telegram-bridge.jsonc");
+		const h = harness({ configFile: file });
+		h.emit("session_start", { reason: "startup" });
+		expect(h.sent).toEqual([]);
+
+		await h.command("telegram");
+		expect(readFileSync(file, "utf8")).toBe(TELEGRAM_BRIDGE_CONFIG_TEMPLATE);
+		expect(h.notices.at(-1)!.text).toContain(`Created ${file}.`);
+
+		// Template exists but has no token yet: no overwrite, still inactive.
+		await h.command("telegram");
+		expect(readFileSync(file, "utf8")).toBe(TELEGRAM_BRIDGE_CONFIG_TEMPLATE);
+		expect(h.notices.at(-1)!.text).toContain("botToken is not configured");
+		expect(h.sent).toEqual([]);
+
+		writeFileSync(file, TELEGRAM_BRIDGE_CONFIG_TEMPLATE.replace('"botToken": ""', `"botToken": "${TOKEN}"`));
+		await h.command("telegram");
+		expect(h.sent[0]).toMatchObject({ t: "register", sessionId: "s1" });
+		expect(h.notices.at(-1)!.text).toContain("chatId is not set");
 	});
 });

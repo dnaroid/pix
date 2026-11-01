@@ -15,6 +15,8 @@ export interface TopicRecord {
 
 export interface BrokerState {
 	offset: number;
+	/** Chat the topic map belongs to; topics are reset when the chat changes. */
+	chatId?: number;
 	topics: Record<string, TopicRecord>;
 }
 
@@ -90,6 +92,36 @@ export class TelegramBridgeBroker {
 		this.setTimer = deps.setTimer ?? ((callback, ms) => { const timer = setTimeout(callback, ms); timer.unref?.(); return timer; });
 		this.clearTimer = deps.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
 		this.report = deps.report ?? (() => {});
+		this.adoptChat();
+	}
+
+	/**
+	 * Apply edited credentials without a restart: setup mode → configured chat
+	 * creates topics for every live session; a different chat starts a fresh
+	 * topic map; a new allowlist applies to the next update.
+	 */
+	reconfigure(access: { chatId?: number; allowedUserIds: readonly number[] }): void {
+		if (this.disposed) return;
+		this.deps.allowedUserIds = access.allowedUserIds;
+		if (access.chatId === this.deps.chatId) return;
+		if (access.chatId === undefined) delete this.deps.chatId;
+		else this.deps.chatId = access.chatId;
+		this.adoptChat();
+		for (const sessionId of this.sessions.keys()) {
+			this.serial(sessionId, () => this.ensureTopic(sessionId).then(() => undefined));
+		}
+	}
+
+	private adoptChat(): void {
+		const chatId = this.deps.chatId;
+		if (chatId === undefined || this.deps.state.chatId === chatId) return;
+		// A state file without a recorded chat predates this field: keep its topics.
+		if (this.deps.state.chatId !== undefined) {
+			this.deps.state.topics = {};
+			this.pending.clear();
+		}
+		this.deps.state.chatId = chatId;
+		this.deps.saveState();
 	}
 
 	get liveSessionIds(): string[] {
