@@ -50,6 +50,7 @@ mod git_identity;
 mod git_ignore;
 mod git_operations;
 mod git_process;
+mod image_viewer;
 mod git_remote_link;
 mod log_clear;
 mod log_reader;
@@ -8597,6 +8598,7 @@ pub fn run() {
         .manage(git_ci::GitCiProcessState::default())
         .manage(git_history_search::GitHistorySearchState::default())
         .manage(window_restore::WindowRestoreState::default())
+        .manage(image_viewer::State::default())
         .manage(desktop_tray_attention::State::default())
         .setup(move |app| {
             if let Ok(home) = app.path().home_dir() {
@@ -8649,6 +8651,7 @@ pub fn run() {
                 // Logical geometry is applied by window_restore at creation.
                 // The plugin only owns maximization, not physical-pixel resize.
                 .with_state_flags(StateFlags::MAXIMIZED)
+                .with_filter(|label| !image_viewer::is_viewer(label))
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
@@ -8668,6 +8671,8 @@ pub fn run() {
             dictation_shortcut::desktop_set_dictation_shortcut,
             window_restore::desktop_window_workspace,
             window_restore::desktop_open_project_window,
+            image_viewer::desktop_open_image_window,
+            image_viewer::desktop_image_window_payload,
             desktop_context_menu::desktop_edit,
             desktop_notification::desktop_send_notification,
             desktop_notification_sound::desktop_play_notification_sound,
@@ -8814,7 +8819,9 @@ pub fn run() {
             ..
         } = &event
         {
-            dictation_shortcut::window_focus_changed(handle, label, *focused);
+            if !image_viewer::is_viewer(label) {
+                dictation_shortcut::window_focus_changed(handle, label, *focused);
+            }
         }
         if let tauri::RunEvent::WindowEvent {
             label,
@@ -8822,7 +8829,7 @@ pub fn run() {
             ..
         } = &event
         {
-            if close_guard::prevent(handle, Some(label), None) {
+            if !image_viewer::is_viewer(label) && close_guard::prevent(handle, Some(label), None) {
                 api.prevent_close();
             }
         }
@@ -8844,6 +8851,10 @@ pub fn run() {
             ..
         } = &event
         {
+            image_viewer::destroyed(handle, label);
+            if image_viewer::is_viewer(label) {
+                return;
+            }
             desktop_notification::destroyed(handle, label);
             close_guard::destroyed(handle, label);
             dictation_shortcut::destroyed(label);

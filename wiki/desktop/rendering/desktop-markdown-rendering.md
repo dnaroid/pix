@@ -107,8 +107,22 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - In a Markdown file Preview editor, supported project and local images resolve through the existing confined Tauri media commands instead of remaining in a loading state.
 - Supported project, raw absolute and absolute `file://` image/video links in transcript
   Markdown render bounded inline media previews with their label as a caption.
-  Images lazy-load and open the media viewer when activated; videos expose native
-  inline playback controls and their caption opens the viewer.
+  Images lazy-load; activating the image or its caption retains the existing
+  media-viewer action. Transcript Markdown images and image attachments also
+  have a separate top-right magnifier button, shown on hover or keyboard focus
+  and always visible on non-hover devices, that opens a separate native image
+  window. Its initial size uses the image's natural dimensions and is scaled
+  down, without upscaling, to fit the current monitor's work area in logical
+  points; it is independent of the owner window's bounds. Each project window
+  owns at most one transient viewer: opening another image replaces it. The
+  viewer is draggable and resizable, and closes with its X, Escape, or Cmd+W;
+  closing the owner also closes it. It uses only the existing local asset URL
+  or inline image data and grants no additional file permissions. The viewer
+  starts no workbench runtime and is not restored with sessions or workspaces;
+  closing the last project window retains normal project restoration behavior.
+  The magnifier is available only in transcripts; the image frame's existing
+  click behavior is unchanged. Videos expose native inline playback controls
+  and their caption opens the viewer.
 - Inline video backgrounds, including WebKit's native paused-player backdrop,
   use the semantic Desktop background in both light and dark themes.
 - Local audio links in both `[label](../../../specs/track.mp3)` and `![label](../../../specs/track.mp3)` syntax
@@ -170,8 +184,8 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   (including composer resizing); hidden panes retain their last positive height.
   Inline project/local videos use the same content-width and viewport-height
   bounds, keeping natural proportions and native playback controls. Outside chat
-  the existing 48rem container and 28rem height caps remain. Remote images and
-  attachment thumbnails are unchanged. Unknown image dimensions use
+  the existing 48rem container and 28rem height caps remain. Remote images are
+  unchanged. Unknown image dimensions use
   a compact fallback until first load, not a fixed square.
   See [Desktop transcript scrolling](desktop-transcript-scrolling.md).
 - Unchanged project/local image previews retain their actual DOM subtree across

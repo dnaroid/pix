@@ -1193,6 +1193,15 @@ setInterval(() => process.stdout.write("\\r" + (++i)), 10);
 		expect(launchedApplicationSelector({ pid: 4242 }, "win32")).toEqual(["--owner-pid", "4242"]);
 	});
 
+	test("gates app menus separately and validates exact bounded title paths", () => {
+		const step = { action: "activateMenu", path: ["Tools", "Scripting..."] };
+		expect(validateDesktopStepCapabilities(step, ["menuActivation"])).toEqual(step);
+		expect(() => validateDesktopStepCapabilities(step, ["semanticActivation"])).toThrow(/menuActivation/);
+		for (const path of [undefined, "Tools", [], Array(9).fill("x"), [""], [42], ["x".repeat(257)], ["x\0y"]]) {
+			expect(() => validateDesktopStepCapabilities({ action: "activateMenu", path }, ["menuActivation"])).toThrow(/activateMenu/);
+		}
+	});
+
 	test("bundles capability-probed Windows UIA and Linux AT-SPI desktop helpers without shell evaluation", () => {
 		const windows = fs.readFileSync(windowsDesktopDriverSource, "utf8");
 		const linux = fs.readFileSync(linuxDesktopDriverSource, "utf8");

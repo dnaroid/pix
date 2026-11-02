@@ -138,6 +138,7 @@
                 ? "block h-auto max-h-80 w-auto max-w-full object-contain"
                 : "h-full w-full object-cover"}
               src={previewUrl(attachment)}
+              data-transcript-image
               data-image-path={attachment.path}
               alt=""
               onload={(event) => rememberDimensions(attachment, event)}

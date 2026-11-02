@@ -471,7 +471,12 @@ pub(crate) fn destroyed(app: &AppHandle, label: &str) {
     let mut registry = state.0.lock().unwrap();
     // Closing the last window is also an application exit: keep it for relaunch.
     // Once explicit Quit has frozen the snapshot, teardown cannot erase it.
-    registry.destroyed(label, !app.webview_windows().is_empty());
+    registry.destroyed(
+        label,
+        app.webview_windows()
+            .keys()
+            .any(|label| !crate::image_viewer::is_viewer(label)),
+    );
 }
 
 pub(crate) fn freeze(app: &AppHandle) -> Snapshot {

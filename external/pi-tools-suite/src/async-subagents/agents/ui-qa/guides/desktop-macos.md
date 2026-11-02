@@ -45,6 +45,13 @@ and perform scoped cleanup.
 
 ## Bounded TextEdit synthetic fixture
 
+For generic app targets, `menuActivation` enables `activateMenu` through the
+trusted driver. It resolves an exact title path in the selected app's menu bar,
+opens each submenu, and presses the final item with AXPress. Missing, ambiguous
+or disabled items fail; errors list available titles for discovery. It never
+searches another application's menu bar or uses coordinate fallback. This does
+not enable direct AppleScript/Accessibility calls from the QA child.
+
 Only for an explicitly authorized synthetic smoke, use
 `target.application: { "fixture": "texteditBlank" }`. This fixed macOS-only route
 cannot be combined with selectors or launch settings. It refuses an already-running
@@ -88,7 +95,8 @@ not an automatically completed lifecycle. Inspect windows and unsaved documents
 before manually closing; never recommend discarding unknown content. Close before
 another launch; do not retry after an ambiguous result. Failure stops input; automated
 tests do not prove runtime delivery or that LaunchServices fixes an OS signature kill.
-The helper cache/release build includes all three Swift sources; its signing identifier
+The helper cache/release build includes the closed Swift source set from
+`helper-sources.mjs`, including menu navigation; its signing identifier
 is unchanged. An ad-hoc rebuild may need user reapproval; never reset TCC.
 
 Accessibility permission is required for semantic QA. Exact-window screenshots

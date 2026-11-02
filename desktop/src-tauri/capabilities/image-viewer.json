@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "image-viewer",
+  "description": "Transient image viewer: close and drag its own window only",
+  "windows": ["image-viewer-*"],
+  "permissions": ["core:window:allow-close", "core:window:allow-start-dragging"]
+}

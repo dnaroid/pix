@@ -29,7 +29,7 @@ struct Arguments {
         let valueOptions: Set<String> = [
             "--app", "--bundle-id", "--pid", "--pgid", "--depth", "--limit", "--match",
             "--role", "--occurrence", "--path", "--value", "--text",
-            "--key", "--modifiers", "--x", "--y", "--out", "--timeout", "--duration",
+            "--key", "--modifiers", "--x", "--y", "--out", "--timeout", "--duration", "--menu-path",
         ]
         var parsedOptions: [String: String] = [:]
         var parsedFlags = Set<String>()
@@ -101,6 +101,7 @@ struct Arguments {
       set-value SELECTOR (--path PATH | --match TEXT) --value TEXT
       type SELECTOR --text TEXT
       key SELECTOR --key KEY [--modifiers cmd,shift,ctrl,opt]
+      menu SELECTOR --menu-path '["Tools","Action..."]' [--timeout 10]
       click-point SELECTOR --x X --y Y
       quit SELECTOR [--force]
     """
@@ -1110,6 +1111,7 @@ func run(_ arguments: Arguments) throws {
         )
         print("macos=\(ProcessInfo.processInfo.operatingSystemVersionString)")
         print("accessibility=\(accessibility ? "granted" : "missing")")
+        print("menu_activation=available")
         print("screen_recording=\(screenRecording ? "granted" : "missing")")
         print("sck=\(screenCaptureKit ? "available" : "unsupported")")
 
@@ -1246,6 +1248,12 @@ func run(_ arguments: Arguments) throws {
             throw Failure("setting AX value failed: \(result.rawValue)")
         }
         print("set-value path=\(located.path) role=\(role(located.element))")
+
+    case "menu":
+        try requireAccessibility()
+        let app = try findApplication(arguments)
+        try activate(app)
+        try activateMenu(app, arguments: arguments)
 
     case "type":
         try requireAccessibility()

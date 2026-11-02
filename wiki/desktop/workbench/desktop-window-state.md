@@ -52,6 +52,10 @@ persistent layout setting. Its resulting normal geometry is persisted here.
   browser history persistence fails. An explicitly saved empty window remains empty.
 - Closing a window while other windows remain excludes it from the next launch.
   Closing the last window exits the app and retains that last window for relaunch.
+- Transient image-viewer windows are not project windows: they are neither
+  included in membership snapshots nor restored with project/workspace state.
+  Closing their owning project window closes its viewer; closing the last
+  project window still retains the normal project window for relaunch.
 - Closing a window while other windows remain records its stable identity,
   workspace and normal geometry as bounded history. Reopening that project
   later in a new window reuses the most recently closed matching identity, so

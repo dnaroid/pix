@@ -1,0 +1,26 @@
+.transcript-image-zoom {
+  position: relative;
+  display: inline-grid;
+  max-width: 100%;
+  min-width: 0;
+  align-self: flex-start;
+}
+.transcript-image-zoom-button {
+  position: absolute;
+  top: 0.375rem;
+  right: 0.375rem;
+  border: 1px solid var(--border);
+  background: var(--popover);
+  box-shadow: var(--shadow-xs);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+.transcript-image-zoom:hover > .transcript-image-zoom-button,
+.transcript-image-zoom:focus-within > .transcript-image-zoom-button {
+  opacity: 1;
+  pointer-events: auto;
+}
+@media (hover: none) {
+  .transcript-image-zoom-button { opacity: 1; pointer-events: auto; }
+}

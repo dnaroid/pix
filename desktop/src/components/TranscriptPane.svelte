@@ -10,6 +10,11 @@
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import Undo2 from "@lucide/svelte/icons/undo-2";
   import Pencil from "@lucide/svelte/icons/pencil";
+  import ZoomIn from "@lucide/svelte/icons/zoom-in";
+  import { createTranscriptImageZoom } from "./transcript-image-zoom";
+  import { openImageWindow } from "../lib/image-window";
+  import { createDiagnosticLogger } from "../lib/diagnostic-logging";
+  import "../styles/transcript-image-zoom.css";
   import { onDestroy, tick } from "svelte";
   import type { Attachment } from "../lib/attachments";
   import { agentPauseJustTriggered, type AgentControlState } from "../lib/agent-control";
@@ -238,6 +243,13 @@
 
   const handleTranscriptPaneScroll = historyPager.handleScroll;
 
+  let zoomIcon: HTMLSpanElement | undefined;
+  const imageWindowDiagnostics = createDiagnosticLogger(() => ({ workspace: workspace ?? "", sessionId: activeSessionId }));
+  const imageZoom = createTranscriptImageZoom(
+    () => zoomIcon?.querySelector("svg") ?? undefined,
+    (image) => { void openImageWindow(image).catch((error) => imageWindowDiagnostics.warn("image-window:open", error)); },
+  );
+
   $effect(() => {
     const sessionId = activeSessionId;
     const itemCount = transcript.items.length;
@@ -250,8 +262,10 @@
 
 <svelte:window onclick={handleWindowClick} onkeydown={handleWindowKeydown} onresize={handleWindowResize} />
 
+<span hidden aria-hidden="true" bind:this={zoomIcon}><ZoomIn size={16} aria-hidden="true" /></span>
+
 <div class="relative row-start-2 min-h-0 min-w-0">
-  <div class="transcript-pane h-full min-h-0 overflow-auto" bind:this={pane} use:transcriptMediaViewport style="--chat-media-width: 100%" aria-live="polite" onscroll={handleTranscriptPaneScroll}>
+  <div class="transcript-pane h-full min-h-0 overflow-auto" bind:this={pane} use:transcriptMediaViewport use:imageZoom style="--chat-media-width: 100%" aria-live="polite" onscroll={handleTranscriptPaneScroll}>
   {#if !activeSessionId && !workspace}
     <section class="grid h-full place-items-center content-center p-10 text-center">
       <div class="mb-[18px] grid h-11 w-11 place-items-center rounded-md border border-border bg-panel-strong font-semibold text-primary">P</div>

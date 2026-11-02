@@ -22,6 +22,7 @@ const ACTION_FIELDS = {
 	activateWindow: new Set(["action", "timeoutMs"]),
 	snapshotAccessibility: new Set(["action", "name", "depth", "limit", "timeoutMs"]),
 	activate: new Set(["action", "selector", "timeoutMs"]),
+	activateMenu: new Set(["action", "path", "timeoutMs"]),
 	setValue: new Set(["action", "selector", "value", "timeoutMs"]),
 	inputText: new Set(["action", "text", "timeoutMs"]),
 	pressKey: new Set(["action", "key", "modifiers", "timeoutMs"]),
@@ -75,10 +76,13 @@ async function probeMacosDesktopBackend(context, supportedCapabilities) {
 		// windowVideo has a stricter producer than screenshots: it also needs the
 		// ScreenCaptureKit window-stream API (macOS 12.3+), reported by doctor.
 		const sck = /(?:^|\n)sck=available(?:\n|$)/.test(doctor.stdout);
+		const menuActivation = /(?:^|\n)menu_activation=available(?:\n|$)/.test(doctor.stdout);
 		const supported = [...supportedCapabilities];
 		const missing = [];
 		if (accessibility) supported.push("semanticAccessibility", "accessibilitySnapshot", "semanticActivation", "valueInput", "keyboardInput", "stateAssertions");
 		else missing.push("semanticAccessibility", "accessibilitySnapshot", "semanticActivation", "valueInput", "keyboardInput", "stateAssertions");
+		if (accessibility && menuActivation) supported.push("menuActivation");
+		else missing.push("menuActivation");
 		if (screenRecording) supported.push("windowScreenshot");
 		else missing.push("windowScreenshot");
 		if (screenRecording && sck) supported.push("windowVideo");
@@ -367,6 +371,10 @@ async function executeStep(options) {
 			await helperCall(helper, ["set-value", ...selector, ...elementSelectorArgs(step.selector), "--value", step.value], context, timeoutMs);
 			observations.push({ action: step.action, selector: publicSelector(step.selector) });
 			return;
+		case "activateMenu":
+			await helperCall(helper, ["menu", ...selector, "--menu-path", JSON.stringify(step.path), "--timeout", String(timeoutMs / 1000)], context, timeoutMs);
+			observations.push({ action: step.action, path: step.path });
+			return;
 		case "inputText":
 			requireBoundedString(step.text, "inputText.text", 4096);
 			await helperCall(helper, ["type", ...selector, "--text", step.text], context, timeoutMs);
@@ -518,12 +526,20 @@ function validateSteps(steps, probe) {
 // Exported for focused unit tests: capability gating must be honest about what
 // the probed producer actually supports on this host.
 export function validateDesktopStepCapabilities(step, supportedCapabilities) {
+	if (step.action === "activateMenu") {
+		if (!Array.isArray(step.path) || step.path.length < 1 || step.path.length > 8) throw new Error("activateMenu.path must contain 1..8 menu titles");
+		for (const title of step.path) {
+			requireBoundedString(title, "activateMenu.path title", 256);
+			if (title.includes("\0")) throw new Error("activateMenu.path titles must not contain NUL");
+		}
+	}
 	if ((step.action === "screenshot" || step.action === "capture") && !supportedCapabilities.includes("windowScreenshot")) {
 		throw new Error("desktop flow requires windowScreenshot, but the selected desktop driver does not currently provide it");
 	}
 	const required = {
 		texteditSmoke: "keyboardInput",
 		activate: "semanticActivation",
+		activateMenu: "menuActivation",
 		setValue: "valueInput",
 		inputText: "keyboardInput",
 		pressKey: "keyboardInput",

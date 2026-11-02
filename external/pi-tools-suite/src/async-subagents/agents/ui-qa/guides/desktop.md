@@ -35,6 +35,9 @@ detail guide allows it. The detail guide documents platform-specific identity
 restrictions. Common steps are:
 
 - window/control: `waitForWindow`, `activateWindow`, `activate`;
+- app menu (when the probe advertises `menuActivation`): `activateMenu`, with
+  `path` containing 1–8 exact titles, e.g.
+  `{"action":"activateMenu","path":["Tools","Scripting..."]}`;
 - inspection: `snapshotAccessibility`;
 - input: `setValue`, `inputText`, `pressKey`;
 - assertions: `waitForText`, `assertText`, `assertState`;

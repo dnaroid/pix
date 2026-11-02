@@ -105,7 +105,11 @@ mod native {
         };
         let native_app = NSApplication::sharedApplication(mtm);
         let key = native_app.keyWindow().or_else(|| native_app.mainWindow());
-        let mut windows = app.webview_windows().into_iter().collect::<Vec<_>>();
+        let mut windows = app
+            .webview_windows()
+            .into_iter()
+            .filter(|(label, _)| !crate::image_viewer::is_viewer(label))
+            .collect::<Vec<_>>();
         // HashMap iteration must not determine the order of the other windows.
         windows.sort_by(|a, b| a.0.cmp(&b.0));
         let windows = windows
