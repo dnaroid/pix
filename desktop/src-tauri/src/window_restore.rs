@@ -9,6 +9,7 @@ const FILE_NAME: &str = "open-windows.json";
 const QA_FILE_NAME: &str = "qa-open-windows.json";
 const MAX_BYTES: u64 = 64 * 1024;
 const MAX_WINDOWS: usize = 128;
+const MAX_CLOSED_WINDOWS: usize = 32;
 
 fn snapshot_file(ui_qa: bool, smoke: bool, qa_restore: bool) -> Option<&'static str> {
     if smoke {
@@ -45,21 +46,44 @@ pub(crate) struct SavedWindow {
     geometry: Option<Geometry>,
 }
 
-#[derive(Deserialize, Serialize)]
-struct Snapshot {
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub(crate) struct Snapshot {
     version: u8,
     windows: Vec<SavedWindow>,
+    #[serde(
+        default,
+        rename = "closedWindows",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    closed_windows: Vec<SavedWindow>,
+}
+
+impl Snapshot {
+    fn encode(mut self) -> Result<Vec<u8>, serde_json::Error> {
+        let mut bytes = serde_json::to_vec(&self)?;
+        // Closed history is optional: it must never crowd out live membership.
+        while bytes.len() as u64 > MAX_BYTES && !self.closed_windows.is_empty() {
+            self.closed_windows.remove(0);
+            bytes = serde_json::to_vec(&self)?;
+        }
+        Ok(bytes)
+    }
 }
 
 #[derive(Default)]
 struct Registry {
     windows: BTreeMap<String, SavedWindow>,
+    // Oldest first. Closed windows are not part of startup membership.
+    closed_windows: Vec<SavedWindow>,
+    // Reserve identities while the native builder runs without holding the lock.
+    opening: BTreeMap<String, Option<SavedWindow>>,
     exiting: bool,
 }
 
 impl Registry {
     fn update(&mut self, label: &str, workspace: String) {
         if !self.exiting {
+            self.closed_windows.retain(|window| window.label != label);
             self.windows
                 .entry(label.into())
                 .and_modify(|window| {
@@ -83,13 +107,107 @@ impl Registry {
 
     fn destroyed(&mut self, label: &str, other_windows_remain: bool) {
         if !self.exiting && other_windows_remain {
-            self.windows.remove(label);
+            if let Some(window) = self.windows.remove(label) {
+                self.remember_closed(window);
+            }
         }
     }
 
-    fn freeze(&mut self) -> Vec<SavedWindow> {
+    fn remember_closed(&mut self, window: SavedWindow) {
+        self.closed_windows
+            .retain(|saved| saved.label != window.label);
+        self.closed_windows.push(window);
+        if self.closed_windows.len() > MAX_CLOSED_WINDOWS {
+            self.closed_windows.remove(0);
+        }
+    }
+
+    fn begin_open(&mut self, label: String, workspace: String) -> Result<SavedWindow, String> {
+        if self.exiting {
+            return Err("application is exiting".into());
+        }
+        if self.windows.contains_key(&label)
+            || self.opening.contains_key(&label)
+            || self
+                .closed_windows
+                .iter()
+                .any(|window| window.label == label)
+        {
+            return Err("window identity is already in use".into());
+        }
+        let previous = self
+            .closed_windows
+            .iter()
+            .rposition(|window| {
+                window.workspace == workspace
+                    && !self.windows.contains_key(&window.label)
+                    && !self.opening.contains_key(&window.label)
+            })
+            .map(|index| self.closed_windows.remove(index));
+        let window = previous.clone().unwrap_or(SavedWindow {
+            label,
+            workspace,
+            geometry: None,
+        });
+        self.opening.insert(window.label.clone(), previous);
+        Ok(window)
+    }
+
+    fn finish_open(&mut self, window: SavedWindow, created: bool) -> bool {
+        // Keep reservations intact after freeze: repeated exit snapshots must
+        // still retain any closed identity whose creation raced Quit.
+        if self.exiting {
+            return false;
+        }
+        let Some(previous) = self.opening.remove(&window.label) else {
+            return false;
+        };
+        if created {
+            self.closed_windows
+                .retain(|saved| saved.label != window.label);
+            self.windows.entry(window.label.clone()).or_insert(window);
+            true
+        } else {
+            if let Some(previous) = previous {
+                // Early frontend registration/destruction may already have a
+                // newer record, or retain this as the last window for relaunch.
+                if !self.windows.contains_key(&previous.label)
+                    && !self
+                        .closed_windows
+                        .iter()
+                        .any(|saved| saved.label == previous.label)
+                {
+                    self.remember_closed(previous);
+                }
+            }
+            false
+        }
+    }
+
+    fn freeze(&mut self) -> Snapshot {
         self.exiting = true;
-        self.windows.values().cloned().collect()
+        let mut closed_windows = self.closed_windows.clone();
+        closed_windows.extend(
+            self.opening
+                .values()
+                .flatten()
+                .filter(|window| {
+                    !self.windows.contains_key(&window.label)
+                        && !self
+                            .closed_windows
+                            .iter()
+                            .any(|saved| saved.label == window.label)
+                })
+                .cloned(),
+        );
+        if closed_windows.len() > MAX_CLOSED_WINDOWS {
+            closed_windows.drain(..closed_windows.len() - MAX_CLOSED_WINDOWS);
+        }
+        Snapshot {
+            version: 1,
+            windows: self.windows.values().cloned().collect(),
+            closed_windows,
+        }
     }
 }
 
@@ -119,17 +237,20 @@ fn workspace_window_title(workspace: &str) -> String {
     format!("Pix — {}", name.as_deref().unwrap_or(workspace))
 }
 
-fn parse(bytes: &[u8]) -> Result<Vec<SavedWindow>, String> {
+fn parse(bytes: &[u8]) -> Result<Snapshot, String> {
     if bytes.len() as u64 > MAX_BYTES {
         return Err("window snapshot is too large".into());
     }
     let snapshot: Snapshot = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
-    if snapshot.version != 1 || snapshot.windows.is_empty() || snapshot.windows.len() > MAX_WINDOWS
+    if snapshot.version != 1
+        || snapshot.windows.is_empty()
+        || snapshot.windows.len() > MAX_WINDOWS
+        || snapshot.closed_windows.len() > MAX_CLOSED_WINDOWS
     {
         return Err("invalid window snapshot".into());
     }
     let mut labels = std::collections::HashSet::new();
-    for window in &snapshot.windows {
+    for window in snapshot.windows.iter().chain(&snapshot.closed_windows) {
         if !valid_label(&window.label)
             || !valid_workspace(&window.workspace)
             || !labels.insert(window.label.clone())
@@ -137,10 +258,10 @@ fn parse(bytes: &[u8]) -> Result<Vec<SavedWindow>, String> {
             return Err("invalid saved window".into());
         }
     }
-    Ok(snapshot.windows)
+    Ok(snapshot)
 }
 
-fn load(path: &Path) -> Vec<SavedWindow> {
+fn load(path: &Path) -> Option<Snapshot> {
     let result = (|| {
         let mut bytes = Vec::new();
         fs::File::open(path)?
@@ -148,7 +269,7 @@ fn load(path: &Path) -> Vec<SavedWindow> {
             .read_to_end(&mut bytes)?;
         parse(&bytes).map_err(std::io::Error::other)
     })();
-    result.unwrap_or_default()
+    result.ok()
 }
 
 fn route(workspace: &str) -> WebviewUrl {
@@ -165,15 +286,24 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<bool, Box<dyn std::error::Er
     // opt-in restore QA uses separate membership AND plugin geometry files.
     let saved = match persistence_file() {
         Some(filename) => load(&app.path().app_config_dir()?.join(filename)),
-        None => Vec::new(),
+        None => None,
     };
-    let restoring = !saved.is_empty();
+    let restoring = saved.is_some();
     let fallback = SavedWindow {
         label: "main".into(),
         workspace: String::new(),
         geometry: None,
     };
-    let windows = if restoring { saved } else { vec![fallback] };
+    let windows = if let Some(saved) = saved {
+        app.state::<WindowRestoreState>()
+            .0
+            .lock()
+            .unwrap()
+            .closed_windows = saved.closed_windows;
+        saved.windows
+    } else {
+        vec![fallback]
+    };
     let monitors: Vec<_> = app
         .available_monitors()?
         .iter()
@@ -222,7 +352,19 @@ fn track(window: &WebviewWindow, workspace: String, saved: Option<Geometry>) {
     {
         let state = window.state::<WindowRestoreState>();
         let mut registry = state.0.lock().unwrap();
-        registry.update(window.label(), workspace);
+        // Destruction can win after the builder completes but before tracking.
+        if registry.exiting
+            || window
+                .app_handle()
+                .get_webview_window(window.label())
+                .is_none()
+        {
+            return;
+        }
+        // An early frontend workspace update is newer than the builder input.
+        if !registry.windows.contains_key(window.label()) {
+            registry.update(window.label(), workspace);
+        }
         if let Some(geometry) = geometry {
             registry.geometry(window.label(), geometry);
         }
@@ -283,18 +425,43 @@ pub(crate) async fn desktop_open_project_window(
     {
         return Err("invalid project window".into());
     }
+    let monitors: Vec<_> = app
+        .available_monitors()
+        .map_err(|e| e.to_string())?
+        .iter()
+        .map(window_geometry::logical_monitor)
+        .collect();
     let state = app.state::<WindowRestoreState>();
-    if state.0.lock().map_err(|e| e.to_string())?.exiting {
-        return Err("application is exiting".into());
-    }
+    let saved = state
+        .0
+        .lock()
+        .map_err(|e| e.to_string())?
+        .begin_open(label, workspace)?;
     let mut config = app.config().app.windows[0].clone();
-    config.label = label.clone();
-    config.url = route(&workspace);
-    config.title = workspace_window_title(&workspace);
-    let window = crate::startup_theme::build(&app, &config).map_err(|e| e.to_string())?;
-    if app.get_webview_window(&label).is_some() {
-        track(&window, workspace, None);
+    config.label = saved.label.clone();
+    config.url = route(&saved.workspace);
+    config.title = workspace_window_title(&saved.workspace);
+    window_geometry::apply(&mut config, saved.geometry, &monitors);
+    let built = crate::startup_theme::build(&app, &config);
+    let accepted = {
+        let mut registry = state.0.lock().map_err(|e| e.to_string())?;
+        let created = built.is_ok() && app.get_webview_window(&saved.label).is_some();
+        registry.finish_open(saved.clone(), created)
+    };
+    let window = built.map_err(|e| e.to_string())?;
+    if !accepted {
+        if app.get_webview_window(&saved.label).is_some() {
+            if let Err(error) = window.close() {
+                crate::logging::error(
+                    module_path!(),
+                    format!("could not close late project window: {error}"),
+                );
+            }
+        }
+        // Closing a newly created window (or quitting) is not an open failure.
+        return Ok(());
     }
+    track(&window, saved.workspace, saved.geometry);
     crate::desktop_tray::refresh(&app);
     Ok(())
 }
@@ -307,27 +474,21 @@ pub(crate) fn destroyed(app: &AppHandle, label: &str) {
     registry.destroyed(label, !app.webview_windows().is_empty());
 }
 
-pub(crate) fn freeze(app: &AppHandle) -> Vec<SavedWindow> {
+pub(crate) fn freeze(app: &AppHandle) -> Snapshot {
     for window in app.webview_windows().values() {
         record_geometry(window);
     }
     app.state::<WindowRestoreState>().0.lock().unwrap().freeze()
 }
 
-pub(crate) fn save(
-    app: &AppHandle,
-    windows: Vec<SavedWindow>,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn save(app: &AppHandle, snapshot: Snapshot) -> Result<(), Box<dyn std::error::Error>> {
     let Some(filename) = persistence_file() else {
         return Ok(());
     };
-    if windows.is_empty() {
+    if snapshot.windows.is_empty() {
         return Ok(());
     }
-    let bytes = serde_json::to_vec(&Snapshot {
-        version: 1,
-        windows,
-    })?;
+    let bytes = snapshot.encode()?;
     // Never replace a usable snapshot with one we cannot load next time.
     parse(&bytes).map_err(std::io::Error::other)?;
     let dir = app.path().app_config_dir()?;
@@ -339,143 +500,5 @@ pub(crate) fn save(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn native_window_title_identifies_the_current_project() {
-        assert_eq!(workspace_window_title("/projects/pix"), "Pix — pix");
-        assert_eq!(
-            workspace_window_title("/projects/Мой проект/"),
-            "Pix — Мой проект"
-        );
-        assert_eq!(workspace_window_title("/"), "Pix — /");
-        assert_eq!(workspace_window_title(""), "Pix");
-    }
-
-    #[test]
-    fn qa_restore_opt_in_never_uses_user_membership_storage() {
-        assert_eq!(snapshot_file(false, false, false), Some(FILE_NAME));
-        assert_eq!(snapshot_file(false, false, true), Some(FILE_NAME));
-        assert_eq!(snapshot_file(true, false, false), None);
-        assert_eq!(snapshot_file(true, false, true), Some(QA_FILE_NAME));
-        assert_eq!(snapshot_file(false, true, true), None);
-        assert_eq!(snapshot_file(true, true, true), None);
-    }
-
-    #[test]
-    fn closing_one_window_excludes_it_but_last_window_is_retained() {
-        let mut registry = Registry::default();
-        registry.update("main", "/a".into());
-        registry.update("project-1", "/b".into());
-        registry.destroyed("main", true);
-        registry.destroyed("project-1", false);
-        let snapshot = registry.freeze();
-        assert_eq!(
-            snapshot,
-            vec![SavedWindow {
-                label: "project-1".into(),
-                workspace: "/b".into(),
-                geometry: None,
-            }]
-        );
-    }
-
-    #[test]
-    fn quit_freezes_membership_and_workspaces_before_async_teardown() {
-        let mut registry = Registry::default();
-        registry.update("main", "/a".into());
-        registry.update("project-1", "/b".into());
-        let geometry = Geometry {
-            width: 1100.0,
-            height: 750.0,
-            x: 40.0,
-            y: -900.0,
-        };
-        registry.geometry("project-1", geometry);
-        let snapshot = registry.freeze();
-        registry.destroyed("main", true);
-        registry.update("project-1", "/stale".into());
-        registry.update("project-late", "/late".into());
-        registry.geometry(
-            "project-1",
-            Geometry {
-                width: 430.0,
-                ..geometry
-            },
-        );
-        assert_eq!(registry.freeze(), snapshot);
-        assert_eq!(snapshot.len(), 2);
-        assert_eq!(snapshot[1].geometry, Some(geometry));
-    }
-
-    #[test]
-    fn workspace_update_preserves_normal_geometry_and_last_close_keeps_it() {
-        let mut registry = Registry::default();
-        registry.update("main", "/a".into());
-        let geometry = Geometry {
-            width: 1100.0,
-            height: 750.0,
-            x: 40.0,
-            y: -900.0,
-        };
-        registry.geometry("main", geometry);
-        registry.update("main", "/b".into());
-        registry.destroyed("main", false);
-        let snapshot = registry.freeze();
-        assert_eq!(snapshot[0].geometry, Some(geometry));
-        assert_eq!(snapshot[0].workspace, "/b");
-        let bytes = serde_json::to_vec(&Snapshot {
-            version: 1,
-            windows: snapshot.clone(),
-        })
-        .unwrap();
-        assert_eq!(parse(&bytes).unwrap(), snapshot);
-    }
-
-    #[test]
-    fn snapshot_keeps_stable_labels_and_repeated_projects() {
-        let bytes = br#"{"version":1,"windows":[{"label":"main","workspace":"/a"},{"label":"project-123-abc","workspace":"/a"}]}"#;
-        let windows = parse(bytes).unwrap();
-        assert_eq!(windows.len(), 2);
-        assert_eq!(windows[1].label, "project-123-abc");
-        assert_eq!(
-            parse(
-                &serde_json::to_vec(&Snapshot {
-                    version: 1,
-                    windows: windows.clone()
-                })
-                .unwrap()
-            )
-            .unwrap(),
-            windows
-        );
-    }
-
-    #[test]
-    fn invalid_snapshots_fall_back_instead_of_creating_arbitrary_windows() {
-        for bytes in [
-            r#"{"version":2,"windows":[]}"#,
-            r#"{"version":1,"windows":[{"label":"other","workspace":"/a"}]}"#,
-            r#"{"version":1,"windows":[{"label":"main","workspace":"relative"}]}"#,
-            r#"{"version":1,"windows":[{"label":"main","workspace":"/a"},{"label":"main","workspace":"/b"}]}"#,
-            "not json",
-        ] {
-            assert!(parse(bytes.as_bytes()).is_err());
-        }
-        assert!(parse(&vec![b' '; MAX_BYTES as usize + 1]).is_err());
-    }
-
-    #[test]
-    fn route_encodes_paths_without_turning_them_into_query_or_fragment() {
-        let WebviewUrl::App(path) = route("/space & ?# проект") else {
-            panic!()
-        };
-        let url = tauri::Url::parse(&format!("http://localhost/{}", path.display())).unwrap();
-        assert_eq!(
-            url.query_pairs().find(|(k, _)| k == "workspace").unwrap().1,
-            "/space & ?# проект"
-        );
-        assert!(url.fragment().is_none());
-    }
-}
+#[path = "window_restore/tests.rs"]
+mod tests;

@@ -52,6 +52,13 @@ persistent layout setting. Its resulting normal geometry is persisted here.
   browser history persistence fails. An explicitly saved empty window remains empty.
 - Closing a window while other windows remain excludes it from the next launch.
   Closing the last window exits the app and retains that last window for relaunch.
+- Closing a window while other windows remain records its stable identity,
+  workspace and normal geometry as bounded history. Reopening that project
+  later in a new window reuses the most recently closed matching identity, so
+  its per-window session tabs, active-session pointer, model metadata and pane
+  layout resume with it. Closed windows are not automatically opened at launch.
+  Live or reserved identities are never reused; a failed open releases its
+  reservation, and Quit freezes the state against late updates.
 - Explicit application Quit freezes window membership/workspaces before background
   resource cleanup; destruction and late workspace updates cannot erase that snapshot.
 - A window close or application Quit with active conversations first requires
@@ -73,6 +80,13 @@ persistent layout setting. Its resulting normal geometry is persisted here.
   every project. Their unqualified plugin pixel rectangles are not migrated:
   the first launch uses configured dimensions/OS placement, then records the
   new normal geometry. Restored sizes respect configured logical minimums.
+- Version 1 `open-windows.json` snapshots may include optional `closedWindows`
+  history (oldest first, at most 32 entries); snapshots without it remain valid.
+  History persists across clean Quit but is optional and evicted oldest-first
+  before live membership if needed to satisfy the existing 64 KiB snapshot
+  bound. Historical closed identities from before this history was introduced
+  cannot be reconstructed. Reused geometry follows the same monitor validation
+  as restored live windows.
 - Desktop coordinates restore the window onto the same available display.
 - If the saved display is unavailable or the saved rectangle no longer intersects any display, the operating system chooses a safe position instead of restoring the window off-screen.
 - A maximized window reopens maximized while retaining its previous normal geometry for a later unmaximize.
