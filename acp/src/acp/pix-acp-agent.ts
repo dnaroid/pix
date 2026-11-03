@@ -3715,13 +3715,13 @@ export class PixAcpAgent {
 		return this.claudeLoginNudgeInFlight;
 	}
 
-	private async setAgentControlState(session: AgentSessionState, state: DesktopAgentControlState, forcePublish = false): Promise<void> {
+	private async setAgentControlState(session: AgentSessionState, state: DesktopAgentControlState, forcePublish = false, stopReason?: StopReason): Promise<void> {
 		if (this.sessions.get(session.acpSessionId) !== session || (!forcePublish && session.agentControlState === state)) return;
 		session.agentControlState = state;
 		await session.client.notify(PIX_SESSION_STATE_METHOD, {
 			sessionId: session.acpSessionId,
 			channel: "agent-control",
-			data: { state },
+			data: { state, ...(stopReason !== undefined ? { stopReason } : {}) },
 		}).catch((error: unknown) => {
 			this.options.logger.warn(`${PIX_SESSION_STATE_METHOD} agent-control failed: ${stringifyUnknown(error)}`);
 		});
@@ -3766,7 +3766,7 @@ export class PixAcpAgent {
 		const pauseRequested = session.agentControlState === "pause-requested";
 		const cancelled = run.cancelled;
 		if (cancelled) {
-			await this.setAgentControlState(session, "idle");
+			await this.setAgentControlState(session, "idle", run.extensionInitiated, run.extensionInitiated ? "cancelled" : undefined);
 			if (ownsSettlement()) this.resolveActiveRun(session, "cancelled");
 			return;
 		}
@@ -3778,8 +3778,9 @@ export class PixAcpAgent {
 			next = pauseRequested ? "paused" : "idle";
 		}
 		if (!ownsSettlement()) return;
-		await this.setAgentControlState(session, next);
-		if (ownsSettlement()) this.resolveActiveRun(session, run.stopReason ?? "end_turn");
+		const stopReason = run.stopReason ?? "end_turn";
+		await this.setAgentControlState(session, next, run.extensionInitiated, run.extensionInitiated ? stopReason : undefined);
+		if (ownsSettlement()) this.resolveActiveRun(session, stopReason);
 	}
 
 	private async prompt(params: PromptRequest): Promise<PromptResponse> {

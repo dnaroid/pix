@@ -5,6 +5,55 @@ import { createPromptAgentControl } from "./prompt-agent-control.svelte";
 import { createPromptRunLifecycle } from "./prompt-run-lifecycle.svelte";
 
 describe("prompt agent control notifications", () => {
+  it("does not enable completion notifications for unrelated extension runs", async () => {
+    const onPromptSettled = vi.fn();
+    const flushAutoQueue = vi.fn(async () => {});
+    const runs = createPromptRunLifecycle({
+      client: () => null, activeSessionId: () => "session-1", reportError: vi.fn(),
+      bindPromptSessionEntry: vi.fn(), finalizeTranscriptActivity: vi.fn(), flushAutoQueue, onPromptSettled,
+    });
+    const control = createPromptAgentControl({
+      client: () => null, activeSessionId: () => "session-1", runtimeReady: () => true,
+      operationRunning: () => false, setErrorMessage: vi.fn(), reportError: vi.fn(), runs,
+      shouldNotifyExtensionRun: () => false,
+    });
+    control.handleAgentControlStatePush("session-1", "running");
+    control.handleSessionActivityChanged("session-1");
+    control.handleAgentControlStatePush("session-1", "idle", "end_turn");
+    await vi.waitFor(() => expect(flushAutoQueue).toHaveBeenCalledOnce());
+    expect(onPromptSettled).not.toHaveBeenCalled();
+  });
+
+  it("does not carry late or other-session eligibility into another run", async () => {
+    let pending = false;
+    const onPromptSettled = vi.fn();
+    const flushAutoQueue = vi.fn(async () => {});
+    const runs = createPromptRunLifecycle({
+      client: () => null, activeSessionId: () => "session-1", reportError: vi.fn(),
+      bindPromptSessionEntry: vi.fn(), finalizeTranscriptActivity: vi.fn(), flushAutoQueue, onPromptSettled,
+    });
+    const control = createPromptAgentControl({
+      client: () => null, activeSessionId: () => "session-1", runtimeReady: () => true,
+      operationRunning: () => false, setErrorMessage: vi.fn(), reportError: vi.fn(), runs,
+      shouldNotifyExtensionRun: () => pending,
+    });
+    control.handleAgentControlStatePush("session-1", "running");
+    pending = true;
+    control.handleSessionActivityChanged("other-session");
+    pending = false;
+    control.handleAgentControlStatePush("session-1", "idle", "end_turn");
+    pending = true;
+    control.handleSessionActivityChanged("session-1"); // Already settled: too late to enable it.
+    await vi.waitFor(() => expect(flushAutoQueue).toHaveBeenCalledTimes(1));
+    expect(onPromptSettled).not.toHaveBeenCalled();
+
+    pending = false;
+    control.handleAgentControlStatePush("session-1", "running");
+    control.handleAgentControlStatePush("session-1", "idle", "end_turn");
+    await vi.waitFor(() => expect(flushAutoQueue).toHaveBeenCalledTimes(2));
+    expect(onPromptSettled).not.toHaveBeenCalled();
+  });
+
   it.each(["resuming", "running"] as const)("adopts %s and enables Pause once the continuation starts", async (initialState) => {
     const agentControl = vi.fn(async (_sessionId: string, action: string) => ({
       sessionId: "session-1", state: action === "cancel-pause" ? "running" as const : "pause-requested" as const,
@@ -48,9 +97,10 @@ describe("prompt agent control notifications", () => {
   it.each(["idle", "continuable"] as const)("settles an adopted recovered-question run at %s", async (state) => {
     const client = {} as AcpClient;
     const flushAutoQueue = vi.fn(async () => {});
+    const onPromptSettled = vi.fn();
     const runs = createPromptRunLifecycle({
       client: () => client, activeSessionId: () => "session-1", reportError: vi.fn(),
-      bindPromptSessionEntry: vi.fn(), finalizeTranscriptActivity: vi.fn(), flushAutoQueue,
+      bindPromptSessionEntry: vi.fn(), finalizeTranscriptActivity: vi.fn(), flushAutoQueue, onPromptSettled,
     });
     const control = createPromptAgentControl({
       client: () => client, activeSessionId: () => "session-1", runtimeReady: () => true,
@@ -61,6 +111,7 @@ describe("prompt agent control notifications", () => {
     expect(runs.isRunning("session-1")).toBe(false);
     expect(control.agentState("session-1")).toBe(state);
     await vi.waitFor(() => expect(flushAutoQueue).toHaveBeenCalledTimes(1));
+    expect(onPromptSettled).not.toHaveBeenCalled(); // Legacy pushes do not prove success.
   });
 
   it("emits pause attention only for a live transition into paused", () => {

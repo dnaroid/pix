@@ -40,6 +40,8 @@ export interface SubagentLiveStateRun {
 export interface SubagentsLiveStateEvent {
 	version: 1;
 	count: number;
+	/** Owned results or their parent follow-up have not settled yet. */
+	completionPending?: boolean;
 	runs: SubagentLiveStateRun[];
 	sessionFile?: string;
 	checkedAt: number;

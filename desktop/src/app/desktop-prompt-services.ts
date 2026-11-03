@@ -29,6 +29,7 @@ type DesktopPromptServicesOptions = {
   reportError: (error: unknown) => void;
   onPromptStarted?: (sessionId: string) => void;
   onPromptSettled?: (sessionId: string, stopReason: StopReason) => void;
+  shouldNotifyExtensionRun?: (sessionId: string) => boolean;
   onPromptError?: (sessionId: string, error: unknown) => void;
   onAgentPaused?: (sessionId: string) => void;
   onSessionCleared?: (sessionId: string) => void;
@@ -57,6 +58,7 @@ export function createDesktopPromptServices(options: DesktopPromptServicesOption
     reportError: options.reportError,
     onPromptStarted: options.onPromptStarted,
     onPromptSettled: options.onPromptSettled,
+    shouldNotifyExtensionRun: options.shouldNotifyExtensionRun,
     onPromptError: options.onPromptError,
     onAgentPaused: options.onAgentPaused,
     onSessionCleared: options.onSessionCleared,

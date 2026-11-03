@@ -3,11 +3,24 @@ import {
   agentControlAllowsAutoQueue,
   agentControlShowsPausedTab,
   agentControlStateFromSessionState,
+  agentControlStopReasonFromSessionState,
   agentPauseJustTriggered,
   isAgentControlState,
 } from "./agent-control";
 
 describe("Desktop agent control state", () => {
+  it("parses only explicit, valid settlement reasons on the control channel", () => {
+    for (const stopReason of ["end_turn", "cancelled", "refusal", "max_tokens", "max_turn_requests"] as const) {
+      expect(agentControlStopReasonFromSessionState({ sessionId: "a", channel: "agent-control",
+        data: { state: "idle", stopReason } })).toBe(stopReason);
+    }
+    for (const data of [{ state: "idle" }, { state: "idle", stopReason: "unknown" }, { state: "other", stopReason: "end_turn" }]) {
+      expect(agentControlStopReasonFromSessionState({ sessionId: "a", channel: "agent-control", data })).toBeUndefined();
+    }
+    expect(agentControlStopReasonFromSessionState({ sessionId: "a", channel: "other",
+      data: { state: "idle", stopReason: "end_turn" } })).toBeUndefined();
+  });
+
   it("updates tab pause status when a restored boundary is discovered and later resumed", () => {
     const states = ["idle", "continuable", "resuming", "running", "pause-requested", "paused"] as const;
     expect(states.map(agentControlShowsPausedTab)).toEqual([false, true, false, false, false, true]);

@@ -43,6 +43,8 @@ export interface SessionSubagentRun {
 export interface SessionSubagentSnapshot {
   readonly version: 1;
   readonly count: number;
+  /** Includes terminal results and a queued/running parent completion follow-up. */
+  readonly completionPending?: boolean;
   readonly runs: SessionSubagentRun[];
   readonly sessionFile?: string;
   readonly checkedAt: number;
@@ -177,6 +179,7 @@ export function isSessionSubagentSnapshot(value: unknown): value is SessionSubag
   if (!isRecord(value) || value.version !== 1) return false;
   if (!isNonNegativeInteger(value.count) || typeof value.checkedAt !== "number" || !Number.isFinite(value.checkedAt)) return false;
   if (value.sessionFile !== undefined && typeof value.sessionFile !== "string") return false;
+  if (value.completionPending !== undefined && typeof value.completionPending !== "boolean") return false;
   if (!Array.isArray(value.runs) || !value.runs.every(isSessionSubagentRun)) return false;
   if (new Set(value.runs.map((run) => run.runDir)).size !== value.runs.length) return false;
   const activeCount = value.runs.reduce(

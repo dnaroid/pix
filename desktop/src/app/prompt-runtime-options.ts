@@ -18,6 +18,8 @@ export type PromptRuntimeOptions = {
   finalizeTranscriptActivity: (sessionId: string, endedAtMs: number) => void;
   onPromptStarted?: (sessionId: string) => void;
   onPromptSettled?: (sessionId: string, stopReason: StopReason) => void;
+  /** Check at adoption and on activity changes for a pending subagent handoff. */
+  shouldNotifyExtensionRun?: (sessionId: string) => boolean;
   onPromptError?: (sessionId: string, error: unknown) => void;
   onAgentPaused?: (sessionId: string) => void;
   onSessionCleared?: (sessionId: string) => void;

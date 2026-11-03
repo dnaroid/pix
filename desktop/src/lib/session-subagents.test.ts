@@ -30,6 +30,16 @@ function notification(data: unknown, channel = "pi-tools-suite:async-subagents:l
 }
 
 describe("desktop session subagents", () => {
+  it("accepts an optional pending completion independently of the visible child count", () => {
+    const empty = snapshot([]);
+    expect(sessionSubagentSnapshot(notification(empty))).toEqual(empty);
+    for (const completionPending of [true, false]) {
+      const state = { ...empty, completionPending };
+      expect(sessionSubagentSnapshot(notification(state))).toEqual(state);
+    }
+    expect(sessionSubagentSnapshot(notification({ ...empty, completionPending: 1 }))).toBeUndefined();
+  });
+
   it("validates the channel and versioned live-state snapshot", () => {
     const valid = snapshot([{
       runDir: "/work/.pi/subagents/review-run",

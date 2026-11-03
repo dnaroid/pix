@@ -1,3 +1,4 @@
+import type { StopReason } from "@agentclientprotocol/sdk";
 import type { AgentControlState } from "../lib/agent-control";
 import type { PromptRunLifecycle } from "./prompt-run-lifecycle.svelte";
 import type { PromptRuntimeOptions } from "./prompt-runtime-options";
@@ -12,6 +13,7 @@ type PromptAgentControlOptions = Pick<
   | "reportError"
   | "onPromptError"
   | "onAgentPaused"
+  | "shouldNotifyExtensionRun"
 > & {
   runs: PromptRunLifecycle;
 };
@@ -23,8 +25,8 @@ export function createPromptAgentControl(options: PromptAgentControlOptions) {
   /** Serialize rapid Pause clicks, including undo before the first RPC replies. */
   const pauseToggleQueues = new Map<string, { tail?: Promise<void> }>();
   const stateRevisions = new Map<string, number>();
-  /** Run generations adopted from extension-initiated continuations. */
-  const extensionRunGenerations = new Map<string, number>();
+  /** Latch handoff ownership during a run before its pending snapshot clears. */
+  const extensionRuns = new Map<string, { generation: number; notifyCompletion: boolean }>();
 
   function agentState(sessionId: string): AgentControlState {
     return agentControlStates.get(sessionId) ?? "idle";
@@ -38,7 +40,22 @@ export function createPromptAgentControl(options: PromptAgentControlOptions) {
    * must not erase the newer server run or flush queued work into it. */
   function adoptServerRun(sessionId: string): void {
     if (!serverIsRunning(agentState(sessionId))) return;
-    extensionRunGenerations.set(sessionId, options.runs.beginRun(sessionId));
+    beginExtensionRun(sessionId);
+  }
+
+  function beginExtensionRun(sessionId: string): void {
+    const notifyCompletion = options.shouldNotifyExtensionRun?.(sessionId) === true;
+    extensionRuns.set(sessionId, { generation: options.runs.beginRun(sessionId), notifyCompletion });
+  }
+
+  function handleSessionActivityChanged(sessionId: string): void {
+    const run = extensionRuns.get(sessionId);
+    if (run && run.generation === options.runs.generation(sessionId) && options.runs.isRunning(sessionId)
+      && options.shouldNotifyExtensionRun?.(sessionId) === true) {
+      // A live-state snapshot may arrive after the running push. Once observed,
+      // retain eligibility even if completionPending clears before the idle push.
+      run.notifyCompletion = true;
+    }
   }
 
   function setAgentState(sessionId: string, state: AgentControlState): void {
@@ -64,28 +81,29 @@ export function createPromptAgentControl(options: PromptAgentControlOptions) {
    * Also accept the legacy "resuming" busy signal. Adopt a run so the session shows as
    * running and Stop works, and finish it when the run settles.
    */
-  function handleAgentControlStatePush(sessionId: string, state: AgentControlState): void {
-    if (localControlRequests.has(sessionId) && !extensionRunGenerations.has(sessionId)) {
+  function handleAgentControlStatePush(sessionId: string, state: AgentControlState, stopReason?: StopReason): void {
+    if (localControlRequests.has(sessionId) && !extensionRuns.has(sessionId)) {
       setAgentState(sessionId, state);
       return;
     }
     if (serverIsRunning(state) && !options.runs.isRunning(sessionId)) {
-      extensionRunGenerations.set(sessionId, options.runs.beginRun(sessionId));
-    } else if (extensionRunGenerations.has(sessionId) && !options.runs.isRunning(sessionId)) {
-      finishExtensionRun(sessionId);
-    } else if (extensionRunGenerations.has(sessionId)
+      beginExtensionRun(sessionId);
+    } else if (extensionRuns.has(sessionId) && !options.runs.isRunning(sessionId)) {
+      finishExtensionRun(sessionId, stopReason);
+    } else if (extensionRuns.has(sessionId)
       && (state === "idle" || state === "paused" || state === "continuable")
       && !options.runs.hasPromptRun(sessionId)) {
-      finishExtensionRun(sessionId);
+      finishExtensionRun(sessionId, stopReason);
     }
     setAgentState(sessionId, state);
   }
 
-  function finishExtensionRun(sessionId: string): void {
-    const generation = extensionRunGenerations.get(sessionId);
-    if (generation === undefined) return;
-    extensionRunGenerations.delete(sessionId);
-    options.runs.finishRunAndFlush(sessionId, generation, undefined);
+  function finishExtensionRun(sessionId: string, stopReason?: StopReason): void {
+    const run = extensionRuns.get(sessionId);
+    if (run === undefined) return;
+    extensionRuns.delete(sessionId);
+    const reason = options.runs.isCancellationRequested(sessionId) ? "cancelled" : stopReason;
+    options.runs.finishRunAndFlush(sessionId, run.generation, run.notifyCompletion ? reason : undefined);
   }
 
   async function pauseActiveAgent(): Promise<void> {
@@ -182,7 +200,7 @@ export function createPromptAgentControl(options: PromptAgentControlOptions) {
     next.delete(sessionId);
     agentControlStates = next;
     localControlRequests.delete(sessionId);
-    extensionRunGenerations.delete(sessionId);
+    extensionRuns.delete(sessionId);
   }
 
   function reset(): void {
@@ -190,7 +208,7 @@ export function createPromptAgentControl(options: PromptAgentControlOptions) {
     localControlRequests.clear();
     pauseToggleQueues.clear();
     stateRevisions.clear();
-    extensionRunGenerations.clear();
+    extensionRuns.clear();
   }
 
   return {
@@ -199,6 +217,7 @@ export function createPromptAgentControl(options: PromptAgentControlOptions) {
     setAgentState,
     adoptServerRun,
     handleAgentControlStatePush,
+    handleSessionActivityChanged,
     pauseActiveAgent,
     continueActiveAgent,
     clearSession,

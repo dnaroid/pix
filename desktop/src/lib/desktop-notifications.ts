@@ -231,6 +231,7 @@ type DesktopAgentNotificationCoordinatorOptions = {
   agentState: (sessionId: string) => AgentControlState;
   isPromptRunning: (sessionId: string) => boolean;
   activeSubagents: (sessionId: string) => number;
+  subagentCompletionPending?: (sessionId: string) => boolean;
   onCompleted?: (sessionId: string) => void;
   attention?: {
     mark: (sessionId: string | null) => void;
@@ -268,6 +269,7 @@ export function createDesktopAgentNotificationCoordinator(options: DesktopAgentN
     if (options.isPromptRunning(sessionId)) return;
     if (options.agentState(sessionId) !== "idle") return;
     if (options.activeSubagents(sessionId) > 0) return;
+    if (options.subagentCompletionPending?.(sessionId)) return;
     pendingCompletions.delete(sessionId);
     options.attention?.mark(sessionId);
     try {

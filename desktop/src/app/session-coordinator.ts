@@ -1,5 +1,5 @@
 import type { SessionNotification } from "@agentclientprotocol/sdk";
-import { agentControlStateFromSessionState } from "../lib/agent-control";
+import { agentControlStateFromSessionState, agentControlStopReasonFromSessionState } from "../lib/agent-control";
 import type { SessionStateNotification } from "../lib/session-state";
 import type { ActiveSessionState } from "./active-session-state.svelte";
 import type { createDcpCompression } from "./dcp-compression.svelte";
@@ -90,7 +90,8 @@ export function createSessionCoordinator(options: SessionCoordinatorOptions) {
     if (options.runtime.handleSessionState(notification)) return;
     const agentControlState = agentControlStateFromSessionState(notification);
     if (agentControlState) {
-      options.prompts.handleAgentControlStatePush(notification.sessionId, agentControlState);
+      options.prompts.handleAgentControlStatePush(notification.sessionId, agentControlState,
+        agentControlStopReasonFromSessionState(notification));
       return;
     }
     if (options.registry.handleSessionState(notification)) return;

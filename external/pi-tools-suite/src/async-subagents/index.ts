@@ -142,6 +142,7 @@ export default function (pi: ExtensionAPI) {
 	let shuttingDown = false;
 	let parentRunAwaitingSettlement = false;
 	let wakeupHeldByAbort = false;
+	let completionWakeupPending = false;
 	const completionDelivery = new CompletionDelivery(liveAgents, refreshSubagentOverlay);
 	const completionReceipts = new CompletionReceipts(liveAgents, completionDelivery);
 
@@ -155,6 +156,9 @@ export default function (pi: ExtensionAPI) {
 		try {
 			reconcileLiveAgentCompletions();
 			const liveState = createLiveStatePayload(liveAgents, currentSessionFile);
+			// Terminal children disappear from the visible count before their
+			// parent follow-up starts. Cover SDK-deferred settlement wakeups too.
+			liveState.completionPending = completionWakeupPending || hasLiveAgentsForCurrentSession();
 			pi.events?.emit?.(SUBAGENTS_LIVE_COUNT_EVENT, { count: liveState.count });
 			pi.events?.emit?.(SUBAGENTS_LIVE_STATE_EVENT, liveState);
 			publishRpcSessionState(currentSessionStateContext, SUBAGENTS_LIVE_STATE_EVENT, liveState);
@@ -209,6 +213,7 @@ export default function (pi: ExtensionAPI) {
 				});
 				if (boundaryMessages) boundaryMessages.push(message);
 				else {
+					completionWakeupPending = true;
 					pi.sendMessage(message, { triggerTurn: true, deliverAs: "followUp" });
 					// In agent_settled the SDK defers the new run. Do not schedule
 					// several independent prompts before that run has started.
@@ -287,6 +292,7 @@ export default function (pi: ExtensionAPI) {
 			shuttingDown = false;
 			parentRunAwaitingSettlement = false;
 			wakeupHeldByAbort = false;
+			completionWakeupPending = false;
 			sawAutoUltraworkCandidate = false;
 			currentSessionFile = sessionFileFromContext(ctx);
 			currentSessionStateContext = ctx;
@@ -334,6 +340,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("agent_settled", (event) => {
 		if (event.aborted) wakeupHeldByAbort = true;
 		parentRunAwaitingSettlement = false;
+		completionWakeupPending = false;
 		refreshSubagentOverlay();
 	});
 
@@ -397,6 +404,7 @@ export default function (pi: ExtensionAPI) {
 			shuttingDown = true;
 			parentRunAwaitingSettlement = false;
 			wakeupHeldByAbort = false;
+			completionWakeupPending = false;
 			completionReceipts.clear();
 			clearSessionLiveState();
 			clearSubagentsNativeWidget(ctx);

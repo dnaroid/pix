@@ -1,3 +1,4 @@
+import type { StopReason } from "@agentclientprotocol/sdk";
 import type { SessionStateNotification } from "./session-state";
 
 export const AGENT_CONTROL_CHANNEL = "agent-control";
@@ -23,6 +24,20 @@ export function agentControlStateFromSessionState(
 
 export function agentControlAllowsAutoQueue(state: AgentControlState | undefined): boolean {
   return (state ?? "idle") === "idle";
+}
+
+export function isStopReason(value: unknown): value is StopReason {
+  return value === "end_turn"
+    || value === "max_tokens"
+    || value === "max_turn_requests"
+    || value === "refusal"
+    || value === "cancelled";
+}
+
+/** Only a live adopted-run settlement carries a reason, never state rehydration. */
+export function agentControlStopReasonFromSessionState(notification: SessionStateNotification): StopReason | undefined {
+  if (!agentControlStateFromSessionState(notification) || !isRecord(notification.data)) return undefined;
+  return isStopReason(notification.data.stopReason) ? notification.data.stopReason : undefined;
 }
 
 /** Loaded paused transcripts rehydrate as continuable; both need the pause tab glyph. */

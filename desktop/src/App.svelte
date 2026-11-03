@@ -299,12 +299,12 @@
     agentState: (sessionId) => promptRuntime.agentState(sessionId),
     isPromptRunning: (sessionId) => promptRuntime.isRunning(sessionId),
     activeSubagents: (sessionId) => sessionActivity.summaries.get(sessionId)?.activeSubagents ?? 0,
+    subagentCompletionPending: (sessionId) => sessionActivity.subagents.get(sessionId)?.completionPending === true,
     onCompleted: (sessionId) => sessionTabAttention.markCompleted(
       sessionId,
       activeWorkbenchTabId === workbenchSessionTabId(sessionId),
     ),
   });
-  onSessionActivityChanged = agentNotifications.sessionActivityChanged;
 
   const sessionRuntime = sessionServices.runtime;
   const changingConfig = $derived(
@@ -344,6 +344,7 @@
       agentNotifications.promptSettled(sessionId, stopReason);
       projectServices.planLaunches.settle(sessionId, planLaunchOutcome(stopReason));
     },
+    shouldNotifyExtensionRun: (sessionId) => sessionActivity.subagents.get(sessionId)?.completionPending === true,
     onPromptError: (sessionId, error) => {
       agentNotifications.promptError(sessionId, error);
       projectServices.planLaunches.settle(sessionId, "failed");
@@ -360,6 +361,10 @@
     suppressAutoQueue: (sessionId) => quotaWait.waiting(sessionId),
   });
   const promptRuntime = promptServices.runtime;
+  onSessionActivityChanged = (sessionId) => {
+    promptRuntime.handleSessionActivityChanged(sessionId);
+    agentNotifications.sessionActivityChanged(sessionId);
+  };
   const queuedMessages = promptServices.queue;
   const queueItemsBySession = $derived(promptRuntime.queueItemsBySession);
   const refreshQueueState = promptRuntime.refreshQueueState;

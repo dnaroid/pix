@@ -2996,6 +2996,36 @@ test("session/prompt ignores a duplicate settlement before its agent_start", asy
 	});
 });
 
+for (const [sdkReason, expected] of [["stop", "end_turn"], ["error", "refusal"], ["length", "max_tokens"], ["aborted", "cancelled"]] as const) {
+	test(`an extension continuation publishes its settled ${expected} reason once`, async () => {
+		const { adapter, clients } = createTestAdapter();
+		const notifications: Array<{ sessionId: string; channel: string; data: { state?: string; stopReason?: string } }> = [];
+		await connect(adapter, async (cx) => {
+			const session = await cx.buildSession("/tmp/extension-completion-reason").start();
+			const pi = clients[0]!;
+			pi.emit({ type: "agent_start" });
+			pi.emit({ type: "agent_end", messages: [{ role: "assistant", stopReason: sdkReason }] });
+			assert.equal(notifications.some((item) => item.data.stopReason !== undefined), false,
+				"agent_end is not a settled completion");
+			pi.emit({ type: "agent_settled", aborted: sdkReason === "aborted" });
+			await waitFor(() => adapter.getSession(session.sessionId)?.activeRun === undefined);
+			await waitFor(() => notifications.some((item) => item.data.stopReason === expected));
+			const settled = notifications.filter((item) => item.channel === "agent-control" && item.data.stopReason !== undefined);
+			assert.deepEqual(settled.map((item) => item.data), [{ state: "idle", stopReason: expected }]);
+			await cx.request(PIX_AGENT_CONTROL_METHOD, { sessionId: session.sessionId, action: "state" });
+			assert.equal(notifications.filter((item) => item.data.stopReason !== undefined).length, 1,
+				"state rehydration must not replay completion");
+		}, (app) => {
+			const custom = app as unknown as {
+				onNotification(method: string, parser: (params: unknown) => typeof notifications[number],
+					handler: (ctx: { params: typeof notifications[number] }) => void): void;
+			};
+			custom.onNotification(PIX_SESSION_STATE_METHOD, (params) => params as typeof notifications[number],
+				(ctx) => { notifications.push(ctx.params); });
+		});
+	});
+}
+
 test("a recovered-question extension run publishes pause-ready running state", async () => {
 	const { adapter, clients } = createTestAdapter();
 	await connect(adapter, async (cx) => {

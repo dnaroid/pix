@@ -125,8 +125,12 @@ async function entryHarness(ids = ["child"]) {
 	const messages: any[] = [];
 	const messageOptions: unknown[] = [];
 	const evidenceEvents: any[] = [];
+	const liveStates: any[] = [];
 	register({
-		events: { emit: (channel: string, event: unknown) => { if (channel === "async-subagents:delegated-evidence") evidenceEvents.push(event); } },
+		events: { emit: (channel: string, event: unknown) => {
+			if (channel === "async-subagents:delegated-evidence") evidenceEvents.push(event);
+			if (channel === "pi-tools-suite:async-subagents:live-state") liveStates.push(event);
+		} },
 		registerTool: (tool: any) => tools.set(tool.name, tool),
 		registerCommand() {},
 		on: (event: string, handler: any) => handlers.set(event, handler),
@@ -134,7 +138,7 @@ async function entryHarness(ids = ["child"]) {
 	} as any);
 	await handlers.get("session_start")({}, ctx);
 	return {
-		ctx, runDir, messages, messageOptions, evidenceEvents,
+		ctx, runDir, messages, messageOptions, evidenceEvents, liveStates,
 		setBusy: (value: boolean) => { busy = value; },
 		boundary: (context = ctx, outcome = "completed", canContinue = true) => handlers.get("agent_before_settle")({ outcome, context: { canContinue } }, context),
 		settle: (aborted = false) => { busy = false; return handlers.get("agent_settled")({ aborted }, ctx); },
@@ -159,6 +163,28 @@ async function entryHarness(ids = ["child"]) {
 }
 
 describe.serial("completion delivery through the entrypoint", () => {
+	test("zero visible children do not settle a queued parent follow-up", async () => {
+		const h = await entryHarness();
+		try {
+			await h.start();
+			await h.settle();
+			expect(h.liveStates.at(-1)).toMatchObject({ count: 1, completionPending: true });
+			h.finish();
+			await h.refresh();
+			expect(h.messages).toHaveLength(1);
+			expect(h.liveStates.at(-1)).toMatchObject({ count: 0, completionPending: true });
+			// sendMessage can queue a turn without starting it synchronously.
+			await h.refresh();
+			expect(h.liveStates.at(-1).completionPending).toBe(true);
+			await h.start();
+			await h.refresh();
+			expect(h.liveStates.at(-1).completionPending).toBe(true);
+			await h.settle();
+			expect(h.liveStates.at(-1)).toMatchObject({ count: 0, completionPending: false });
+			expect(h.messages).toHaveLength(1);
+		} finally { await h.close(); }
+	});
+
 	test("normal settlement releases the watcher gate and wakes the parent once", async () => {
 		const h = await entryHarness();
 		try {
@@ -168,6 +194,7 @@ describe.serial("completion delivery through the entrypoint", () => {
 			await h.refresh();
 			expect(h.messages).toHaveLength(0);
 			await h.settle(false);
+			expect(h.liveStates.at(-1)).toMatchObject({ count: 0, completionPending: true });
 			await h.refresh();
 			expect(h.messages).toHaveLength(1);
 			expect(h.messageOptions[0]).toMatchObject({ triggerTurn: true, deliverAs: "followUp" });

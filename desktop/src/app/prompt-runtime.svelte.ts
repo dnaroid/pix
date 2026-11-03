@@ -45,6 +45,7 @@ export function createPromptRuntime(options: PromptRuntimeOptions) {
     operationRunning: options.operationRunning,
     setErrorMessage: options.setErrorMessage,
     reportError: options.reportError,
+    shouldNotifyExtensionRun: options.shouldNotifyExtensionRun,
     runs,
   });
 
@@ -72,6 +73,7 @@ export function createPromptRuntime(options: PromptRuntimeOptions) {
     agentState: agent.agentState,
     setAgentState: agent.setAgentState,
     handleAgentControlStatePush: agent.handleAgentControlStatePush,
+    handleSessionActivityChanged: agent.handleSessionActivityChanged,
     handleQueueState: queue.handleQueueState,
     handleQueueConsumed: queue.handleQueueConsumed,
     refreshQueueState: queue.refreshQueueState,

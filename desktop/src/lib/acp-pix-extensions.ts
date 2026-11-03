@@ -1,6 +1,6 @@
 import type { ContentBlock, SessionConfigOption, SessionUpdate } from "@agentclientprotocol/sdk";
 import { BTW_METHOD, parseBtwCommand, parseBtwState, type BtwCommand, type BtwState } from "../../../acp/src/btw/contract";
-import { isAgentControlState, type AgentControlAction } from "./agent-control";
+import { isAgentControlState, isStopReason, type AgentControlAction } from "./agent-control";
 import {
   parseRegistryDiff,
   parseRegistrySnapshot,
@@ -124,14 +124,6 @@ export type AcpRequest = <Response>(
   timeoutMs?: number | null,
   signal?: AbortSignal,
 ) => Promise<Response>;
-
-function isStopReason(value: unknown): value is NonNullable<AgentControlStatus["stopReason"]> {
-  return value === "end_turn"
-    || value === "max_tokens"
-    || value === "max_turn_requests"
-    || value === "refusal"
-    || value === "cancelled";
-}
 
 export class AcpPixExtensions {
   constructor(private readonly request: AcpRequest) {}
