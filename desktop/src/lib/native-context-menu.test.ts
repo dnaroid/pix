@@ -6,6 +6,9 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { createNativeContextMenuFactory, nativeContextMenuItems } from "./native-context-menu";
 import type { DesktopContextTarget } from "./desktop-context-target";
 import { copyContextImage, openContextImage } from "./image-context-actions";
+import { selectPreviewText } from "./preview-text-selection";
+
+vi.mock("./preview-text-selection", () => ({ selectPreviewText: vi.fn() }));
 
 vi.mock("./image-context-actions", () => ({ copyContextImage: vi.fn().mockResolvedValue(undefined), openContextImage: vi.fn().mockResolvedValue(undefined) }));
 
@@ -27,6 +30,26 @@ const labels = (value: Partial<DesktopContextTarget>) => items(value).map((item)
 
 describe("native desktop context menu commands", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it("scopes Preview Select All to the captured document, including selected text and source rows", () => {
+    const surface = { isConnected: true } as HTMLElement;
+    for (const linux of [false, true]) {
+      for (const kind of ["file", "selection", "link", "readonly"] as const) {
+        const commands = items({ kind, previewTextSurface: surface, sourceReference: "file.ts:1" }, linux);
+        const selects = commands.filter((item) => "id" in item && item.id === "desktop.text.SelectAll");
+        expect(selects).toHaveLength(1);
+        const command = selects[0];
+        if (command && "action" in command) command.action?.("ignored");
+      }
+    }
+    expect(selectPreviewText).toHaveBeenCalledTimes(8);
+    expect(selectPreviewText).toHaveBeenLastCalledWith(surface);
+    expect(invoke).not.toHaveBeenCalled();
+    const stale = items({ kind: "file", previewTextSurface: surface }, false, () => false);
+    const select = stale.find((item) => "id" in item && item.id === "desktop.text.SelectAll");
+    if (select && "action" in select) select.action?.("ignored");
+    expect(selectPreviewText).toHaveBeenCalledTimes(8);
+  });
 
   it("uses native editing roles instead of replacing values or synthesizing paste", () => {
     expect(labels({})).toEqual(["Undo", "Redo", "Separator", "Cut", "Copy", "Paste", "Separator", "SelectAll"]);

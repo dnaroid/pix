@@ -63,7 +63,7 @@ export class NativeSessionMetadataCache {
   }
 }
 
-/** SDK-compatible title, fork and activity projection without allMessagesText. */
+/** SDK-compatible title/fork projection, with filesystem modification time for catalog ordering. */
 export async function readNativeSessionMetadata(path: string, signal: AbortSignal): Promise<NativeSessionMetadata | undefined> {
   signal.throwIfAborted();
   const file = await open(path, "r");
@@ -78,7 +78,6 @@ export async function readNativeSessionMetadata(path: string, signal: AbortSigna
     let header: Record<string, unknown> | undefined;
     let name: string | undefined;
     let firstMessage = "";
-    let lastActivity: number | undefined;
     for await (const line of lines) {
       signal.throwIfAborted();
       let entry;
@@ -92,8 +91,6 @@ export async function readNativeSessionMetadata(path: string, signal: AbortSigna
       if (entry.type === "session_info") name = typeof entry.name === "string" ? entry.name.trim() || undefined : undefined;
       const message = entry.type === "message" ? entry.message : undefined;
       if (!message || typeof message !== "object" || !("content" in message) || (message.role !== "user" && message.role !== "assistant")) continue;
-      const activity = typeof message.timestamp === "number" ? message.timestamp : Date.parse(entry.timestamp);
-      if (Number.isFinite(activity)) lastActivity = Math.max(lastActivity ?? 0, activity);
       if (!firstMessage && message.role === "user") {
         if (typeof message.content === "string") firstMessage = message.content;
         else if (Array.isArray(message.content)) {
@@ -105,14 +102,11 @@ export async function readNativeSessionMetadata(path: string, signal: AbortSigna
     }
     signal.throwIfAborted();
     if (!header) return;
-    const headerTime = typeof header.timestamp === "string" ? Date.parse(header.timestamp) : NaN;
-    let modified = Number.isFinite(headerTime) ? headerTime : stats.mtimeMs;
-    if (lastActivity !== undefined && lastActivity > 0) modified = lastActivity;
     return {
       path: resolve(path), id: header.id as string, cwd: typeof header.cwd === "string" ? header.cwd : "",
       ...(name ? { name } : {}),
       ...(typeof header.parentSession === "string" ? { parentSessionPath: header.parentSession } : {}),
-      modified: new Date(modified),
+      modified: stats.mtime,
       firstMessage: firstMessage || "(no messages)",
     };
   } finally {

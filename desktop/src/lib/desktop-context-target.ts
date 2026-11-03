@@ -9,6 +9,8 @@ export interface DesktopContextTarget {
   kind: DesktopContextKind;
   element: HTMLElement;
   editor: HTMLElement | null;
+  /** Read-only Preview document owning local Select All. */
+  previewTextSurface?: HTMLElement;
   linkUrl?: string;
   /** Absolute (or `~/`) target of a validated Markdown local/project file link. */
   fileLinkPath?: string;
@@ -170,6 +172,7 @@ export function desktopContextTarget(target: EventTarget | null, workspace = "")
   const fileLinkRevealPath = fileLinkPath ? projectRevealPath(fileLinkPath, workspace) : undefined;
   const hasSelection = hasContextSelection(element);
   const sourceReference = previewSourceReference(element, workspace);
+  const previewTextSurface = element.closest<HTMLElement>(".preview-text-surface") ?? undefined;
   if (linkUrl || fileLinkPath || hasSelection || sourceReference || fileSurface) {
     let kind: DesktopContextKind = fileSurface ? "file" : "readonly";
     if (linkUrl || fileLinkPath) kind = "link";
@@ -177,7 +180,7 @@ export function desktopContextTarget(target: EventTarget | null, workspace = "")
     const assist = hasSelection ? selectionAssistTarget(element.ownerDocument.getSelection()) ?? undefined : undefined;
     return {
       kind, element, editor: null, ...(assist ? { assist } : {}), linkUrl, fileLinkPath, fileLinkRevealPath, sourceReference,
-      filePath, projectRevealPath: revealPath, moveTab, hasSelection, readOnly: true,
+      filePath, projectRevealPath: revealPath, moveTab, previewTextSurface, hasSelection, readOnly: true,
     };
   }
   if (workbenchTab && moveTab) return { kind: "workbench", element: workbenchTab, moveTab, editor: null, hasSelection: false, readOnly: true };

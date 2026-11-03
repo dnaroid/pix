@@ -42,6 +42,7 @@ Make Pix Desktop text selection behave like a native desktop application: conver
 7. Buttons, selects, disclosure summaries, tabs, options, checkbox/radio controls, and menu-item chrome remain non-selectable even when nested inside an otherwise selectable content surface.
 8. Existing per-component `select-none` behavior remains authoritative for interaction labels that intentionally live inside the transcript, such as disclosure summaries.
 9. In Tauri windows, right-click on selected content opens the native application text menu, not the WebView menu. Selection Copy takes priority over whole-user-message actions; the message ellipsis still exposes those actions. Text editing uses native editing commands without replacing the draft value or inventing a separate undo stack. See `desktop-context-menus.md`.
+10. In read-only Markdown and source Preview, native context-menu Select All and focused `Cmd+A`/`Ctrl+A` select only the `.preview-text-surface` document, excluding the transcript, Preview header, and other chrome. Editable descendants retain their native local Select All behavior. Context-menu actions captured from stale or detached Preview targets do nothing.
 
 ## Verification
 
@@ -55,6 +56,7 @@ Make Pix Desktop text selection behave like a native desktop application: conver
 - Manual desktop verification: select across wrapped Markdown and source lines in Preview, then edit the file and select inside the textarea; confirm the theme selection background and foreground apply consistently to prose, links, code, and syntax tokens, Markdown Preview's outer horizontal gutters do not paint selection, Copy returns the selected text, and find-input selection keeps its normal paint.
 - Manual desktop verification: focus the composer, press `Cmd+A`/`Ctrl+A`, and confirm only the draft is selected.
 - Manual desktop verification: move focus to non-editable chrome and invoke Select All; transcript text may select, but chrome/control labels do not.
+- Manual desktop verification: in read-only Markdown and source Preview, use the native context menu's Select All and focused `Cmd+A`/`Ctrl+A`; selection must cover only the Preview document, not transcript/header/chrome. Confirm editable fields retain their native local selection behavior.
 
 ## Evidence
 

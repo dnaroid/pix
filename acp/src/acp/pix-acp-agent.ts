@@ -757,7 +757,17 @@ export class PixAcpAgent {
 		this.usageStatsHost = new UsageStatsHost({ logger: this.options.logger, agentDir: options.agentDir ?? getAgentDir() });
 		this.providerUsageCache = new ProviderUsageCacheHost({ logger: this.options.logger, ...(options.agentDir ? { agentDir: options.agentDir } : {}) });
 		this.listPiSessions = options.listPiSessions
-			?? ((cwd, signal) => cwd ? SessionManager.list(cwd, undefined, undefined, signal) : SessionManager.listAll(undefined, signal));
+			?? (async (cwd, signal) => {
+				const sessions = cwd
+					? await SessionManager.list(cwd, undefined, undefined, signal)
+					: await SessionManager.listAll(undefined, signal);
+				// SDK `modified` is message activity (or creation for empty sessions).
+				// ACP selectors need the last file modification, including metadata edits.
+				return Promise.all(sessions.map(async (session) => {
+					signal?.throwIfAborted();
+					return { ...session, modified: (await stat(session.path)).mtime };
+				}));
+			});
 		this.loadTuiTabs = options.loadTuiTabs ?? ((cwd) => loadTuiTabSnapshot(cwd));
 		this.loadAutocompleteConfig = options.loadAutocompleteConfig ?? loadAutocompleteConfig;
 		this.loadDefaultModel = options.loadDefaultModel ?? loadPixDefaultModel;

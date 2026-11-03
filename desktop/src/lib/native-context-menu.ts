@@ -4,6 +4,7 @@ import { Menu, type MenuItemOptions, type PredefinedMenuItemOptions } from "@tau
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { DesktopContextTarget } from "./desktop-context-target";
+import { selectPreviewText } from "./preview-text-selection";
 import { copyContextImage, openContextImage } from "./image-context-actions";
 import { gitRemoteLinkLabel, type GitRemoteEntryLink } from "./project-git-remote-link";
 import type { SelectionAssistTarget } from "./selection-assist-target";
@@ -56,7 +57,13 @@ export function nativeContextMenuItems(
     if (isActive() && context.element.isConnected) void action().catch(reportError);
   };
   const edit = (command: EditCommand) => {
-    if (linux) {
+    if (command === "SelectAll" && context.previewTextSurface) {
+      const surface = context.previewTextSurface;
+      items.push({
+        id: "desktop.text.SelectAll", text: EDIT_LABELS.SelectAll,
+        action: run(async () => selectPreviewText(surface)),
+      });
+    } else if (linux) {
       // muda's Linux predefined actions emulate X11 keys (and omit Undo/Redo).
       // Execute WebKit's native editing commands instead, including on Wayland.
       items.push({
@@ -147,6 +154,11 @@ export function nativeContextMenuItems(
     edit("SelectAll");
   } else if (context.hasSelection) {
     edit("Copy");
+  }
+
+  if (context.previewTextSurface && (context.kind !== "readonly" || context.sourceReference)) {
+    if (items.length) separator();
+    edit("SelectAll");
   }
 
   const assist = context.assist;

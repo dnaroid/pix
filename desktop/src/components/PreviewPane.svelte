@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { previewTextSelection } from "../lib/preview-text-selection";
   import { iconButtonClass } from "../lib/icon-button";
   import { convertFileSrc } from "@tauri-apps/api/core";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
@@ -730,6 +731,7 @@
           <!-- svelte-ignore a11y_no_noninteractive_tabindex Scrollable preview needs keyboard focus. -->
           <div
             bind:this={contentScrollElement}
+            use:previewTextSelection
             use:restoreScroll={{ key: previewId, position: scrollPosition }}
             class="preview-text-surface min-h-0 min-w-0 flex-1 overflow-auto bg-background outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             role="region"
@@ -762,6 +764,7 @@
         <!-- svelte-ignore a11y_no_noninteractive_tabindex Scrollable source needs keyboard focus. -->
         <div
           bind:this={contentScrollElement}
+          use:previewTextSelection
           use:restoreScroll={{ key: previewId, position: scrollPosition }}
           class="preview-text-surface preview-source-surface min-h-0 min-w-0 flex-1 overflow-auto outline-none [container-type:inline-size] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           role="region"

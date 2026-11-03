@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { NativeSessionMetadataCache, readNativeSessionMetadata } from "../src/acp/native-session-metadata.js";
 import { nativeSessionDirectory } from "../src/search/session-discovery.js";
+import { SessionMapStore } from "../src/acp/session-map.js";
 
 const cwd = resolve("/catalog-project");
 const signal = () => new AbortController().signal;
@@ -22,7 +23,7 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   return { agentDir, directory };
 }
 
-test("metadata projection matches SDK title, activity and fork fields without transcript retention", async t => {
+test("metadata projection matches SDK title and fork fields without transcript retention", async t => {
   const { directory } = await fixture(t);
   const path = join(directory, "a.jsonl");
   await writeFile(path, header("a") + user
@@ -33,13 +34,39 @@ test("metadata projection matches SDK title, activity and fork fields without tr
   const [expected] = await SessionManager.list(cwd, directory);
   const info = await readNativeSessionMetadata(path, signal());
   assert.ok(expected && info);
-  for (const field of ["path", "id", "cwd", "name", "firstMessage", "modified", "parentSessionPath"] as const) {
+  for (const field of ["path", "id", "cwd", "name", "firstMessage", "parentSessionPath"] as const) {
     assert.deepEqual(info[field], expected[field], field);
   }
   assert.equal("allMessagesText" in info, false);
   assert.equal("messageCount" in info, false);
+  assert.deepEqual(info.modified, (await stat(path)).mtime);
   await appendFile(path, line({ type: "session_info", name: " " }));
   assert.equal((await readNativeSessionMetadata(path, signal()))?.name, undefined, "explicit title clear");
+});
+
+test("catalog orders by file modification, not creation or message timestamps", async t => {
+  const { agentDir, directory } = await fixture(t);
+  const old = join(directory, "old.jsonl"), newer = join(directory, "newer.jsonl");
+  await writeFile(old, header("old") + user + line({ type: "session_info", name: "Renamed" }));
+  await writeFile(newer, line({ type: "session", version: 3, id: "newer", cwd, timestamp: "2026-02-01T00:00:00Z" }));
+  const recent = new Date("2026-04-01T00:00:00Z"), previous = new Date("2026-03-01T00:00:00Z");
+  await utimes(old, recent, recent);
+  await utimes(newer, previous, previous);
+  const cache = new NativeSessionMetadataCache(agentDir);
+  const store = new SessionMapStore(join(agentDir, "map.json"), { info() {}, warn() {}, error() {}, debug() {} });
+  const refresh = async () => {
+    await store.mergeByPiSessionPath((await cache.list(cwd, signal())).map(info => ({
+      sessionId: info.id, piSessionId: info.id, piSessionPath: info.path, cwd,
+      updatedAt: info.modified.toISOString(),
+    })));
+    return (await store.list(cwd)).map(record => record.sessionId);
+  };
+  assert.deepEqual(await refresh(), ["old", "newer"]);
+  const latest = new Date("2026-05-01T00:00:00Z");
+  await appendFile(newer, line({ type: "session_info", name: "Empty but edited" }));
+  await utimes(newer, latest, latest);
+  assert.deepEqual(await refresh(), ["newer", "old"]);
+  assert.equal((await store.list(cwd))[0]?.updatedAt, latest.toISOString());
 });
 
 test("unchanged files are never reread when one session grows, is replaced, or is deleted", async t => {
