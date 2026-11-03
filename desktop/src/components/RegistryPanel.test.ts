@@ -102,6 +102,14 @@ describe("RegistryProjectStatus quiet-by-default sync row", () => {
     expect(projectStatusSource).toContain('onclick={() => onAction({ action: "project-key" }, "project-key")}');
   });
 
+  it("uses the same cleanup policy for the menu and confirmation, with an unknown-size fallback", () => {
+    expect(projectStatusSource).toContain("const canCleanProjectPi = $derived(registryProjectCleanupAllowed({");
+    expect(projectStatusSource).toContain("disabled={!canCleanProjectPi}");
+    expect(projectStatusSource).toContain("if (!canCleanProjectPi) return;");
+    expect(projectStatusSource).toContain("projectPiStorageError === requestedError && canCleanProjectPi) onCleanProject();");
+    expect(projectStatusSource).toContain("Clean generated data from .pi? The storage size is unavailable.");
+  });
+
   it("shows routine project changes as automatic sync but keeps review items visible on errors", () => {
     expect(sidebarSource).toContain("backgroundSync={registryBackgroundSync}");
     expect(projectStatusSource).toContain("registryProjectSyncPresentation(projectItems, backgroundSync, snapshot?.error, projectKeyRequired)");

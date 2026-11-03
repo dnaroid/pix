@@ -71,6 +71,11 @@ describe("Registry project initialization", () => {
     expect(store.projectPiStorageLoading).toBe(false);
     expect(store.projectPiStorageError).toBe("Storage meter unavailable");
     expect(reportError).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledWith("log_desktop_diagnostic", expect.objectContaining({
+      event: "frontend:warning",
+      workspace: "/project",
+      diagnostic: expect.stringContaining("registry:storage-inspection"),
+    }));
   });
 
   it("bounds a stalled .pi storage inspection instead of remaining in loading forever", async () => {
@@ -135,6 +140,64 @@ describe("Registry project initialization", () => {
     expect(loadProjectDocuments).toHaveBeenCalledWith("/project");
     await vi.waitFor(() => expect(store.projectInitialized).toBe(true));
     await vi.waitFor(() => expect(store.projectPiSizeBytes).toBe(1536));
+  });
+
+  it("can clean after a meter timeout and ignores the late pre-clean estimate", async () => {
+    vi.useFakeTimers();
+    const { store } = fixture();
+    let finishInspection!: (value: unknown) => void;
+    let inspected = false;
+    invoke.mockImplementation(async (command: string) => {
+      if (command === "project_pi_initialized") return true;
+      if (command === "project_pi_storage") {
+        if (!inspected) {
+          inspected = true;
+          return new Promise((resolve) => { finishInspection = resolve; });
+        }
+        return { totalBytes: 1024, cleanupBytes: 0, cleanupAvailable: false };
+      }
+      if (command === "clean_project_pi") return 512;
+      return undefined;
+    });
+
+    const pending = store.refreshProjectInitialization();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await pending;
+    expect(store.projectPiStorageError).toBe("Storage meter timed out");
+
+    await expect(store.cleanProject()).resolves.toBe(true);
+    expect(invoke).toHaveBeenCalledWith("clean_project_pi", { workspace: "/project" });
+    finishInspection({ totalBytes: 1536, cleanupBytes: 512, cleanupAvailable: true });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(store.projectPiStorageError).toBeNull();
+    expect(store.projectPiSizeBytes).toBe(1024);
+    expect(store.projectPiCleanupBytes).toBe(0);
+    expect(store.projectPiCleanupAvailable).toBe(false);
+    expect(store.actionId).toBeNull();
+  });
+
+  it("logs storage failures once per streak and resumes reporting after recovery", async () => {
+    const { store } = fixture();
+    let failing = true;
+    invoke.mockImplementation(async (command: string) => {
+      if (command === "project_pi_initialized") return true;
+      if (command === "project_pi_storage") {
+        if (failing) throw new Error("permission denied");
+        return { totalBytes: 1024, cleanupBytes: 0, cleanupAvailable: false };
+      }
+      return undefined;
+    });
+    const warningCount = () => invoke.mock.calls.filter(([command]) => command === "log_desktop_diagnostic").length;
+
+    await store.refreshProjectInitialization();
+    await store.refreshProjectInitialization();
+    expect(warningCount()).toBe(1);
+    failing = false;
+    await store.refreshProjectInitialization();
+    failing = true;
+    await store.refreshProjectInitialization();
+    expect(warningCount()).toBe(2);
   });
 
   it("cleans only reclaimable .pi garbage and keeps project state initialized", async () => {

@@ -24,6 +24,7 @@
   import RegistryStatusIcon from "./RegistryStatusIcon.svelte";
   import type { RegistryBackgroundSyncState } from "../lib/registry-background-sync";
   import { registryProjectSyncPresentation } from "../lib/registry-project-sync";
+  import { registryProjectCleanupAllowed } from "../lib/registry-project-cleanup";
 
   let {
     snapshot,
@@ -70,6 +71,13 @@
     item.status !== "up-to-date" && item.status !== "local-only" && item.status !== "local-changes"
   ));
   const expanded = $derived(projectSync.needsReview && attentionItems.length > 0);
+  const canCleanProjectPi = $derived(registryProjectCleanupAllowed({
+    busy: storageBusy,
+    actionId,
+    loading: projectPiStorageLoading,
+    error: projectPiStorageError,
+    cleanupAvailable: projectPiCleanupAvailable,
+  }));
 
   function requestFor(item: RegistryItem, action: RegistryItemAction): RegistryActionRequest | undefined {
     if (!item.artifact || (action !== "push" && action !== "pull")) return undefined;
@@ -116,15 +124,17 @@
 
   async function cleanProjectPi(): Promise<void> {
     menuOpen = false;
-    if (storageBusy || actionId !== null || projectPiStorageLoading || projectPiStorageError || !projectPiCleanupAvailable) return;
-    const requestSnapshot = snapshot, requestedBytes = projectPiCleanupBytes;
+    if (!canCleanProjectPi) return;
+    const requestSnapshot = snapshot, requestedBytes = projectPiCleanupBytes, requestedError = projectPiStorageError;
+    const question = projectPiStorageError
+      ? "Clean generated data from .pi? The storage size is unavailable."
+      : `Clean ${formatPiSize(projectPiCleanupBytes)} from .pi?`;
     const confirmed = await confirmDesktopDeletion(
-      `Clean ${formatPiSize(projectPiCleanupBytes)} from .pi? This clears all contents of artifacts/ and subagents/ and removes non-canonical top-level files and directories. Canonical project state, config, agents/, plans/, skills/ and task-attachments/ are preserved.`,
+      `${question} This clears all contents of artifacts/ and subagents/ and removes non-canonical top-level files and directories. Canonical project state, config, agents/, plans/, skills/ and task-attachments/ are preserved.`,
       { title: "Clean project data?", okLabel: "Clean" },
     );
     if (confirmed && snapshot === requestSnapshot && projectPiCleanupBytes === requestedBytes
-      && !storageBusy && actionId === null && !projectPiStorageLoading
-      && !projectPiStorageError && projectPiCleanupAvailable) onCleanProject();
+      && projectPiStorageError === requestedError && canCleanProjectPi) onCleanProject();
   }
 
   $effect(() => {
@@ -200,7 +210,7 @@
               role="menuitem"
               type="button"
               class="flex min-h-7 w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-xs text-tool-error hover:bg-tool-error/10 disabled:opacity-40"
-              disabled={storageBusy || actionId !== null || projectPiStorageLoading || Boolean(projectPiStorageError) || !projectPiCleanupAvailable}
+              disabled={!canCleanProjectPi}
               onclick={cleanProjectPi}
             >
               {#if actionId === "cleanup-project"}

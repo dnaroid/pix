@@ -305,7 +305,14 @@ JSONC/task overlay import or fallback.
   the panel does not duplicate full-tree traversal. Desktop bounds local project
   inspection waits to five seconds; a stalled or failed storage inspection ends
   the loading state with a local unavailable/timeout status, and a later Refresh
-  starts a new inspection instead of leaving `Checking…` indefinitely.
+  starts a new inspection instead of leaving `Checking…` indefinitely. A storage
+  inspection timeout or failure does not disable `Clean .pi`: confirmation states
+  that the size is unavailable rather than showing a stale reclaimable estimate.
+  Cleanup still shares the action/storage mutex and revalidates the current
+  snapshot, size result and error state after confirmation; known-empty storage
+  and an inspection still loading remain disabled. Inspection failures emit the
+  existing diagnostic warning once per failure streak; recovery or workspace
+  reset allows a later streak to warn again.
 - Registry cleanup is allowlist-based and never resets project state. The
   canonical top-level project directories are `agents/`, `artifacts/`,
   `plans/`, `search/`, `skills/`, `subagents/`, and `task-attachments/`.

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { createDiagnosticLogger, createFailureStreakReporter } from "../lib/diagnostic-logging";
 
 type ProjectPiStorageSnapshot = {
   totalBytes: number | null;
@@ -36,6 +37,8 @@ export function createRegistryProjectStorage(options: RegistryProjectStorageOpti
   let error = $state<string | null>(null);
   let loadGeneration = 0;
   let lifecycleGeneration = 0;
+  const diagnostics = createDiagnosticLogger(() => ({ workspace: options.workspace() }));
+  const storageFailures = createFailureStreakReporter((caught) => diagnostics.warn("registry:storage-inspection", caught));
 
   async function refresh(): Promise<void> {
     const workspace = options.workspace();
@@ -48,6 +51,7 @@ export function createRegistryProjectStorage(options: RegistryProjectStorageOpti
       cleanupAvailable = false;
       loading = false;
       error = null;
+      storageFailures.success();
       return;
     }
     loading = true;
@@ -64,9 +68,11 @@ export function createRegistryProjectStorage(options: RegistryProjectStorageOpti
       cleanupBytes = storageResult.value.cleanupBytes;
       cleanupAvailable = storageResult.value.cleanupAvailable;
       error = null;
+      storageFailures.success();
     } else {
       cleanupAvailable = false;
       error = storageErrorLabel(storageResult.reason);
+      storageFailures.failure(storageResult.reason);
     }
     loading = false;
   }
@@ -147,6 +153,7 @@ export function createRegistryProjectStorage(options: RegistryProjectStorageOpti
     cleanupAvailable = false;
     loading = false;
     error = null;
+    storageFailures.success();
   }
 
   return {
