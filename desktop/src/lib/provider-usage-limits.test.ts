@@ -21,12 +21,13 @@ describe("provider limit snapshots", () => {
     expect(providerUsageLimits([status(usage, { ...usage, updatedAt: now + 1, hourly: undefined, rateWindows: [hourly] })], now)).toEqual([]);
   });
 
-  it("expires cached windows independently and prefers fresh data on equal timestamps", () => {
+  it("retains cached windows past reset and prefers fresh data on equal timestamps", () => {
     const expired = { ...hourly, resetAt: now };
-    expect(providerUsageLimits([status({ ...usage, stale: true, hourly: expired })], now)).toEqual([]);
+    expect(providerUsageLimits([status({ ...usage, stale: true, hourly: expired })], now)[0]?.hourly).toEqual(expired);
     const [entry] = providerUsageLimits([status({ ...usage, stale: true, hourly: expired, weekly: hourly })], now);
-    expect(entry?.hourly).toBeUndefined();
+    expect(entry?.hourly).toEqual(expired);
     expect(entry?.weekly).toEqual(hourly);
+    expect(entry?.stale).toBe(true);
     expect(providerUsageLimits([status({ ...usage, stale: true }), status(usage)], now)[0]?.stale).toBeUndefined();
   });
 

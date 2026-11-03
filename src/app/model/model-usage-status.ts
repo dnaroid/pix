@@ -527,32 +527,24 @@ export function modelUsageRemainingPercent(status: ModelUsageStatus | undefined,
 }
 
 /**
- * Retain a quota snapshot as explicitly stale cache. Only windows whose reset
- * has not passed survive — an expired window describes a quota period that is
- * over, so it is dropped instead of aging indefinitely. Returns `undefined`
- * when nothing current enough remains.
+ * Retain the last observed quota windows as explicitly stale cache until a
+ * fresh observation replaces them. Passing reset does not prove a refill.
  */
-export function markModelUsageStale(status: ModelUsageStatus | undefined, now = Date.now()): ModelUsageStatus | undefined {
+export function markModelUsageStale(status: ModelUsageStatus | undefined, _now = Date.now()): ModelUsageStatus | undefined {
 	if (!status) return undefined;
-	const hourly = status.hourly !== undefined && status.hourly.resetAt > now ? status.hourly : undefined;
-	const weekly = status.weekly !== undefined && status.weekly.resetAt > now ? status.weekly : undefined;
-	if (!hourly && !weekly) return undefined;
+	if (!status.hourly && !status.weekly) return undefined;
 	// Banked credits can be spent externally; do not carry them as fresh data
 	// through credential absence, even while cached quota windows survive.
-	const { hourly: _oldHourly, weekly: _oldWeekly, resetCredits: _credits, resetCreditsAvailableCount: _count, ...withoutWindows } = status;
+	const { resetCredits: _credits, resetCreditsAvailableCount: _count, ...quota } = status;
 	return {
-		...withoutWindows,
+		...quota,
 		stale: true,
-		...(hourly ? { hourly } : {}),
-		...(weekly ? { weekly } : {}),
 	};
 }
 
 /**
- * Display view of a quota snapshot. Fresh statuses pass through unchanged; a
- * stale (cached) status loses windows whose reset has passed and disappears
- * entirely once every window has expired, so cached values never outlive the
- * window they describe.
+ * Display view of a quota snapshot. Fresh statuses pass through unchanged;
+ * stale windows remain visible at their original values and reset times.
  */
 export function liveStaleModelUsage(status: ModelUsageStatus | undefined, now = Date.now()): ModelUsageStatus | undefined {
 	if (!status?.stale) return status;

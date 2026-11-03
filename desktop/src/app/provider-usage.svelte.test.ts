@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcpClient, ModelUsageStatus } from "../lib/acp-client";
 import { providerUsageTargets } from "../lib/provider-usage-targets";
+import { providerUsageRows } from "../lib/provider-usage-rows";
 import { createProviderUsageStore, resetProviderUsageCacheForTests } from "./provider-usage.svelte";
 
 type Response = Awaited<ReturnType<AcpClient["draftConfig"]>>;
@@ -49,6 +50,34 @@ describe("provider quota targets", () => {
 });
 
 describe("panel-owned provider quota polling", () => {
+  it("keeps expired Z.ai quotas visible during refresh and replaces them only on success", async () => {
+    const { store, draftConfig } = setup();
+    const old = { ...quota("zai/glm"), stale: true as const };
+    const late = deferred<Response>();
+    draftConfig.mockImplementation((_cwd, selection) => selection ? late.promise : Promise.resolve({
+      ...catalogue([old.modelKey]), usageCache: { scope: "a".repeat(64), snapshots: [old] },
+    }));
+    const pending = store.refresh();
+    await flush();
+    await vi.advanceTimersByTimeAsync(3_600_000);
+    const rows = () => providerUsageRows(store.entries.flatMap((entry) => entry.runtime ? [entry.runtime] : []), store.entries, Date.now(), []);
+    expect(store.busy).toBe(true);
+    expect(rows()[0]).toMatchObject({ kind: "quota", usage: { hourly: old.hourly, stale: true } });
+    late.resolve({ ...catalogue(), modelUsageRefresh: "failed" });
+    await pending;
+    expect(rows()[0]).toMatchObject({ kind: "quota", usage: { hourly: old.hourly, stale: true } });
+    const fresh = { ...quota(old.modelKey), hourly: { ...old.hourly!, remainingPercent: 80, resetAt: Date.now() + 3_600_000 } };
+    draftConfig.mockImplementation(async (_cwd, selection) => selection
+      ? { ...catalogue(), modelUsageRefresh: "ready", modelUsage: fresh }
+      : { ...catalogue([old.modelKey]), usageCache: { scope: "a".repeat(64), snapshots: [] } });
+    await store.refresh();
+    expect(rows()[0]).toMatchObject({ kind: "quota", usage: { hourly: fresh.hourly } });
+    const row = rows()[0];
+    expect(row?.kind).toBe("quota");
+    if (row?.kind === "quota") expect(row.usage.stale).toBeUndefined();
+    store.dispose();
+  });
+
   it("shows saved quotas while the first live refresh is pending and keeps them asleep on collapse", async () => {
     const { store, draftConfig } = setup();
     const late = deferred<Response>();

@@ -245,20 +245,18 @@ export function mergePushedModelUsage(
 }
 
 /**
- * Display view of a cached (`stale`) quota snapshot: windows whose reset has
- * passed are dropped and nothing remains once every window expired, so cached
- * values never outlive the window they describe. Fresh statuses pass through.
+ * Keep cached quota windows until a new observation replaces them, including
+ * after reset. They describe the last observation, not a predicted refill.
+ * Banked credits are not retained as available. Fresh statuses pass through.
  */
 export function liveModelUsage(
   status: ModelUsageStatus | undefined,
-  now = Date.now(),
+  _now = Date.now(),
 ): ModelUsageStatus | undefined {
   if (!status?.stale) return status;
-  const hourly = status.hourly !== undefined && status.hourly.resetAt > now ? status.hourly : undefined;
-  const weekly = status.weekly !== undefined && status.weekly.resetAt > now ? status.weekly : undefined;
-  if (!hourly && !weekly) return undefined;
-  const { hourly: _oldHourly, weekly: _oldWeekly, resetCredits: _credits, resetCreditsAvailableCount: _count, ...withoutWindows } = status;
-  return { ...withoutWindows, ...(hourly ? { hourly } : {}), ...(weekly ? { weekly } : {}) };
+  if (!status.hourly && !status.weekly) return undefined;
+  const { resetCredits: _credits, resetCreditsAvailableCount: _count, ...quota } = status;
+  return quota;
 }
 
 /**

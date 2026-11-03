@@ -122,14 +122,15 @@ describe("global account-scoped quota cache", () => {
 		assert.equal((await real.read([model])).snapshots.length, 0);
 	});
 
-	it("does not save failures, partial/stale quotas, credits or expired windows", async () => {
+	it("does not save failures, stale quotas or credits, but restores windows past reset", async () => {
 		await cache.query(model, async () => ({ refresh: "failed" }));
 		await cache.query(model, async () => ({ refresh: "ready", status: { ...quota(), stale: true } }));
 		assert.equal((await cache.read([model])).snapshots.length, 0);
 		await cache.query(model, async () => ({ refresh: "ready", status: { ...quota(), resetCreditsAvailableCount: 3, resetCredits: [{ title: "Full reset", count: 3 }] } }));
 		assert.equal((await cache.read([model])).snapshots[0]?.resetCredits, undefined);
-		await cache.query(model, async () => ({ refresh: "ready", status: { ...quota(), hourly: { ...quota().hourly!, resetAt: Date.now() - 1 } } }));
-		assert.equal((await cache.read([model])).snapshots.length, 0);
+		const expired = { ...quota(), hourly: { ...quota().hourly!, resetAt: Date.now() - 1 } };
+		await cache.query(model, async () => ({ refresh: "ready", status: expired }));
+		assert.deepEqual((await cache.read([model])).snapshots, [{ ...expired, stale: true }]);
 	});
 
 	it("ignores corrupt/unknown-version files and logs sanitized errors once", async () => {

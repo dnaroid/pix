@@ -235,8 +235,11 @@ saved model slot is restored only when its saved scope matches the current
 identity; a successful refresh for another account replaces it, bounding
 orphaned quota files. Persisted quota payloads contain
 display windows and account labels, never credentials, authorization headers,
-raw endpoint responses or reset-credit counts. Expired saved windows are
-removed and remaining windows retain their original observation timestamp.
+raw endpoint responses or reset-credit counts. Saved windows retain their
+original percentages, reset timestamps and observation timestamp until fresh
+observations arrive, including after reset; no refill is predicted. Stale data
+does not retain banked reset credits. Credential/account invalidation behavior
+is unchanged.
 
 Cached panel queries bypass the older route-only Claude telemetry fallback
 and request `freshOnly` provider results, so Antigravity's legacy embedded

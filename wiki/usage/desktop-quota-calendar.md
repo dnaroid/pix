@@ -131,9 +131,12 @@ request or control is implemented.
   unavailable**, with no manufactured calendar or countdown.
 - A passed reset says **Reset time reached · Awaiting quota refresh**; it does
   not claim the account quota has replenished or advance the date by seven days.
-- Cached windows are visibly marked **Cached** and filtered out at their own
-  reset by the existing runtime-status selector. The existing mounted minute
-  timer feeds that selector and countdown; no extra timers or network requests.
+- Cached windows are visibly marked **Cached** and remain at their last observed
+  percentages and reset timestamps until fresh observations arrive, even after
+  reset. No refill is predicted. Banked reset credits are stripped from stale
+  data; credential/account invalidation behavior is unchanged. The existing
+  mounted minute timer updates countdowns; it does not expire cached windows.
+  No extra timers or network requests are added.
 - Reset-credit details come from the authenticated read-only Codex
   `rate-limit-reset-credits` endpoint during the existing model-usage refresh.
   This supplementary request is best-effort: endpoint failure, rate limiting,
