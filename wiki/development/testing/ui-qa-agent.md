@@ -210,6 +210,21 @@ the parent releases only its own helper with a 5-second ceiling inside the runne
 Diagnostics do not repair launch or prove delivery/cleanup; see the
 [macOS guide](../../../external/pi-tools-suite/src/async-subagents/agents/ui-qa/guides/desktop-macos.md).
 
+For generic macOS desktop targets, `menuActivation` supports the unified
+runner's `activateMenu` action when both Accessibility is available and
+`doctor` reports `menu_activation=available`. The action takes a path of 1–8
+exact menu titles and uses app-scoped AXPress; missing, ambiguous or disabled
+items fail closed, with no coordinate fallback. Older helper binaries do not
+advertise this capability. See the [desktop router](../../../external/pi-tools-suite/src/async-subagents/agents/ui-qa/guides/desktop.md)
+and [macOS guide](../../../external/pi-tools-suite/src/async-subagents/agents/ui-qa/guides/desktop-macos.md).
+
+Desktop `waitForText` and `assertText` accept an optional semantic `selector`
+to inspect the complete string value of a specific accessibility record instead
+of searching only the compact tree summary. Native macOS record fields are
+bounded to 16,384 characters; secure-text redaction is unchanged. Discover paths
+from the current target window snapshot; the selector is not portable across
+apps or UI states.
+
 POSIX desktop launch contracts are correlated and cleaned up by their owned
 detached process group, not only by the launcher PID. This lets package-manager
 wrappers hand off to the real GUI descendant without making that descendant

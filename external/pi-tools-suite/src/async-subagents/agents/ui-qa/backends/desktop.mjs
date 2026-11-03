@@ -18,17 +18,17 @@ const SHELL_EXECUTABLES = new Set([
 ]);
 const ACTION_FIELDS = {
 	texteditSmoke: new Set(["action", "timeoutMs"]),
-	waitForWindow: new Set(["action", "timeoutMs"]),
+	waitForWindow: new Set(["action", "windowTitle", "timeoutMs"]),
 	activateWindow: new Set(["action", "timeoutMs"]),
-	snapshotAccessibility: new Set(["action", "name", "depth", "limit", "timeoutMs"]),
-	activate: new Set(["action", "selector", "timeoutMs"]),
+	snapshotAccessibility: new Set(["action", "name", "depth", "limit", "windowTitle", "timeoutMs"]),
+	activate: new Set(["action", "selector", "windowTitle", "timeoutMs"]),
 	activateMenu: new Set(["action", "path", "timeoutMs"]),
-	setValue: new Set(["action", "selector", "value", "timeoutMs"]),
+	setValue: new Set(["action", "selector", "value", "windowTitle", "timeoutMs"]),
 	inputText: new Set(["action", "text", "timeoutMs"]),
 	pressKey: new Set(["action", "key", "modifiers", "timeoutMs"]),
-	waitForText: new Set(["action", "text", "timeoutMs"]),
-	assertText: new Set(["action", "text", "timeoutMs"]),
-	assertState: new Set(["action", "selector", "attribute", "equals", "timeoutMs"]),
+	waitForText: new Set(["action", "text", "selector", "windowTitle", "timeoutMs"]),
+	assertText: new Set(["action", "text", "selector", "windowTitle", "timeoutMs"]),
+	assertState: new Set(["action", "selector", "attribute", "equals", "windowTitle", "timeoutMs"]),
 	screenshot: new Set(["action", "name", "timeoutMs"]),
 	capture: new Set(["action", "name", "depth", "limit", "timeoutMs"]),
 };
@@ -77,12 +77,15 @@ async function probeMacosDesktopBackend(context, supportedCapabilities) {
 		// ScreenCaptureKit window-stream API (macOS 12.3+), reported by doctor.
 		const sck = /(?:^|\n)sck=available(?:\n|$)/.test(doctor.stdout);
 		const menuActivation = /(?:^|\n)menu_activation=available(?:\n|$)/.test(doctor.stdout);
+		const windowTargeting = /(?:^|\n)window_targeting=available(?:\n|$)/.test(doctor.stdout);
 		const supported = [...supportedCapabilities];
 		const missing = [];
 		if (accessibility) supported.push("semanticAccessibility", "accessibilitySnapshot", "semanticActivation", "valueInput", "keyboardInput", "stateAssertions");
 		else missing.push("semanticAccessibility", "accessibilitySnapshot", "semanticActivation", "valueInput", "keyboardInput", "stateAssertions");
 		if (accessibility && menuActivation) supported.push("menuActivation");
 		else missing.push("menuActivation");
+		if (accessibility && windowTargeting) supported.push("windowTargeting");
+		else missing.push("windowTargeting");
 		if (screenRecording) supported.push("windowScreenshot");
 		else missing.push("windowScreenshot");
 		if (screenRecording && sck) supported.push("windowVideo");
@@ -348,7 +351,8 @@ async function finalizeWindowRecorder(recorder, artifacts, observations) {
 }
 
 async function executeStep(options) {
-	const { context, helper, selector, step, index, assertions, observations, artifacts } = options;
+	const { context, helper, selector: applicationSelector, step, index, assertions, observations, artifacts } = options;
+	const selector = desktopWindowSelector(applicationSelector, step.windowTitle);
 	const timeoutMs = desktopStepTimeout(step, context);
 	switch (step.action) {
 		case "waitForWindow":
@@ -372,7 +376,9 @@ async function executeStep(options) {
 			observations.push({ action: step.action, selector: publicSelector(step.selector) });
 			return;
 		case "activateMenu":
-			await helperCall(helper, ["menu", ...selector, "--menu-path", JSON.stringify(step.path), "--timeout", String(timeoutMs / 1000)], context, timeoutMs);
+			// Leave room for the helper to return its own stage diagnostic before
+			// the outer watchdog kills it and makes an AX timeout opaque.
+			await helperCall(helper, ["menu", ...selector, "--menu-path", JSON.stringify(step.path), "--timeout", String(Math.max(0.001, (timeoutMs - 2000) / 1000))], context, timeoutMs);
 			observations.push({ action: step.action, path: step.path });
 			return;
 		case "inputText":
@@ -393,13 +399,13 @@ async function executeStep(options) {
 		}
 		case "waitForText": {
 			const text = requireBoundedString(step.text, "waitForText.text", 4096);
-			await waitFor(async () => (await inspect(helper, selector, context, timeoutMs)).includes(text), timeoutMs, `text ${JSON.stringify(text)} did not appear`);
+			await waitFor(async () => (await accessibleText(helper, selector, step.selector, context, timeoutMs)).includes(text), timeoutMs, `text ${JSON.stringify(text)} did not appear`);
 			observations.push({ action: step.action, text });
 			return;
 		}
 		case "assertText": {
 			const text = requireBoundedString(step.text, "assertText.text", 4096);
-			const snapshot = await inspect(helper, selector, context, timeoutMs);
+			const snapshot = await accessibleText(helper, selector, step.selector, context, timeoutMs);
 			const passed = snapshot.includes(text);
 			assertions.push({ action: step.action, expected: { visibleText: text }, passed });
 			if (!passed) throw new Error(`visible accessibility text does not contain ${JSON.stringify(text)}`);
@@ -526,6 +532,10 @@ function validateSteps(steps, probe) {
 // Exported for focused unit tests: capability gating must be honest about what
 // the probed producer actually supports on this host.
 export function validateDesktopStepCapabilities(step, supportedCapabilities) {
+	if (step.windowTitle !== undefined) {
+		desktopWindowSelector([], step.windowTitle);
+		if (!supportedCapabilities.includes("windowTargeting")) throw new Error("desktop windowTitle requires windowTargeting");
+	}
 	if (step.action === "activateMenu") {
 		if (!Array.isArray(step.path) || step.path.length < 1 || step.path.length > 8) throw new Error("activateMenu.path must contain 1..8 menu titles");
 		for (const title of step.path) {
@@ -549,6 +559,13 @@ export function validateDesktopStepCapabilities(step, supportedCapabilities) {
 		throw new Error(`desktop action ${step.action} requires ${required}, but the selected desktop driver does not currently provide it`);
 	}
 	return step;
+}
+
+export function desktopWindowSelector(applicationSelector, windowTitle) {
+	if (windowTitle === undefined) return applicationSelector;
+	const title = requireBoundedString(windowTitle, "windowTitle", 256);
+	if (title.includes("\0")) throw new Error("windowTitle must not contain NUL");
+	return [...applicationSelector, "--window-title", title];
 }
 
 function launchApplication(launch, context) {
@@ -653,6 +670,17 @@ async function inspect(helper, selector, context, timeoutMs, depth = 12, limit =
 async function describe(helper, selector, elementSelector, context, timeoutMs) {
 	const output = await helperCall(helper, ["describe", ...selector, ...elementSelectorArgs(elementSelector)], context, timeoutMs);
 	try { return JSON.parse(output); } catch { throw new Error("desktop accessibility driver returned an invalid semantic record"); }
+}
+
+// Tree summaries shorten long values. A targeted text assertion must read the
+// complete semantic record, or a console's later output can never match.
+async function accessibleText(helper, selector, elementSelector, context, timeoutMs) {
+	if (elementSelector === undefined) return inspect(helper, selector, context, timeoutMs);
+	return desktopRecordText(await describe(helper, selector, elementSelector, context, timeoutMs));
+}
+
+export function desktopRecordText(record) {
+	return Object.values(record?.attributes ?? {}).filter((value) => typeof value === "string").join("\n");
 }
 
 async function captureAccessibility({ context, helper, selector, name, artifacts, depth, limit, timeoutMs = 15_000 }) {
@@ -794,7 +822,7 @@ function cleanupPartialVideo(target) {
 	} catch { /* best effort */ }
 }
 
-function runOwnedProcess(file, args, options) {
+export function runOwnedProcess(file, args, options) {
 	return new Promise((resolve, reject) => {
 		const child = spawn(file, args, {
 			cwd: options.cwd,
@@ -813,7 +841,8 @@ function runOwnedProcess(file, args, options) {
 			if (settled) return;
 			settled = true;
 			killOwnedPid(child.pid, "SIGKILL");
-			reject(new Error(`desktop driver stage timed out after ${options.timeoutMs} ms`));
+			const diagnostic = stderr.toString("utf8").trim().slice(-2000);
+			reject(new Error(`desktop driver stage timed out after ${options.timeoutMs} ms${diagnostic ? `; helper diagnostic: ${diagnostic}` : ""}`));
 		}, Math.max(1, options.timeoutMs));
 		child.once("error", (error) => {
 			if (settled) return;

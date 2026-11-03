@@ -29,7 +29,7 @@ struct Arguments {
         let valueOptions: Set<String> = [
             "--app", "--bundle-id", "--pid", "--pgid", "--depth", "--limit", "--match",
             "--role", "--occurrence", "--path", "--value", "--text",
-            "--key", "--modifiers", "--x", "--y", "--out", "--timeout", "--duration", "--menu-path",
+            "--key", "--modifiers", "--x", "--y", "--out", "--timeout", "--duration", "--menu-path", "--window-title",
         ]
         var parsedOptions: [String: String] = [:]
         var parsedFlags = Set<String>()
@@ -173,7 +173,11 @@ func role(_ element: AXUIElement) -> String {
     stringAttribute(element, kAXRoleAttribute) ?? "AXUnknown"
 }
 
-func fields(_ element: AXUIElement) -> [(String, String)] {
+func fields(_ element: AXUIElement, fullValues: Bool = false) -> [(String, String)] {
+    func projectedText(_ value: String?) -> String? {
+        if fullValues { return value.map { String($0.prefix(16_384)) } }
+        return compact(value)
+    }
     let elementRole = role(element)
     var result: [(String, String)] = []
     let pairs = [
@@ -183,13 +187,13 @@ func fields(_ element: AXUIElement) -> [(String, String)] {
         ("help", kAXHelpAttribute),
     ]
     for (label, attribute) in pairs {
-        if let value = compact(stringAttribute(element, attribute)) {
+        if let value = projectedText(stringAttribute(element, attribute)) {
             result.append((label, value))
         }
     }
     if elementRole == "AXSecureTextField" {
         result.append(("value", "<redacted>"))
-    } else if let value = compact(scalarAttribute(element, kAXValueAttribute)) {
+    } else if let value = projectedText(scalarAttribute(element, kAXValueAttribute)) {
         result.append(("value", value))
     }
     for (label, attribute) in [
@@ -310,8 +314,9 @@ func axApplication(_ app: NSRunningApplication) -> AXUIElement {
     AXUIElementCreateApplication(app.processIdentifier)
 }
 
-func frontWindow(_ app: NSRunningApplication) throws -> AXUIElement {
+func frontWindow(_ app: NSRunningApplication, messagingTimeout: Float? = nil) throws -> AXUIElement {
     let application = axApplication(app)
+    if let messagingTimeout { AXUIElementSetMessagingTimeout(application, messagingTimeout) }
     if let focused = copyAttribute(application, kAXFocusedWindowAttribute) {
         return unsafeBitCast(focused, to: AXUIElement.self)
     }
@@ -350,7 +355,7 @@ func printJSON(_ value: Any) throws {
 
 func record(_ located: LocatedElement) -> [String: Any] {
     var attributes: [String: String] = [:]
-    for (name, value) in fields(located.element) { attributes[name] = value }
+    for (name, value) in fields(located.element, fullValues: true) { attributes[name] = value }
     var result: [String: Any] = [
         "path": located.path,
         "role": role(located.element),
@@ -442,15 +447,17 @@ func locate(_ root: AXUIElement, arguments: Arguments) throws -> LocatedElement 
     return candidates[0]
 }
 
-func activate(_ app: NSRunningApplication) throws {
+func activate(_ app: NSRunningApplication, messagingTimeout: Float? = nil) throws {
     let activated = app.activate(options: [.activateAllWindows])
     let application = axApplication(app)
+    if let messagingTimeout { AXUIElementSetMessagingTimeout(application, messagingTimeout) }
     _ = AXUIElementSetAttributeValue(
         application,
         kAXFrontmostAttribute as CFString,
         kCFBooleanTrue
     )
-    if let window = try? frontWindow(app) {
+    if let window = try? frontWindow(app, messagingTimeout: messagingTimeout) {
+        if let messagingTimeout { AXUIElementSetMessagingTimeout(window, messagingTimeout) }
         _ = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
     }
     guard activated || app.isActive else {
@@ -1112,6 +1119,7 @@ func run(_ arguments: Arguments) throws {
         print("macos=\(ProcessInfo.processInfo.operatingSystemVersionString)")
         print("accessibility=\(accessibility ? "granted" : "missing")")
         print("menu_activation=available")
+        print("window_targeting=available")
         print("screen_recording=\(screenRecording ? "granted" : "missing")")
         print("sck=\(screenCaptureKit ? "available" : "unsupported")")
 
@@ -1135,7 +1143,7 @@ func run(_ arguments: Arguments) throws {
             do {
                 let app = try findApplication(arguments)
                 do {
-                    _ = try frontWindow(app)
+                    _ = try selectedWindow(app, arguments: arguments)
                 } catch {
                     throw Failure("app=\(quoted(app.localizedName ?? "?")) pid=\(app.processIdentifier): \(error)")
                 }
@@ -1171,7 +1179,7 @@ func run(_ arguments: Arguments) throws {
     case "inspect":
         try requireAccessibility()
         let app = try findApplication(arguments)
-        let window = try frontWindow(app)
+        let window = try selectedWindow(app, arguments: arguments)
         let depth = try arguments.integer("depth", default: 10)
         let limit = try arguments.integer("limit", default: 80)
         var shown = 0
@@ -1186,7 +1194,7 @@ func run(_ arguments: Arguments) throws {
     case "describe":
         try requireAccessibility()
         let app = try findApplication(arguments)
-        let located = try locate(frontWindow(app), arguments: arguments)
+        let located = try locate(selectedWindow(app, arguments: arguments), arguments: arguments)
         try printJSON(record(located))
 
     case "screenshot":
@@ -1220,7 +1228,7 @@ func run(_ arguments: Arguments) throws {
         try requireAccessibility()
         let app = try findApplication(arguments)
         try activate(app)
-        let located = try locate(frontWindow(app), arguments: arguments)
+        let located = try locate(selectedWindow(app, arguments: arguments), arguments: arguments)
         let method = try press(located, allowFrameFallback: arguments.has("frame-fallback"))
         print("clicked method=\(method) path=\(located.path) role=\(role(located.element))")
 
@@ -1228,7 +1236,7 @@ func run(_ arguments: Arguments) throws {
         try requireAccessibility()
         let app = try findApplication(arguments)
         try activate(app)
-        let located = try locate(frontWindow(app), arguments: arguments)
+        let located = try locate(selectedWindow(app, arguments: arguments), arguments: arguments)
         var settable = DarwinBoolean(false)
         let check = AXUIElementIsAttributeSettable(
             located.element,
@@ -1252,7 +1260,6 @@ func run(_ arguments: Arguments) throws {
     case "menu":
         try requireAccessibility()
         let app = try findApplication(arguments)
-        try activate(app)
         try activateMenu(app, arguments: arguments)
 
     case "type":

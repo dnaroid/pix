@@ -43,14 +43,56 @@ or a bounded runner-owned `launch` contract. Launch wrappers remain inside the
 owned POSIX process group so the runner can correlate the real GUI descendant
 and perform scoped cleanup.
 
-## Bounded TextEdit synthetic fixture
-
 For generic app targets, `menuActivation` enables `activateMenu` through the
 trusted driver. It resolves an exact title path in the selected app's menu bar,
 opens each submenu, and presses the final item with AXPress. Missing, ambiguous
 or disabled items fail; errors list available titles for discovery. It never
 searches another application's menu bar or uses coordinate fallback. This does
 not enable direct AppleScript/Accessibility calls from the QA child.
+
+The capability is advertised only when Accessibility is available and
+`doctor` reports `menu_activation=available`; an older helper binary must not
+be treated as supporting it. Use the desktop base guide's bounded `path` array
+of exact menu titles.
+
+When `doctor` reports `window_targeting=available` and Accessibility is
+available, element inspection and interaction steps may specify an exact
+top-level `windowTitle` to target an app-owned window directly, without relying
+on `AXFocusedWindow`, focus changes, or coordinate fallback. The selected
+window's AX paths are local to that window. `windowTitle` is the native AX
+window title, which can differ from the caption visibly painted by Qt or
+another toolkit; discover available native titles and do not infer a match from
+the caption. `waitForWindow` also accepts `windowTitle` and polls for that exact
+native title before later inspection. Exact selection fails closed when
+missing or ambiguous. For mGBA, visible caption `Скрипты` matched no native
+window in the completed probe; candidate `Window` contained only a
+`WindowSharingSessionButton` overlay and is conclusively not the REPL. Do not
+use it as an mGBA window target. The final bounded probe waits for the exact
+native title `Скрипты` to distinguish delayed registration from an inaccessible
+Qt tool window. General safe sequence:
+
+```json
+{"action":"waitForWindow","windowTitle":"Скрипты","timeoutMs":15000}
+{"action":"snapshotAccessibility","windowTitle":"Скрипты"}
+{"action":"assertText","windowTitle":"Скрипты","text":"Запустить"}
+{"action":"setValue","windowTitle":"Скрипты","selector":{"path":"0.0.0"},"value":"dofile(\"/absolute/path/tools/mgba_bridge.lua\")"}
+```
+
+The identifying assertion is mandatory before interaction; the selected native
+title itself is not proof that this is the intended REPL. This option is
+supported on `waitForWindow`, `snapshotAccessibility`, `activate`, `setValue`,
+`waitForText`, `assertText`, and `assertState`; it does not apply to screenshots,
+capture, window activation, or keyboard actions. Omitting it retains the
+existing focused-window behavior.
+
+For long console/REPL output, `waitForText` and `assertText` also accept a
+semantic `selector` and read the complete text attribute of that accessibility
+record, rather than relying on the truncated tree summary. Combine it with the
+exact native `windowTitle`; use a path discovered from that window's snapshot.
+Native record string fields are bounded to 16,384 characters each; compact tree
+summaries remain abbreviated and secure-text redaction remains in effect.
+
+## Bounded TextEdit synthetic fixture
 
 Only for an explicitly authorized synthetic smoke, use
 `target.application: { "fixture": "texteditBlank" }`. This fixed macOS-only route

@@ -5,7 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { removeDirsWithRetry } from "../support/fs-retry.js";
 import { probeBrowserBackend, resolveBrowserDriver, runBrowserBackend } from "../../src/async-subagents/agents/ui-qa/backends/browser.mjs";
-import { desktopEvidenceName, desktopPlatformContract, desktopStepTimeout, launchedApplicationSelector, terminateOwnedProcessTree, validateDesktopStepCapabilities } from "../../src/async-subagents/agents/ui-qa/backends/desktop.mjs";
+import { desktopEvidenceName, desktopPlatformContract, desktopRecordText, desktopStepTimeout, desktopWindowSelector, launchedApplicationSelector, runOwnedProcess, terminateOwnedProcessTree, validateDesktopStepCapabilities } from "../../src/async-subagents/agents/ui-qa/backends/desktop.mjs";
 import { releaseWindowsPtyResources, resolveTuiPresentation, terminateOwnedPty, validateNativeTerminalSteps } from "../../src/async-subagents/agents/ui-qa/backends/tui.mjs";
 import { CHROME_DEVTOOLS_DRIVER, chromeDevtoolsStartArgs, probeChromeDevtoolsProvider } from "../../src/async-subagents/agents/ui-qa/drivers/chrome-devtools/chrome-devtools-provider.mjs";
 import { chooseNativeTerminalProvider, nativeTerminalBridgeCommandFile, nativeTerminalBridgeShellCommand, nativeTerminalProviderLaunchArgs } from "../../src/async-subagents/agents/ui-qa/drivers/native-terminal/native-terminal-host.mjs";
@@ -1200,6 +1200,32 @@ setInterval(() => process.stdout.write("\\r" + (++i)), 10);
 		for (const path of [undefined, "Tools", [], Array(9).fill("x"), [""], [42], ["x".repeat(257)], ["x\0y"]]) {
 			expect(() => validateDesktopStepCapabilities({ action: "activateMenu", path }, ["menuActivation"])).toThrow(/activateMenu/);
 		}
+	});
+
+	test("retains bounded native diagnostics when the owned driver times out", async () => {
+		const pending = runOwnedProcess(nodeExecutable, ["-e", "process.stderr.write('menu-stage: press Tools\\n'); setInterval(() => {}, 1000)"], { cwd: process.cwd(), timeoutMs: 1000 });
+		await expect(pending).rejects.toThrow(/timed out after 1000 ms; helper diagnostic: menu-stage: press Tools/);
+	});
+
+	test("targets modeless windows by exact title without changing the app selector", () => {
+		const app = ["--pgid", "123"];
+		expect(desktopWindowSelector(app, undefined)).toBe(app);
+		expect(desktopWindowSelector(app, "Скрипты")).toEqual(["--pgid", "123", "--window-title", "Скрипты"]);
+		expect(app).toEqual(["--pgid", "123"]);
+		for (const title of ["", "x".repeat(257), "x\0y", 42]) {
+			expect(() => desktopWindowSelector(app, title)).toThrow(/windowTitle/);
+		}
+		const step = { action: "snapshotAccessibility", windowTitle: "Скрипты" };
+		expect(validateDesktopStepCapabilities(step, ["windowTargeting"])).toEqual(step);
+		expect(validateDesktopStepCapabilities({ action: "waitForWindow", windowTitle: "Скрипты" }, ["windowTargeting"])).toEqual({ action: "waitForWindow", windowTitle: "Скрипты" });
+		expect(() => validateDesktopStepCapabilities(step, [])).toThrow(/windowTargeting/);
+	});
+
+	test("targeted accessibility text retains console output beyond tree-summary truncation", () => {
+		const value = "x".repeat(500) + "\nFFTA bridge released";
+		expect(desktopRecordText({ attributes: { value, enabled: "true", ignored: {} } })).toBe(value + "\ntrue");
+		expect(desktopRecordText({ attributes: { value } })).toContain("FFTA bridge released");
+		expect(desktopRecordText({})).toBe("");
 	});
 
 	test("bundles capability-probed Windows UIA and Linux AT-SPI desktop helpers without shell evaluation", () => {

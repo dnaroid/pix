@@ -46,6 +46,49 @@ restrictions. Common steps are:
 Semantic selectors use `path` or `name`, with optional `role` and `occurrence`.
 Prefer stable application-owned names/roles/labels/IDs over coordinates.
 
+When the probe advertises `windowTargeting`, `waitForWindow` and element actions
+`snapshotAccessibility`, `activate`, `setValue`, `waitForText`, `assertText`,
+and `assertState` may include a top-level exact `windowTitle`. `waitForWindow`
+polls for the named native window; element actions then select it without
+changing focus or using coordinates. Selectors' `path` values are relative to
+the selected window. `windowTitle` matches the
+native accessibility window title, which can differ from the caption visibly
+painted by the application. Inspect the app's discovered native titles first;
+never assume a visible caption is the matching title. Missing or ambiguous
+titles fail rather than falling back. A candidate native title is not proof of
+window identity: wait for the expected native title, inspect it, and assert an
+identifying control/content marker before interaction. For example:
+
+```json
+{"action":"waitForWindow","windowTitle":"Скрипты","timeoutMs":15000}
+{"action":"snapshotAccessibility","windowTitle":"Скрипты"}
+{"action":"assertText","windowTitle":"Скрипты","text":"Запустить"}
+{"action":"setValue","windowTitle":"Скрипты","selector":{"path":"0.0.0"},"value":"dofile(\"/absolute/path/tools/mgba_bridge.lua\")"}
+```
+
+For UI flows, assert an identifying control/content marker in the selected
+window before interacting; an exact native title alone does not prove it is
+the intended dialog. Missing or ambiguous titles fail rather than falling back
+to another window.
+`windowTitle` is not supported on `screenshot`, `capture`, `activateWindow`, or
+keyboard actions. Use the default focused-window behavior when omitted.
+
+`waitForText` and `assertText` may also take a `selector` to inspect the full
+text value of a specific accessibility element. Use this for long console or
+REPL output whose text is shortened in a tree summary. For example:
+
+```json
+{"action":"assertText","windowTitle":"Скрипты","selector":{"path":"0.0.2.0"},"text":"FFTA bridge ready on 127.0.0.1:8765"}
+```
+
+Without `selector`, text assertions retain their existing tree-wide behavior.
+The macOS native accessibility record path requests full string attributes
+(bounded to 16,384 characters per field); compact snapshots remain abbreviated.
+Secure-text redaction is unchanged.
+Discover selectors from the current window snapshot; paths can vary by app and
+UI state. In the mGBA Scripting window, `0.0.2.0` identifies the console text,
+while `0.0.1` is the Run button, not the console.
+
 Launch contracts must remain runner-owned and bounded. The runner permits only
 the documented safe environment subset plus `PI_UI_QA_*` bootstrap variables
 and injects `PI_UI_QA=1`. Do not daemonize the app or deliberately move it

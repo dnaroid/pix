@@ -4,7 +4,7 @@ import path from "node:path";
 // Both development cache and release compilation use the same closed source set.
 export function macosHelperSources(source) {
 	const sources = path.basename(source) === "macos-accessibility.swift"
-		? [source, ...["textedit-lease.swift", "textedit-supervisor.swift", "menu-navigation.swift"].map((name) => path.join(path.dirname(source), name))]
+		? [source, ...["textedit-lease.swift", "textedit-supervisor.swift", "menu-navigation.swift", "window-selection.swift"].map((name) => path.join(path.dirname(source), name))]
 		: [source];
 	for (const file of sources) {
 		const stat = fs.lstatSync(file);
