@@ -208,7 +208,14 @@ npm run test:evals:choices
 PI_TOOLS_SUITE_EVAL_MODELS=zai/glm-5.3-flash \
 PI_TOOLS_SUITE_EVAL_CASES=choice.mixed-risk-report,choice.risk-descriptions,choice.tradeoff-descriptions,choice.exclusive-direction,choice.optional-followups,choice.optional-commit,choice.manual-step \
 PI_TOOLS_SUITE_EVAL_KEEP=1 npm run evals:report
+# Same seven cases through the suite's maintained Claude Code provider
+# (override the model with PI_TOOLS_SUITE_EVAL_MODELS):
+npm run test:evals:choices:claude-code
 ```
+
+`PI_TOOLS_SUITE_EVAL_CASES` entries ending in `*` select an id prefix
+(`choice.*`). The validator also rejects any JSON array/object body inside a
+`pix-actions` fence, the shape observed from the Claude Code provider.
 
 The runner stops at the assistant message containing a selected `question`,
 records its text/stop reason and every tool call in that message batch, then

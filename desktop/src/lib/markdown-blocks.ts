@@ -158,7 +158,11 @@ function parseList(
   }
 
   const tag = first.ordered ? "ol" : "ul";
-  return { html: `<${tag}${startAttribute}>${items.join("")}</${tag}>`, lineCount: index - start };
+  // Native list numbering continues from start, regardless of subsequent source numbers.
+  const markerWidth = first.ordered
+    ? ` style="--list-marker-width: ${String(first.number + items.length - 1).length}ch"`
+    : "";
+  return { html: `<${tag}${startAttribute}${markerWidth}>${items.join("")}</${tag}>`, lineCount: index - start };
 }
 
 function listItem(line: string): { ordered: boolean; number: number; text: string } | undefined {

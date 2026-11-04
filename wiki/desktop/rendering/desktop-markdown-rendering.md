@@ -59,6 +59,11 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   opening and closing boundaries; escaped or unclosed underscores stay readable.
 - Markdown headings use the semantic warning accent mixed with the foreground so
   their hierarchy stays prominent with a restrained warm tone in both themes.
+- Ordered lists retain native numbering; their marker gutter is sized in `ch`
+  from the final native number (`start + item count - 1`), with tabular numeric
+  outside markers and logical padding so multi-digit markers fit within paint
+  containment while wrapped item text remains hanging-aligned. Bullet lists use
+  a logical `1.35em` gutter.
 - Inline code uses the Desktop semantic accent rather than ordinary prose color.
 - Fenced `mermaid` blocks render as diagrams using Mermaid strict security and
   HTML labels disabled. While rendering is pending, or if parsing/rendering

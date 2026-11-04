@@ -25,6 +25,34 @@ describe("JSON choice compatibility", () => {
       .toBe("First line\nSecond line");
   });
 
+  it("accepts the reported versioned envelope inside a pix-actions fence", () => {
+    const envelope = JSON.stringify({
+      version: 1,
+      actions: entries.map((entry, index) => ({ id: `a${index}`, ...entry, kind: index ? "secondary" : "primary" })),
+    });
+    expect(parseJsonChoiceActions(envelope)).toEqual(actions);
+    expect(splitHtmlSandboxSegments(`Ничего не закоммичено.\n\n\`\`\`pix-actions\n${envelope}\n\`\`\``, { actions: true }).at(-1))
+      .toEqual({ type: "actions", actions });
+    expect(splitHtmlSandboxSegments(`Before\n\n${envelope}`, { actions: true }).at(-1)).toEqual({ type: "actions", actions });
+  });
+
+  it.each([
+    { version: 2, actions: entries },
+    { version: 1, actions: [] },
+    { version: 1, actions: entries, extra: true },
+    { actions: entries },
+    { version: 1, actions: [{ ...entries[0], unknown: "x" }] },
+    { version: 1, actions: [{ ...entries[0], kind: 1 }] },
+    { version: 1, actions: [{ ...entries[0], risk: "x".repeat(41) }] },
+    { version: 1, actions: [{ label: "X" }] },
+  ])("rejects malformed envelopes: %j", (value) => {
+    expect(parseJsonChoiceActions(JSON.stringify(value))).toBeUndefined();
+  });
+
+  it("keeps descriptive fields out of bare arrays", () => {
+    expect(parseJsonChoiceActions(JSON.stringify([{ ...entries[0], id: "x" }]))).toBeUndefined();
+  });
+
   it.each([
     "[]", "null", "{}", "[null]", "[[]]", "[1]", '[{"label":"X"}]',
     '[{"label":"X","prompt":1}]', '[{"label":"X","prompt":" "}]',

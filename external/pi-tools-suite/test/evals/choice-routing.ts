@@ -14,6 +14,9 @@ export function validateChoiceRoute(result: EvalRunResult, route: ChoiceRoute, m
 	const actions = lastChoiceActions(output);
 	if (checkpoints.some((event) => event.stopReason !== "toolUse")) errors.push("incomplete tool-selection response");
 	if (/"(?:actions|risk|label|prompt)"\s*:/.test(output)) errors.push("JSON action menu instead of native interaction");
+	// Observed on the Claude Code provider: any JSON array/object body inside
+	// the fence, whatever its keys, is not the checklist/reply syntax.
+	if (/^ {0,3}(?:`{3,}|~{3,})[ \t]*pix-actions\b[^\n]*\n\s*[[{]/m.test(output)) errors.push("JSON body inside pix-actions fence");
 	if (route === "question") {
 		if (calls.length !== 1 || calls[0]?.toolName !== "question") errors.push("expected exactly one question call and no other tools");
 		else {

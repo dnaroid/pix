@@ -197,12 +197,17 @@
   .markdown-text :global(ul),
   .markdown-text :global(ol) {
     margin: 0.4rem 0 0.8rem;
-    padding-left: 1.35rem;
+    padding-inline-start: 1.35em;
   }
   .markdown-text.compact :global(ul),
   .markdown-text.compact :global(ol) { margin: 0.2rem 0 0.4rem; }
   .markdown-text :global(ul) { list-style: disc; }
-  .markdown-text :global(ol) { list-style: decimal; }
+  .markdown-text :global(ol) {
+    list-style: decimal outside;
+    /* Keep markers inside paint containment, including large start values. */
+    padding-inline-start: calc(var(--list-marker-width, 2ch) + 1em);
+  }
+  .markdown-text :global(ol > li::marker) { font-variant-numeric: tabular-nums; }
   .markdown-text :global(li + li) { margin-top: 0.2rem; }
   .markdown-text.compact :global(li + li) { margin-top: 0.08rem; }
   .markdown-text :global(.task-item) {

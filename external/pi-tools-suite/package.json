@@ -36,6 +36,7 @@
     "test:evals:contracts": "bun test test/evals/extension-contracts.test.ts test/evals/harness.test.ts test/evals/decision-policy.test.ts test/evals/session-cases.test.ts test/evals/todo-conciseness.test.ts test/evals/plan-guidance.test.ts test/evals/choice-routing.test.ts",
     "test:evals:plans": "bun test test/evals/plan-guidance.test.ts",
     "test:evals:choices": "bun test test/evals/choice-routing.test.ts",
+    "test:evals:choices:claude-code": "PI_TOOLS_SUITE_EVALS_LIVE=1 PI_TOOLS_SUITE_EVAL_MODELS=${PI_TOOLS_SUITE_EVAL_MODELS:-pi-claude-code-provider/opus} PI_TOOLS_SUITE_EVAL_CASES=choice.* bun test --concurrent --max-concurrency=4 test/evals/live-evals.test.ts",
     "test:evals:live": "PI_TOOLS_SUITE_EVALS_LIVE=1 bun test --concurrent --max-concurrency=4 test/evals/live-evals.test.ts",
     "evals": "npm run test:evals:contracts && bun test test/evals/live-evals.test.ts",
     "evals:report": "bun test/evals/run-evals.ts",

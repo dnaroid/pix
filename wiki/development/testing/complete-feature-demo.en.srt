@@ -1,0 +1,238 @@
+1
+00:00:02,000 --> 00:00:09,000
+A project workspace, not just a chat.
+
+2
+00:00:13,000 --> 00:00:21,000
+Keep your draft while moving
+between project views.
+
+3
+00:00:28,000 --> 00:00:36,000
+Search code, knowledge, work
+and project history together.
+
+4
+00:00:47,000 --> 00:00:56,000
+Ask with retrieved evidence.
+Open the sources behind the answer.
+
+5
+00:01:09,000 --> 00:01:18,000
+Turn a saved task into a linked plan
+and a separate execution session.
+
+6
+00:01:31,000 --> 00:01:40,000
+Saved plan progress and live steps
+are different views of the work.
+
+7
+00:01:54,000 --> 00:02:03,000
+Answer structured questions in place.
+The decision stays with its session.
+
+8
+00:02:12,000 --> 00:02:21,000
+Accept a suggestion, or ignore it.
+You decide what gets sent.
+
+9
+00:02:29,000 --> 00:02:38,000
+Delegate independent research
+to scoped roles and models.
+
+10
+00:02:55,000 --> 00:03:05,000
+Inspect a child's real transcript.
+Continue in a new session.
+
+11
+00:03:19,000 --> 00:03:28,000
+Explore an alternative in a fork
+without interrupting the parent.
+
+12
+00:03:39,000 --> 00:03:49,000
+Pause at a safe boundary.
+Continue the same conversation.
+
+13
+00:03:59,000 --> 00:04:08,000
+Ask a tool-free side question
+without changing the main history.
+
+14
+00:04:17,000 --> 00:04:26,000
+Experimental Observer:
+inspect suggestions before using them.
+
+15
+00:04:34,000 --> 00:04:43,000
+Explain code directly in Preview.
+Keep the main conversation focused.
+
+16
+00:04:55,000 --> 00:05:04,000
+Translate a document in place.
+Preserve its code and structure.
+
+17
+00:05:14,000 --> 00:05:23,000
+Working forms, 2D and 3D
+directly inside the conversation.
+
+18
+00:05:43,000 --> 00:05:53,000
+Submit an interaction back to Pix.
+Choose the next action explicitly.
+
+19
+00:06:04,000 --> 00:06:13,000
+Run project commands in reusable
+workspace terminals, not new chats.
+
+20
+00:06:25,000 --> 00:06:35,000
+Agent-owned background jobs
+keep output and lifecycle explicit.
+
+21
+00:06:44,000 --> 00:06:53,000
+Review the chosen change scope.
+Keep findings tied to the actual diff.
+
+22
+00:07:14,000 --> 00:07:24,000
+Hand a real finding to a fix session.
+Review is not permission to publish.
+
+23
+00:07:34,000 --> 00:07:43,000
+Project knowledge is editable Markdown
+with evidence-backed conflict checks.
+
+24
+00:08:23,000 --> 00:08:33,000
+Compare quotes, resolve, and recheck.
+Export a browsable Wiki.
+
+25
+00:08:49,000 --> 00:08:58,000
+See usage by project and session,
+alongside provider limits.
+
+26
+00:09:07,000 --> 00:09:16,000
+Quota remaining is not elapsed time
+or measured daily consumption.
+
+27
+00:09:24,000 --> 00:09:33,000
+Compress closed work selectively.
+Preserve the current objective.
+
+28
+00:09:46,000 --> 00:09:56,000
+Recover earlier decisions
+from the original session history.
+
+29
+00:10:04,000 --> 00:10:13,000
+Different responsibilities can use
+different models and thinking levels.
+
+30
+00:10:29,000 --> 00:10:39,000
+Inspect model use and replacements
+before changing shared defaults.
+
+31
+00:10:49,000 --> 00:10:58,000
+Compare reusable skills and agents,
+including their companion files.
+
+32
+00:11:18,000 --> 00:11:28,000
+Share approved project resources
+and portable work through Registry.
+
+33
+00:11:39,000 --> 00:11:48,000
+Find and rewrite code by structure,
+not by a fragile text substitution.
+
+34
+00:12:02,000 --> 00:12:12,000
+Compose tool calls in code.
+Discover extra tools when needed.
+
+35
+00:12:24,000 --> 00:12:33,000
+Delegate tests of the real interface
+with explicit observable outcomes.
+
+36
+00:12:51,000 --> 00:13:01,000
+Inspect screenshots, accessibility
+evidence and the actual QA report.
+
+37
+00:13:14,000 --> 00:13:23,000
+Let multiple models challenge an idea
+through five research rounds.
+
+38
+00:13:42,000 --> 00:13:52,000
+Keep disagreement and synthesis.
+Research does not authorize edits.
+
+39
+00:14:04,000 --> 00:14:13,000
+Dictate into the composer or search.
+Review the text before submitting.
+
+40
+00:14:24,000 --> 00:14:34,000
+Voice uses the configured service.
+Credentials stay off camera.
+
+41
+00:14:44,000 --> 00:14:53,000
+Reach a running Desktop session
+through its private Telegram topic.
+
+42
+00:15:08,000 --> 00:15:18,000
+Authorized messages are real prompts.
+Desktop remains the running host.
+
+43
+00:15:29,000 --> 00:15:38,000
+CI status belongs to the exact HEAD,
+not an older run on the same branch.
+
+44
+00:15:56,000 --> 00:16:06,000
+CI repair can commit and push.
+Use an explicitly approved sandbox.
+
+45
+00:16:19,000 --> 00:16:28,000
+The Pix terminal UI is a workspace,
+with tabs and live activity panels.
+
+46
+00:16:58,000 --> 00:17:08,000
+Snapshot undo restores its scope.
+Chat history is not a disk backup.
+
+47
+00:17:24,000 --> 00:17:33,000
+Task, plan, session, diff and evidence:
+one connected project workflow.
+
+48
+00:17:45,000 --> 00:17:55,000
+Show what actually ran.
+Keep limits and blockers visible.

@@ -172,20 +172,24 @@ Choose what I should do next:
 ```
 ~~~~
 
-The shared prompt forbids replacing `question` with JSON action menus or adding
-a `risk` field; every question choice must include both `value` and `label`.
+The shared prompt states the formats affirmatively and does not name JSON or
+action-object fields (naming them was observed to prime JSON envelopes); every
+question choice must include both `value` and `label`.
 Put per-choice explanations, including risks and tradeoffs, in
 `choices[].description`. For optional follow-ups, each checklist item is the
 complete instruction to send and its prerequisites must already hold. Models
-must use the fenced list syntax described here; JSON action envelopes are not
-supported.
+must use the fenced list syntax described here; JSON menus are never an
+advertised generation format.
 
 Desktop additionally tolerates legacy JSON menus as a compatibility fallback,
-not an advertised generation format: a standalone trailing array (at message
+not an advertised generation format: a standalone trailing array or envelope (at message
 start or after a blank line), a trailing closed `json` fence, or JSON inside a
 closed `pix-actions` fence. Each of 1–4 objects must have exactly string `label`
 and `prompt` fields: nonblank labels are single-line, at most 40 characters;
-nonblank prompts are at most 300 characters. JSON source is capped at 16 KiB
+nonblank prompts are at most 300 characters. The same entries may also be
+wrapped in an exact `{"version":1,"actions":[...]}` envelope; only inside that
+envelope may entries carry optional string `id`, `kind` or `risk` fields (at
+most 40 characters each), which are accepted but ignored. JSON source is capped at 16 KiB
 (characters); malformed, incomplete or out-of-bounds input stays ordinary text.
 Only assistant action-enabled rendering recognizes menus; other code fences
 are skipped. These menus reuse the reply-button UI, activity guards and

@@ -30,9 +30,9 @@ export function splitHtmlSandboxSegments(
   while (index < lines.length) {
     const fence = parseFence(lines[index] ?? "");
     if (!fence) {
-      // Only a standalone trailing array is eligible. Bound candidate assembly
+      // Only a standalone trailing array/envelope is eligible. Bound candidate assembly
       // as well as JSON.parse; streaming and ordinary examples stay Markdown.
-      if (options.actions && /^ {0,3}\[/.test(lines[index] ?? "") && (index === 0 || !lines[index - 1]?.trim())) {
+      if (options.actions && /^ {0,3}[[{]/.test(lines[index] ?? "") && (index === 0 || !lines[index - 1]?.trim())) {
         let body = "";
         for (let next = index; next < lines.length && body.length <= MAX_JSON_ACTIONS_CHARS; next += 1) {
           body += (next === index ? "" : "\n") + lines[next];

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { CHOICE_ROUTING_CASES, validateChoiceRoute, type ChoiceRoute } from "./choice-routing.js";
 import { deriveMetrics } from "./harness/metrics.js";
+import { caseIsSelected } from "./harness/runner.js";
 import type { EvalEvent, EvalRunResult } from "./harness/types.js";
 import { QUESTION_TOOL_DESCRIPTION as hostQuestion } from "../../../../src/bundled-extensions/question/tool-description.js";
 import { QUESTION_TOOL_DESCRIPTION as suiteQuestion } from "../../src/question/tool-description.js";
@@ -96,6 +97,21 @@ describe("choice routing eval controls", () => {
             r.events[0]!.input = { questions: [{ ...input.questions[0], choices: input.questions[0]!.choices.map(({ description, ...choice }) => choice) }] };
             expect(scenario.validate!(r)).toContain("missing per-choice descriptions");
         }
+    });
+    test("rejects any JSON body inside a pix-actions fence", () => {
+        for (const body of ['{"version":1,"actions":[{"id":"commit","kind":"primary"}]}', '[\n  {"title":"Commit"}\n]', '{"items":["Commit"]}']) {
+            for (const route of ["checklist", "reply"] as const) {
+                const r = result(route); r.stdout = `Done.\n\`\`\`pix-actions Next\n${body}\n\`\`\``;
+                expect(validateChoiceRoute(r, route)).toContain("JSON body inside pix-actions fence");
+            }
+        }
+        expect(validateChoiceRoute(result("checklist"), "checklist")).not.toContain("JSON body inside pix-actions fence");
+    });
+    test("selects eval ids by trailing-star prefix", () => {
+        const selection = { ids: new Set(["choice.*"]), categories: new Set<string>() };
+        expect(CHOICE_ROUTING_CASES.every((entry) => caseIsSelected(entry, selection))).toBe(true);
+        expect(EVAL_CASES.filter((entry) => caseIsSelected(entry, selection))).toHaveLength(CHOICE_ROUTING_CASES.length);
+        expect(caseIsSelected(CHOICE_ROUTING_CASES[0]!, { ids: new Set(["choice"]), categories: new Set() })).toBe(false);
     });
     test("rejects wrong action mode and nonterminal or incomplete fences", () => {
         expect(validateChoiceRoute(result("reply"), "checklist").length).toBeGreaterThan(0);

@@ -134,7 +134,8 @@ export function parseEvalSelection(): EvalSelection {
 }
 
 export function caseIsSelected(evalCase: EvalCase, selection: EvalSelection): boolean {
-	if (selection.ids.size > 0 && !selection.ids.has(evalCase.id)) return false;
+	// A trailing "*" selects an id prefix, e.g. "choice.*".
+	if (selection.ids.size > 0 && ![...selection.ids].some((id) => id.endsWith("*") ? evalCase.id.startsWith(id.slice(0, -1)) : id === evalCase.id)) return false;
 	if (selection.categories.size > 0 && !selection.categories.has(evalCase.category)) return false;
 	return true;
 }
