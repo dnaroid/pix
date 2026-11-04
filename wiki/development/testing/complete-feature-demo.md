@@ -75,10 +75,15 @@ is deliberately ordinary; the surrounding workflow is the demonstration.
 6. Prepare integration prerequisites from the table below, plus a harmless
    finite background command and a project launch command `Run greeting tests`.
    Keep recorded script output small and English. Don't show account identifiers.
-7. Use one persistent isolated Desktop profile and **one app lifetime** through
-   all Desktop scenes. Preserve drafts and sessions while navigating. Do not
-   kill/relaunch the application between short probes. The separate TUI has its
-   own session; never open a still-running Desktop session for concurrent writes.
+7. Record **sequential chapters**, with one persistent isolated Desktop profile
+   and **one app lifetime per chapter**. This is the user-approved capture mode:
+   the QA supervisor has a nonrenewable 15-minute limit, shorter than the full
+   master even before generation waits. Preserve drafts while navigating within
+   a chapter; finish or explicitly save valuable draft text before closing it
+   because in-memory drafts are not restart-persistent. Keep saved sessions and
+   history between chapters. Do not kill/relaunch between short probes or bypass
+   the supervisor deadline. The separate TUI has its own session; never open a
+   still-running Desktop session for concurrent writes.
 8. Check capture scale and caption safe area. Close unrelated projects and
    notifications. Preserve the build identifier and real execution timestamps.
    Rehearsal screenshots/AX evidence can use `recordWindowVideo: false`; recording
@@ -107,6 +112,13 @@ No credentials or authorization flows belong in footage or subtitle files.
 ## Run order versus edit order
 
 The timeline below is the **edit order**. Reduce dead time without falsifying it:
+
+Capture 3–5 observable checks per chapter, reserving time for owned graceful
+cleanup before the 15-minute deadline. Scene boundaries are editorial, not a
+requirement to finish four complex workflows in one launch: carry unfinished
+scenes into the next chapter using saved state and honest continuation labels.
+Do not leave implementation running across shutdown merely to meet the budget;
+pause at a safe boundary, verify settlement, and preserve its saved session.
 
 1. Capture S01–S04 in sequence. Let the implementation/research work start.
 2. During real background work, capture read-only BTW, Preview, Usage, and model
@@ -400,8 +412,9 @@ The cue table is the editorial source for `complete-feature-demo.en.srt`.
   separately approved disposable destinations.
 - [ ] Actual tests, source citations, task status, child transcripts, and final
   CI SHA are readable. No pre-generated output stands in for live work.
-- [ ] One Desktop lifetime is maintained; background writers do not collide;
-  child jobs and owned test processes are cleaned up without losing the profile.
+- [ ] One Desktop lifetime per chapter is maintained within its bounded deadline;
+  background writers do not collide. Valuable drafts are saved/finished, and
+  child jobs and owned processes are cleaned up without losing the profile/history.
 - [ ] Experimental, unavailable, cached, incomplete and failed states remain honest.
 - [ ] Long waits carry actual elapsed-time labels; subtitle timing matches the
   final edit and never obscures the controls being demonstrated.
