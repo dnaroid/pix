@@ -119,7 +119,13 @@ fn dates_from(
     // Not a repository, or Git is unavailable: only the file time is known.
     let Some(status) = git(
         &root,
-        &["status", "--porcelain=v1", "--untracked-files=all", "--", path],
+        &[
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+            "--",
+            path,
+        ],
     ) else {
         return Ok(dates);
     };
@@ -169,15 +175,27 @@ mod tests {
             let output = git_command(
                 &self.0,
                 &[
-                    "-c", "user.name=Pix", "-c", "user.email=pix@example.invalid",
-                    "-c", "commit.gpgsign=false", "commit", "--no-verify", "-qm", at,
+                    "-c",
+                    "user.name=Pix",
+                    "-c",
+                    "user.email=pix@example.invalid",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "commit",
+                    "--no-verify",
+                    "-qm",
+                    at,
                 ],
             )
             .env("GIT_AUTHOR_DATE", at)
             .env("GIT_COMMITTER_DATE", at)
             .output()
             .unwrap();
-            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
     }
     impl Drop for Directory {
@@ -224,7 +242,10 @@ mod tests {
         fs::write(repo.0.join("new.md"), "draft\n").unwrap();
         let untracked = dates_from(&repo.0, "new.md", Some((1, 1))).unwrap();
         assert!(!untracked.tracked && untracked.uncommitted);
-        assert_eq!((untracked.created_at, untracked.lines_committed_at), (None, None));
+        assert_eq!(
+            (untracked.created_at, untracked.lines_committed_at),
+            (None, None)
+        );
         assert!(untracked.modified_at.is_some());
 
         let plain = Directory::new(false);

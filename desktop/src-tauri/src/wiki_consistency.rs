@@ -386,7 +386,9 @@ fn has_report_header(content: &str) -> bool {
     let Some(first_end) = content.find('\n') else {
         return false;
     };
-    let opener = content[..first_end].strip_suffix('\r').unwrap_or(&content[..first_end]);
+    let opener = content[..first_end]
+        .strip_suffix('\r')
+        .unwrap_or(&content[..first_end]);
     if opener != "---" && opener != "+++" {
         return false;
     }
@@ -402,7 +404,9 @@ fn has_report_header(content: &str) -> bool {
             // The owned '\n' preserves the original closing delimiter EOL.
             // An immediate comment uses the inserted bridge for an original EOF.
             return after.starts_with(REPORT_PREFIX)
-                || after.strip_prefix('\n').is_some_and(|text| text.starts_with(REPORT_PREFIX));
+                || after
+                    .strip_prefix('\n')
+                    .is_some_and(|text| text.starts_with(REPORT_PREFIX));
         }
         let Some(end) = end else {
             return false;
@@ -606,19 +610,46 @@ mod tests {
         let cases = [
             ("# Page\n", format!("{report}# Page\n")),
             ("\u{feff}# Page\n", format!("\u{feff}{report}# Page\n")),
-            ("---\ntitle: Page\n---\n# Page\n", format!("---\ntitle: Page\n---\n\n{report}# Page\n")),
-            ("---\ntitle: Page\n...\n# Page\n", format!("---\ntitle: Page\n...\n\n{report}# Page\n")),
-            ("+++\ntitle = 'Page'\n+++\n# Page\n", format!("+++\ntitle = 'Page'\n+++\n\n{report}# Page\n")),
-            ("\u{feff}---\r\ntitle: Page\r\n---\r\n# Page\r\n", format!("\u{feff}---\r\ntitle: Page\r\n---\r\n\n{report}# Page\r\n")),
-            ("\u{feff}\u{feff}---\n---\nBody\n", format!("\u{feff}\u{feff}---\n---\n\n{report}Body\n")),
-            ("---\ntitle: Page\n---", format!("---\ntitle: Page\n---\n{report}")),
-            ("+++\ntitle = 'Page'\n+++", format!("+++\ntitle = 'Page'\n+++\n{report}")),
+            (
+                "---\ntitle: Page\n---\n# Page\n",
+                format!("---\ntitle: Page\n---\n\n{report}# Page\n"),
+            ),
+            (
+                "---\ntitle: Page\n...\n# Page\n",
+                format!("---\ntitle: Page\n...\n\n{report}# Page\n"),
+            ),
+            (
+                "+++\ntitle = 'Page'\n+++\n# Page\n",
+                format!("+++\ntitle = 'Page'\n+++\n\n{report}# Page\n"),
+            ),
+            (
+                "\u{feff}---\r\ntitle: Page\r\n---\r\n# Page\r\n",
+                format!("\u{feff}---\r\ntitle: Page\r\n---\r\n\n{report}# Page\r\n"),
+            ),
+            (
+                "\u{feff}\u{feff}---\n---\nBody\n",
+                format!("\u{feff}\u{feff}---\n---\n\n{report}Body\n"),
+            ),
+            (
+                "---\ntitle: Page\n---",
+                format!("---\ntitle: Page\n---\n{report}"),
+            ),
+            (
+                "+++\ntitle = 'Page'\n+++",
+                format!("+++\ntitle = 'Page'\n+++\n{report}"),
+            ),
         ];
         for (body, with_report) in cases {
             assert!(has_report_header(&with_report));
             // Reject both a footer matching logical body and one hashing report JSON.
-            assert!(!has_current_clear_stamp(&stamped(&with_report, &stamp(body))));
-            assert!(!has_current_clear_stamp(&stamped(&with_report, &stamp(&with_report))));
+            assert!(!has_current_clear_stamp(&stamped(
+                &with_report,
+                &stamp(body)
+            )));
+            assert!(!has_current_clear_stamp(&stamped(
+                &with_report,
+                &stamp(&with_report)
+            )));
             // A successful recheck removes its report; original body bytes hash identically.
             assert!(has_current_clear_stamp(&stamped(body, &stamp(body))));
         }
@@ -631,7 +662,10 @@ mod tests {
             format!("{REPORT_PREFIX}{{}} -->\n{REPORT_PREFIX}{{}} -->\nBody"),
             format!("{REPORT_PREFIX}{} -->\nBody", "x".repeat(384 * 1024 + 1)),
         ] {
-            assert!(!has_current_clear_stamp(&stamped(&with_report, &stamp(&with_report))));
+            assert!(!has_current_clear_stamp(&stamped(
+                &with_report,
+                &stamp(&with_report)
+            )));
         }
         for body in [
             "```html\n<!-- pix:wiki-report example -->\n```\n",
@@ -804,12 +838,24 @@ mod tests {
         let mut entries = [entry("page.md", ProjectTreeEntryKind::File)];
         let cache = Mutex::new(StampCache::new(4));
         let reads = Cell::new(0);
-        annotate_counted(&workspace, &mut entries, &cache, &reads, MAX_DIRECTORY_BYTES);
+        annotate_counted(
+            &workspace,
+            &mut entries,
+            &cache,
+            &reads,
+            MAX_DIRECTORY_BYTES,
+        );
         assert_eq!(entries[0].wiki_checked, Some(true));
 
         let report_body = format!("---\ntitle: Page\n---\n\n{REPORT_PREFIX}{{}} -->\nBody\n");
         fs::write(&path, stamped(&report_body, &stamp(&report_body))).unwrap();
-        annotate_counted(&workspace, &mut entries, &cache, &reads, MAX_DIRECTORY_BYTES);
+        annotate_counted(
+            &workspace,
+            &mut entries,
+            &cache,
+            &reads,
+            MAX_DIRECTORY_BYTES,
+        );
         assert_eq!(reads.get(), 2);
         assert_eq!(entries[0].wiki_checked, Some(false));
         annotate_counted(&workspace, &mut entries, &cache, &reads, 0);
@@ -817,7 +863,13 @@ mod tests {
         assert_eq!(entries[0].wiki_checked, Some(false));
 
         fs::write(&path, clear).unwrap();
-        annotate_counted(&workspace, &mut entries, &cache, &reads, MAX_DIRECTORY_BYTES);
+        annotate_counted(
+            &workspace,
+            &mut entries,
+            &cache,
+            &reads,
+            MAX_DIRECTORY_BYTES,
+        );
         assert_eq!(reads.get(), 3);
         assert_eq!(entries[0].wiki_checked, Some(true));
     }

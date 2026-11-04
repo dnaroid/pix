@@ -220,7 +220,7 @@ describe("desktop visual regressions", () => {
 
   it("keeps tool diagnostics and failure on child rows instead of promoting them to the activity-group summary", () => {
     expect(transcriptActivityGroupSource).toContain("attention={toolAttention}");
-    expect(transcriptActivityGroupSource).toContain('<ToolStatusIcon status={tool.status} attention={toolAttention}');
+    expect(transcriptActivityGroupSource).toContain('<ToolStatusIcon label={presentation.name} status={tool.status} attention={toolAttention}');
     expect(transcriptActivityGroupSource).not.toContain("toolGroupAttention");
     expect(transcriptActivityGroupSource).not.toContain("settledFailure");
     // The collapsed header carries no status icon, so failure stays on the child call that failed.
@@ -260,7 +260,7 @@ describe("desktop visual regressions", () => {
     expect(header).not.toContain("text-primary");
     expect(header).not.toContain("animate-pulse");
     expect(transcriptActivityGroupSource).toContain('class="tool-name shrink-0 font-bold" data-tool-tone={presentation.tone}');
-    expect(transcriptActivityGroupSource).toContain('<Brain class="h-3 w-3 shrink-0 text-muted-foreground/65"');
+    expect(transcriptActivityGroupSource).toContain('<ToolStatusIcon label="thinking" status={entry.startedAtMs !== undefined && entry.endedAtMs === undefined ? "in_progress" : "completed"}');
     expect(transcriptActivityGroupSource).toContain('data-activity-thought-label class="text-muted-foreground/85"');
   });
 

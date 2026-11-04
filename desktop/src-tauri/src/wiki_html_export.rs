@@ -89,7 +89,10 @@ fn normalize(base_dir: &str, target: &str) -> Option<String> {
     let mut parts: Vec<&str> = if target.starts_with('/') {
         Vec::new()
     } else {
-        base_dir.split('/').filter(|part| !part.is_empty()).collect()
+        base_dir
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .collect()
     };
     for part in target.split('/') {
         match part {
@@ -160,7 +163,11 @@ fn rewrite_url(
     {
         let scheme = url[..index].to_ascii_lowercase();
         let allowed = scheme == "http" || scheme == "https" || (!image && scheme == "mailto");
-        return if allowed { url.to_owned() } else { BLOCKED.to_owned() };
+        return if allowed {
+            url.to_owned()
+        } else {
+            BLOCKED.to_owned()
+        };
     }
     if url.starts_with("//") || url.starts_with('#') {
         return BLOCKED.to_owned();
@@ -202,10 +209,15 @@ fn media_html(url: &str, label: &str) -> String {
 }
 
 fn is_wiki_metadata_comment(raw: &str) -> bool {
-    let line = raw.strip_suffix("\r\n").or_else(|| raw.strip_suffix('\n')).unwrap_or(raw);
-    let Some(payload) = line.strip_prefix("<!-- pix:wiki-report ")
+    let line = raw
+        .strip_suffix("\r\n")
+        .or_else(|| raw.strip_suffix('\n'))
+        .unwrap_or(raw);
+    let Some(payload) = line
+        .strip_prefix("<!-- pix:wiki-report ")
         .or_else(|| line.strip_prefix("<!-- pix:wiki-check "))
-        .and_then(|value| value.strip_suffix(" -->")) else {
+        .and_then(|value| value.strip_suffix(" -->"))
+    else {
         return false;
     };
     // App JSON escapes angle brackets. A second comment or surrounding HTML
@@ -217,7 +229,8 @@ fn without_wiki_metadata(raw: CowStr<'_>) -> Option<CowStr<'_>> {
     if !raw.split_inclusive('\n').any(is_wiki_metadata_comment) {
         return Some(raw);
     }
-    let visible: String = raw.split_inclusive('\n')
+    let visible: String = raw
+        .split_inclusive('\n')
         .filter(|line| !is_wiki_metadata_comment(line))
         .collect();
     (!visible.is_empty()).then(|| CowStr::from(visible))
@@ -249,25 +262,47 @@ fn render_page(rel: &str, source: &str, root: &Path, pages: &HashSet<String>) ->
         }
         let event = match event {
             Event::Html(raw) | Event::InlineHtml(raw) => {
-                let Some(visible) = without_wiki_metadata(raw) else { continue; };
+                let Some(visible) = without_wiki_metadata(raw) else {
+                    continue;
+                };
                 Event::Text(visible)
             }
-            Event::Start(Tag::Link { link_type, dest_url, title, id }) => {
+            Event::Start(Tag::Link {
+                link_type,
+                dest_url,
+                title,
+                id,
+            }) => {
                 let url = rewrite_url(&dest_url, dir, root, pages, false);
                 let local = rewrite_url(&dest_url, dir, root, pages, true);
                 if media_kind(&local).is_some() {
                     media = Some((local, String::new()));
                     continue;
                 }
-                Event::Start(Tag::Link { link_type, dest_url: CowStr::from(url), title, id })
+                Event::Start(Tag::Link {
+                    link_type,
+                    dest_url: CowStr::from(url),
+                    title,
+                    id,
+                })
             }
-            Event::Start(Tag::Image { link_type, dest_url, title, id }) => {
+            Event::Start(Tag::Image {
+                link_type,
+                dest_url,
+                title,
+                id,
+            }) => {
                 let url = rewrite_url(&dest_url, dir, root, pages, true);
                 if media_kind(&url) == Some(true) {
                     media = Some((url, String::new()));
                     continue;
                 }
-                Event::Start(Tag::Image { link_type, dest_url: CowStr::from(url), title, id })
+                Event::Start(Tag::Image {
+                    link_type,
+                    dest_url: CowStr::from(url),
+                    title,
+                    id,
+                })
             }
             other => other,
         };
@@ -275,7 +310,10 @@ fn render_page(rel: &str, source: &str, root: &Path, pages: &HashSet<String>) ->
     }
     for event in &events {
         match event {
-            Event::Start(Tag::Heading { level: HeadingLevel::H1, .. }) => in_title = title.is_empty(),
+            Event::Start(Tag::Heading {
+                level: HeadingLevel::H1,
+                ..
+            }) => in_title = title.is_empty(),
             Event::End(TagEnd::Heading(HeadingLevel::H1)) => {
                 in_title = false;
                 text.push(' ');
@@ -294,7 +332,10 @@ fn render_page(rel: &str, source: &str, root: &Path, pages: &HashSet<String>) ->
     html::push_html(&mut body, events.into_iter());
     if title.trim().is_empty() {
         let name = rel.rsplit('/').next().unwrap_or(rel);
-        title = name.rsplit_once('.').map_or(name, |(stem, _)| stem).to_owned();
+        title = name
+            .rsplit_once('.')
+            .map_or(name, |(stem, _)| stem)
+            .to_owned();
     }
     Page {
         path: rel.to_owned(),
@@ -312,7 +353,12 @@ fn escape_html(value: &str) -> String {
         .replace('"', "&quot;")
 }
 
-fn build_html(project: &str, root: &Path, index: &str, sources: &[(String, String)]) -> Result<String, String> {
+fn build_html(
+    project: &str,
+    root: &Path,
+    index: &str,
+    sources: &[(String, String)],
+) -> Result<String, String> {
     let known: HashSet<String> = sources.iter().map(|(path, _)| path.clone()).collect();
     let pages = sources
         .iter()
@@ -343,11 +389,15 @@ fn export(workspace: &Path, path: &Path, index: &str) -> Result<PathBuf, String>
     if sources.is_empty() {
         return Err("Wiki has no Markdown pages to export".to_owned());
     }
-    let project = workspace
-        .file_name()
-        .map_or_else(|| "Wiki".to_owned(), |name| name.to_string_lossy().into_owned());
+    let project = workspace.file_name().map_or_else(
+        || "Wiki".to_owned(),
+        |name| name.to_string_lossy().into_owned(),
+    );
     let page = build_html(&project, &directory, index, &sources)?;
-    let digest = format!("{:x}", Sha256::digest(workspace.to_string_lossy().as_bytes()));
+    let digest = format!(
+        "{:x}",
+        Sha256::digest(workspace.to_string_lossy().as_bytes())
+    );
     let output = std::env::temp_dir().join(format!("pix-wiki-export-{}", &digest[..16]));
     fs::create_dir_all(&output)
         .map_err(|error| format!("failed to create export folder: {error}"))?;
@@ -405,15 +455,28 @@ mod tests {
         assert_eq!(link("javascript:alert(1)"), "#");
         assert_eq!(link("//evil.example/x"), "#");
         assert_eq!(link("https://example.com/a:b"), "https://example.com/a:b");
-        assert_eq!(rewrite_url("p ic.png", "a", root, &pages, true), "file:///w/a/p%20ic.png");
-        assert_eq!(rewrite_url("data:image/png;base64,AA", "a", root, &pages, true), "#");
+        assert_eq!(
+            rewrite_url("p ic.png", "a", root, &pages, true),
+            "file:///w/a/p%20ic.png"
+        );
+        assert_eq!(
+            rewrite_url("data:image/png;base64,AA", "a", root, &pages, true),
+            "#"
+        );
     }
 
     #[test]
     fn renders_local_media_links_inline() {
         let pages = HashSet::new();
-        let page = render_page("a/p.md", "[x.png](i/x.png)\n\n![v](m.mp4)\n\n[d](d.md)", Path::new("/w"), &pages);
-        assert!(page.html.contains("<img src=\"file:///w/a/i/x.png\" alt=\"x.png\""));
+        let page = render_page(
+            "a/p.md",
+            "[x.png](i/x.png)\n\n![v](m.mp4)\n\n[d](d.md)",
+            Path::new("/w"),
+            &pages,
+        );
+        assert!(page
+            .html
+            .contains("<img src=\"file:///w/a/i/x.png\" alt=\"x.png\""));
         assert!(page.html.contains("<video controls"));
         assert!(!page.html.contains("<a href=\"file"));
     }
@@ -432,28 +495,51 @@ mod tests {
 
     #[test]
     fn omits_saved_wiki_reports_and_stamps_from_html_search_and_titles() {
-        let report = format!("<!-- pix:wiki-report {{\"notice\":\"archivedreport {}\"}} -->\n", "x".repeat(12_000));
+        let report = format!(
+            "<!-- pix:wiki-report {{\"notice\":\"archivedreport {}\"}} -->\n",
+            "x".repeat(12_000)
+        );
         let stamp = "<!-- pix:wiki-check {\"modelRef\":\"archivedstamp\"} -->\n";
-        let source = format!("---\ntitle: Rules\n---\n\n{report}# Current rules\nCurrent body.\n\n{stamp}");
+        let source =
+            format!("---\ntitle: Rules\n---\n\n{report}# Current rules\nCurrent body.\n\n{stamp}");
         let page = render_page("rules.md", &source, Path::new("/w"), &HashSet::new());
         assert_eq!(page.title, "Current rules");
         assert!(page.html.contains("Current body.") && page.text.contains("Current body."));
-        for hidden in ["pix:wiki-report", "pix:wiki-check", "archivedreport", "archivedstamp"] {
+        for hidden in [
+            "pix:wiki-report",
+            "pix:wiki-check",
+            "archivedreport",
+            "archivedstamp",
+        ] {
             assert!(!page.html.contains(hidden));
             assert!(!page.text.contains(hidden));
             assert!(!page.title.contains(hidden));
         }
-        let inline = render_page("title.md", "# Visible <!-- pix:wiki-report {\"notice\":\"hidden\"} -->\n", Path::new("/w"), &HashSet::new());
+        let inline = render_page(
+            "title.md",
+            "# Visible <!-- pix:wiki-report {\"notice\":\"hidden\"} -->\n",
+            Path::new("/w"),
+            &HashSet::new(),
+        );
         assert_eq!(inline.title, "Visible");
         assert!(!inline.html.contains("hidden") && !inline.text.contains("hidden"));
-        let exported = build_html("Wiki", Path::new("/w"), "rules.md", &[("rules.md".to_owned(), source)]).unwrap();
+        let exported = build_html(
+            "Wiki",
+            Path::new("/w"),
+            "rules.md",
+            &[("rules.md".to_owned(), source)],
+        )
+        .unwrap();
         assert!(!exported.contains("archivedreport") && !exported.contains("archivedstamp"));
     }
 
     #[test]
     fn strips_only_complete_reserved_comment_lines_from_combined_html_events() {
         let mixed = "<div>before</div>\n<!-- pix:wiki-report {\"notice\":\"hidden\"} -->\n<section>after</section>\n";
-        assert_eq!(without_wiki_metadata(CowStr::from(mixed)).as_deref(), Some("<div>before</div>\n<section>after</section>\n"));
+        assert_eq!(
+            without_wiki_metadata(CowStr::from(mixed)).as_deref(),
+            Some("<div>before</div>\n<section>after</section>\n")
+        );
         for ordinary in [
             "<!-- pix:wiki-report {} --><!-- ordinary retained -->",
             "<!-- pix:wiki-check {} --> <b>retained</b>",
@@ -461,7 +547,10 @@ mod tests {
             "<!-- ordinary retained -->\n",
             "<!-- pix:wiki-reporter retained -->\n",
         ] {
-            assert_eq!(without_wiki_metadata(CowStr::from(ordinary)).as_deref(), Some(ordinary));
+            assert_eq!(
+                without_wiki_metadata(CowStr::from(ordinary)).as_deref(),
+                Some(ordinary)
+            );
         }
         let page = render_page("mixed.md", mixed, Path::new("/w"), &HashSet::new());
         assert!(page.html.contains("&lt;div&gt;before&lt;/div&gt;"));
