@@ -57,3 +57,15 @@ test("cleanup retries only lock errors and preserves the last failure", async ()
   await expect(withFilesystemRetry(() => { attempts++; throw error; }, 3, 0)).rejects.toBe(error);
   expect(attempts).toBe(3);
 });
+
+test("cleanup yields between transient busy errors so pending handle releases can complete", async () => {
+  let released = false;
+  let attempts = 0;
+  queueMicrotask(() => { released = true; });
+  await withFilesystemRetry(() => {
+    attempts++;
+    if (!released) throw Object.assign(new Error("fixture handle is retiring"), { code: "EBUSY" });
+  }, 2, 0);
+  expect(released).toBe(true);
+  expect(attempts).toBe(2);
+});

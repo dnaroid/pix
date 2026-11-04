@@ -10,6 +10,7 @@ import { probeAndroidBackend, validateAndroidSteps } from "../../src/async-subag
 import { prepareUiQaWorkspace } from "../../src/async-subagents/core/ui-qa-workspace.js";
 import { noIdleHierarchyCommand, parseNoIdleHierarchyResult, requireStableAndroidNode, verifyNoIdleHelperBundle } from "../../src/async-subagents/agents/ui-qa/drivers/android/no-idle.mjs";
 import { HELPER_BASE64, HELPER_SHA256, HELPER_SOURCE_SHA256 } from "../../src/async-subagents/agents/ui-qa/drivers/android/helper-bundle.mjs";
+import { removeDirsWithRetry } from "../support/fs-retry.js";
 
 const runner = path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/scripts/ui-qa-runner.mjs");
 const lookup = process.platform === "win32" ? ["where.exe", "node.exe"] : ["which", "node"];
@@ -42,13 +43,9 @@ server.listen(5037, '127.0.0.1', () => console.log('ready'));
 	});
 });
 afterAll(() => server?.kill("SIGTERM"));
-afterEach(() => {
-	for (const dir of dirs.splice(0)) {
-		// The synchronous runner has exited, but Windows can briefly retain file handles.
-		// Retry transient locks without hiding persistent cleanup failures.
-		fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-	}
-});
+// Bun's built-in rmSync retry options do not reliably retry Windows locks.
+// Yield between bounded attempts so retiring processes can release handles.
+afterEach(() => removeDirsWithRetry(dirs));
 
 const XML = '<hierarchy rotation="0"><node package="your.app" text="Schedules" content-desc="" class="android.widget.Button" enabled="true" checked="false" bounds="[0,0][80,40]"/><node package="other.app" text="Secret"/></hierarchy>';
 
