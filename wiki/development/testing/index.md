@@ -10,6 +10,7 @@ Deterministic checks, native QA and opt-in evaluation harnesses have different e
 - [Evaluation framework](evals.md)
 - [Wiki contradiction evaluation](wiki-contradiction-evaluation.md)
 - [Default Pix QA project](qa-sandbox.md)
+- [Pix demo recording script](task-to-diff-demo.md) — task-to-diff walkthrough; not a completed recording
 - [Session revision discovery: experimental eval](session-revision-evaluation.md)
 - [Self-contained UI QA agent instructions](ui-qa-agent.md)
 - [UI QA sub-agent specification](ui-qa-subagent.md)

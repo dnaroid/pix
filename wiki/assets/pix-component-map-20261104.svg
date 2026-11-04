@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="410" viewBox="0 0 960 410" role="img" aria-labelledby="title desc">
+  <title id="title">Pix component boundaries</title>
+  <desc id="desc">Pix Desktop connects through a native Tauri shell and ACP adapter to Pi SDK. Pix TUI embeds Pi SDK. A shared toolkit provides extensions and a session-independent search CLI. Pi SDK is the upstream runtime foundation.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#91a6c3"/></marker>
+  </defs>
+  <rect width="960" height="410" rx="16" fill="#111827"/>
+  <g font-family="system-ui, -apple-system, sans-serif">
+    <text x="28" y="36" fill="#f1f5f9" font-size="22" font-weight="650">Pix: workbench and orchestration around Pi</text>
+    <g fill="#1e293b" stroke="#5b82b4" stroke-width="1.5">
+      <rect x="28" y="66" width="274" height="94" rx="10"/>
+      <rect x="348" y="66" width="264" height="94" rx="10"/>
+      <rect x="28" y="228" width="274" height="94" rx="10"/>
+      <rect x="348" y="228" width="264" height="94" rx="10"/>
+    </g>
+    <rect x="660" y="66" width="272" height="256" rx="10" fill="#153b36" stroke="#63b7a5" stroke-width="1.5"/>
+    <g fill="#f1f5f9" font-size="20" font-weight="650">
+      <text x="46" y="98">Pix Desktop</text>
+      <text x="366" y="98">Pix ACP adapter</text>
+      <text x="46" y="260">Pix TUI</text>
+      <text x="366" y="260">Bundled toolkit</text>
+      <text x="680" y="102">Pi SDK · upstream</text>
+    </g>
+    <g fill="#cbd5e1" font-size="16">
+      <text x="46" y="126">Svelte UI + Tauri / Rust shell</text>
+      <text x="46" y="147">Projects, tasks, Wiki, Git, tools</text>
+      <text x="366" y="126">Protocol / event translation</text>
+      <text x="366" y="147">pi-acp fork lineage</text>
+      <text x="46" y="288">Terminal workspace</text>
+      <text x="46" y="309">Embeds SDK sessions</text>
+      <text x="366" y="288">Tools, subagents, context</text>
+      <text x="366" y="309">Shared native search engine</text>
+      <text x="680" y="146">Coding-agent runtime</text>
+      <text x="680" y="177">Provider / model APIs</text>
+      <text x="680" y="208">Session primitives</text>
+      <text x="680" y="239">Extension APIs</text>
+      <text x="680" y="284">Not a new LLM runtime</text>
+      <text x="680" y="307">implemented by Pix</text>
+    </g>
+    <g fill="none" stroke="#91a6c3" stroke-width="2" marker-end="url(#arrow)">
+      <path d="M302 112H348"/>
+      <path d="M612 112H660"/>
+      <path d="M165 228V192H636V188H660"/>
+      <path d="M612 270H660"/>
+      <path d="M270 160V211H480V228" stroke-dasharray="5 5"/>
+    </g>
+    <text x="336" y="183" fill="#cbd5e1" font-size="14">SDK integration</text>
+    <text x="28" y="359" fill="#cbd5e1" font-size="15">Solid: runtime integration. Dashed: Desktop can call search without an agent session.</text>
+    <text x="28" y="385" fill="#94a3b8" font-size="14">Simplified component map, not a deployment diagram. Toolkit includes upstream-derived components.</text>
+  </g>
+</svg>

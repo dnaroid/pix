@@ -331,6 +331,12 @@ function readFlow(flowPath, requireSteps) {
 	}
 	if (!isObject(flow) || !isObject(flow.target)) throw new UiQaError("FAILED", "UI QA flow must define target");
 	if (flow.version !== undefined && flow.version !== 1) throw new UiQaError("FAILED", "UI QA flow version must be 1");
+	if (flow.recordWindowVideo !== undefined) {
+		if (typeof flow.recordWindowVideo !== "boolean") throw new UiQaError("FAILED", "recordWindowVideo must be a boolean");
+		if (!isObject(flow.target.application) && flow.target.command?.presentation !== "native-terminal") {
+			throw new UiQaError("FAILED", "recordWindowVideo is supported only for desktop and native-terminal targets");
+		}
+	}
 	if (requireSteps && (!Array.isArray(flow.steps) || flow.steps.length < 1 || flow.steps.length > MAX_STEPS)) {
 		throw new UiQaError("FAILED", `UI QA flow must define between 1 and ${MAX_STEPS} steps`);
 	}

@@ -14,6 +14,7 @@ const AUTOCOMPLETE_HISTORY_MESSAGE_MAX_CHARS = 700;
 const AUTOCOMPLETE_HISTORY_CONTEXT_MAX_CHARS = 3_600;
 const AUTOCOMPLETE_TOKEN_CHARS = 4;
 const AUTOCOMPLETE_EMPTY_SENTINEL = "<EMPTY>";
+const AUTOCOMPLETE_NEXT_MESSAGE_HISTORY = 6;
 const DEFAULT_AUTOCOMPLETE_CONFIG: AutocompleteConfig = {
 	modelRef: "",
 	fallbackModels: [],
@@ -39,6 +40,7 @@ Predict only what that same user would type next at <cursor>.
 Never switch to the assistant/agent's voice, never reply to the draft, and never acknowledge or promise actions on behalf of the agent.
 Preserve the draft author's grammatical person, intent, language, and style. For a request or imperative addressed to the agent, continue the requester's instruction rather than writing the agent's response.
 Use provided recent active-session messages only to disambiguate the user's intended text; never continue a recent message directly.
+Exception for an empty draft: predict a short next message the human user would naturally send after the recent conversation. Use the user's language and voice, not the assistant's. Do not invent unrelated tasks or generic suggestions. Return ${AUTOCOMPLETE_EMPTY_SENTINEL} if no clear next user message follows from the context.
 Return exactly one of:
 - the raw suffix to append after the draft, with no quotes, labels, Markdown, or explanation; or
 - ${AUTOCOMPLETE_EMPTY_SENTINEL} when the draft is already complete, the next text is uncertain, or the likely next turn would be the assistant's reply.
@@ -118,11 +120,14 @@ export function createAutocompleteCompleter(options: CreateAutocompleteCompleter
 	};
 
 	return async ({ cwd, draft, signal, getMessages }) => {
-		const config = (options.loadConfig ?? loadAutocompleteConfig)(cwd);
+		const loadedConfig = (options.loadConfig ?? loadAutocompleteConfig)(cwd);
+		// Next-message prediction needs context even when typed-prefix completion does not.
+		const config = draft.length === 0
+			? { ...loadedConfig, includeRecentMessages: Math.max(loadedConfig.includeRecentMessages, AUTOCOMPLETE_NEXT_MESSAGE_HISTORY) }
+			: loadedConfig;
 		if (!isEligibleDraft(draft) || !config.modelRef.trim()) return "";
 		const requestSignal = createTimeoutSignal(signal, config.timeoutMs);
 		try {
-			const runtime = await raceWithSignal(getRuntime(), requestSignal.signal);
 			const history = config.includeRecentMessages > 0
 				? await raceWithSignal(getMessages(), requestSignal.signal).catch((error: unknown) => {
 					if (requestSignal.signal.aborted) throw error;
@@ -132,6 +137,7 @@ export function createAutocompleteCompleter(options: CreateAutocompleteCompleter
 				: [];
 			const prompt = buildAutocompletePrompt(cwd, draft, history, config);
 			if (!prompt) return "";
+			const runtime = await raceWithSignal(getRuntime(), requestSignal.signal);
 			let refreshed = false;
 			let lastError: unknown;
 			for (const modelRef of configuredModelRefs(config.modelRef, config.fallbackModels)) {
@@ -271,6 +277,7 @@ function buildAutocompletePrompt(
 		history = history.slice(1);
 		prompt = renderAutocompletePrompt(cwd, draft, history);
 	}
+	if (draft.length === 0 && !history.some((message) => message.role === "user")) return "";
 	return autocompletePromptTokenEstimate(prompt) <= config.maxPromptTokens ? prompt : "";
 }
 
@@ -290,7 +297,9 @@ function autocompleteHistoryFromMessages(
 
 function renderAutocompletePrompt(cwd: string, draft: string, history: readonly AutocompleteHistoryMessage[]): string {
 	const lines = [
-		"Predict the suffix of this user-authored draft. Do not answer the draft or start a new conversation turn.",
+		draft.length === 0
+			? "Predict the human user's next message based on the recent conversation. Do not write the assistant's reply."
+			: "Predict the suffix of this user-authored draft. Do not answer the draft or start a new conversation turn.",
 		`cwd: ${cwd}`,
 	];
 	if (history.length > 0) {
@@ -403,7 +412,7 @@ function parseModelRef(value: string): { provider: string; modelId: string; thin
 }
 
 function isEligibleDraft(draft: string): boolean {
-	return draft.trim().length >= 3 && !draft.startsWith("/") && !draft.startsWith("!");
+	return (draft.length === 0 || draft.trim().length >= 3) && !draft.startsWith("/") && !draft.startsWith("!");
 }
 
 function createTimeoutSignal(parent: AbortSignal, timeoutMs: number): { signal: AbortSignal; dispose: () => void } {

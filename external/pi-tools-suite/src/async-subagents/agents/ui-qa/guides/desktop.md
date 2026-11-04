@@ -133,6 +133,15 @@ dependencies. Do not turn either case into a pass by asserting the window title.
 
 ## Oracles, evidence, cleanup
 
+Set top-level `"recordWindowVideo": false` in the flow when window recording is
+forbidden. The runner skips the recorder entirely (no startup wait, recorder
+process, or video file), keeps screenshots/accessibility/assertions/cleanup,
+and reports `windowVideo` with status `disabled`. Omission or `true` preserves
+automatic best-effort recording when the capability is available. The value
+must be boolean. This option is supported only for desktop and native-terminal
+targets; it is not a browser or PTY recording switch. Capabilities still describe
+the host, not whether this flow chose to record.
+
 Prefer accessibility/app-driver state, window/dialog state, visible copy, and
 enabled/checked/value state as deterministic oracles. Screenshots/videos are
 supporting evidence. Repeated evidence actions may omit names; the runner gives

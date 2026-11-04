@@ -1,4 +1,4 @@
-import { selectSuitableToolsForModel } from "../../lib/tool-args.js";
+import { detectModelProfile, selectSuitableToolsForModel } from "../../lib/tool-args.js";
 
 export const SUBAGENT_COMMON_TOOLS = ["todo", "compress", "project_search"];
 const commonTools = new Set(SUBAGENT_COMMON_TOOLS);
@@ -11,6 +11,25 @@ const readOnlyTools = new Set(["read", "grep", "find", "ls", "Read", "Grep", "Gl
 export interface SubagentWorkTools {
 	optional: string[];
 	readOnlySelection?: string[];
+}
+
+/** Called after CLI normalization, so explicit no-tools/exclusions remain authoritative. */
+export function subagentHasShell(args: readonly string[], model?: unknown): boolean {
+	const selection = args.indexOf("--tools");
+	const exclusion = args.indexOf("--exclude-tools");
+	const excluded = new Set(exclusion < 0 ? [] : args[exclusion + 1].split(","));
+	const tools = selection < 0 ? selectSuitableToolsForModel(model, ["bash"]) : args[selection + 1].split(",");
+	return tools.some((name) => ["bash", "Bash", "shell"].includes(name) && !excluded.has(name));
+}
+
+/** The SDK CLI allowlist filters registration, not just the initial active loadout. */
+export function withSubagentBackgroundTools(args: readonly string[], model?: unknown): string[] {
+	const result = [...args];
+	const selection = result.indexOf("--tools");
+	if (selection < 0 || !subagentHasShell(args, model)) return result;
+	const tools = detectModelProfile(model) === "claude" ? ["BashOutput", "KillShell"] : ["shell_output", "shell_kill"];
+	result[selection + 1] = [...new Set([...result[selection + 1].split(","), ...tools])].join(",");
+	return result;
 }
 
 /** Extension names are not builtin aliases; keep them in restricted CLI lists. */

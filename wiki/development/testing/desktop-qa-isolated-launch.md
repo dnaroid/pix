@@ -87,6 +87,42 @@ spawns the pinned `.app` inner executable in its runner-owned process group;
 there is no LaunchServices `open` handoff, detached GUI, or name-based attach.
 Human invocation is `npm run qa:desktop -- launch --manifest <manifestPath>`.
 
+### Continuous adaptive session
+
+Dependent checks can share one app lifetime without disabling per-flow cleanup.
+Start `node scripts/qa-desktop.mjs session --manifest <manifestPath>` as a
+tracked foreground supervisor in a background shell job, retaining its log.
+`--timeout-ms` defaults to 900000 and accepts 100..900000; this nonrenewable
+deadline begins after manifest validation and profile-lock acquisition and
+includes startup/interaction, with owned cleanup afterward. There is no daemon,
+LaunchServices handoff, or generic keep-alive flag. Ordinary `launch` behavior
+is unchanged.
+
+After `QA isolation verified`, run
+`node scripts/qa-desktop.mjs session-target --manifest <manifestPath>` before
+each runner flow. It checks private live runtime/lock/identity markers, expiry,
+native executable and direct supervisor PPID, and returns the exact PID attach
+target plus `ownerPid`/`expiresAt`. Historical identity alone is never sufficient.
+Use that same native PID for start inspection and subsequent adaptive flows;
+attached runner cleanup does not terminate the supervisor's child. Runner
+action/flow limits and capability probing remain unchanged. Set top-level
+`recordWindowVideo: false` in every flow for no-video QA; the supervisor never
+records video itself. Screenshots and AX/assertion evidence remain available.
+
+Finally validate `session-target` again, send SIGTERM only to its owner PID,
+and wait for the tracked job and owned native/backend processes to exit. Verify
+runtime marker and lock removal; never signal a retained PID after validation
+fails. Signals or expiry invoke the same owned graceful quit and bounded
+TERM/KILL fallback as launch cleanup. A ready session returns 143 on SIGTERM or
+124 on expiry (startup cancellation is an error); neither is an acceptance
+verdict. Natural app exit propagates its code. Timers/listeners are disposed on
+all exits. Cleanup failure is surfaced and retains the profile lock if the
+child remains alive; SIGKILL of the supervisor cannot guarantee graceful cleanup.
+The supervisor marks the lock owner as stopping before requesting quit;
+`session-target` rechecks ownership after process inspection and rejects stopping
+sessions while retaining the historical identity for evidence.
+Do not steal locks or automatically relaunch midway through one-lifetime QA.
+
 ## Profile and lifecycle
 
 Isolation activates only for `PI_UI_QA=1` with `PI_UI_QA_PROFILE_DIR`. Explicit

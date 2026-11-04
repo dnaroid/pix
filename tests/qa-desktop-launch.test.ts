@@ -5,7 +5,8 @@ import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile, access } from "node:fs/promises";
 import { join } from "node:path";
-import { parseArguments } from "../scripts/qa-desktop/cli.mjs";
+import { parseArguments, runCli } from "../scripts/qa-desktop/cli.mjs";
+import { sessionTarget } from "../scripts/qa-desktop/session.mjs";
 import { acquireLaunchLock, launchDesktop, launchEnvironment, matchesRuntime, NATIVE_QA_CONTRACT, requireNativeIsolation, validateManifest } from "../scripts/qa-desktop/launch.mjs";
 import { privateJson, readJson } from "../scripts/qa-desktop/paths.mjs";
 import { filterApiKeys } from "../scripts/qa-desktop/seed.mjs";
@@ -151,4 +152,114 @@ test("signal cancellation cleanly quits exact child, removes listeners and unloc
 	assert.equal(result.code, 143); assert.equal(quitPid, c.pid);
 	assert.equal(signals.listenerCount("SIGTERM"), 0);
 	await assert.rejects(access(join(m.profileDir, "launch.lock")));
+});
+
+test("session CLI requires a manifest, bounds lifetime, and leaves ordinary launch unchanged", async () => {
+	for (const args of [["session"], ["session-target"], ["session", "--manifest", "/x", "--timeout-ms", "99"], ["session-target", "--manifest", "/x", "--timeout-ms", "100"], ["launch", "--manifest", "/x", "--timeout-ms", "100"]]) assert.throws(() => parseArguments(args));
+	for (const [args, expected] of [[ ["session", "--manifest", "/x"], 900000 ], [ ["session", "--manifest", "/x", "--timeout-ms", "500"], 500 ], [ ["launch", "--manifest", "/x"], undefined ]]) {
+		assert.equal(await runCli(args, "/checkout", { platform: "darwin", launch: async (options) => {
+			assert.equal(options.sessionTimeoutMs, expected); return { code: 0 };
+		} }), 0);
+	}
+});
+
+test("continuous session survives repeated target checks and stops only at its deadline", { skip: skipWindows }, async (t) => {
+	const { manifest: m, manifestPath, checkout } = await fixture(t);
+	const c = child(); const signals = new EventEmitter(); let tick = 0, deadline, cleared = 0, quits = 0;
+	const inspect = async () => ({ executable: m.executable, parentPid: process.pid });
+	const result = await launchDesktop({ manifest: manifestPath, checkout, sessionTimeoutMs: 1000 }, {
+		signals, spawnChild: () => c, now: () => tick,
+		setTimer: (fn, ms) => { assert.equal(ms, 1000); deadline = fn; return 123; },
+		clearTimer: (id) => { assert.equal(id, 123); cleared++; },
+		wait: async () => { tick += 50; await privateJson(join(m.profileDir, "runtime.json"), runtime(m, c.pid)); },
+		onReady: async () => {
+			for (let i = 0; i < 2; i++) {
+				const target = await sessionTarget({ manifest: manifestPath, checkout }, { now: () => tick, inspect });
+				assert.deepEqual(target.target, { application: { pid: c.pid } });
+				assert.equal(target.ownerPid, process.pid);
+				assert.equal(quits, 0);
+				await assert.rejects(acquireLaunchLock(m), /locked/);
+			}
+			tick = 1000; deadline(); signals.emit("SIGTERM"); // first cancellation wins
+		},
+		quit: async (pid) => { assert.equal(pid, c.pid); quits++; c.emit("exit", 0, null); },
+	});
+	assert.equal(result.code, 124); assert.equal(quits, 1); assert.equal(cleared, 1);
+	assert.equal(signals.listenerCount("SIGTERM"), 0);
+	await assert.rejects(access(join(m.profileDir, "launch.lock")));
+	await assert.rejects(sessionTarget({ manifest: manifestPath, checkout }, { now: () => tick, inspect }));
+});
+
+test("session target rejects expired, foreign, reparented and stale live identities", { skip: skipWindows }, async (t) => {
+	const { manifest: m, manifestPath, checkout } = await fixture(t);
+	const release = await acquireLaunchLock(m); t.after(release);
+	const identity = { ...runtime(m, 7070), profileId: m.profileId, ownerPid: process.pid, expiresAt: 1000 };
+	await privateJson(join(m.runDir, "identity.json"), identity);
+	await privateJson(join(m.profileDir, "runtime.json"), runtime(m, 7070));
+	const options = { manifest: manifestPath, checkout };
+	const deps = { now: () => 0, inspect: async () => ({ executable: m.executable, parentPid: process.pid }) };
+	for (const patch of [{ expiresAt: 0 }, { ownerPid: process.pid + 1 }, { profileId: randomUUID() }, { pid: -1 }, { expiresAt: undefined }]) {
+		await privateJson(join(m.runDir, "identity.json"), { ...identity, ...patch });
+		await assert.rejects(sessionTarget(options, deps), /no live owned/);
+	}
+	await privateJson(join(m.runDir, "identity.json"), identity);
+	for (const patch of [{ executable: "/working/Desktop" }, { parentPid: 1 }]) await assert.rejects(sessionTarget(options, { ...deps, inspect: async () => ({ ...await deps.inspect(), ...patch }) }), /no longer matches/);
+	await privateJson(join(m.profileDir, "runtime.json"), runtime(m, 9999));
+	await assert.rejects(sessionTarget(options, deps), /no longer matches/);
+	await rm(join(m.profileDir, "runtime.json"));
+	await assert.rejects(sessionTarget(options, deps));
+});
+
+test("session natural exit clears watchdog; pre-ready expiry cleans up without publishing target", { skip: skipWindows }, async (t) => {
+	for (const expires of [false, true]) {
+		const { manifest: m, manifestPath, checkout } = await fixture(t);
+		const c = child(); const signals = new EventEmitter(); let deadline, cleared = 0;
+		const promise = launchDesktop({ manifest: manifestPath, checkout, sessionTimeoutMs: 100 }, {
+			signals, spawnChild: () => c,
+			setTimer: (fn) => { deadline = fn; return 123; }, clearTimer: () => { cleared++; },
+			wait: async () => { if (expires) deadline(); else await privateJson(join(m.profileDir, "runtime.json"), runtime(m, c.pid)); },
+			onReady: () => c.emit("exit", 0, null), quit: async () => c.emit("exit", 0, null),
+		});
+		if (expires) await assert.rejects(promise, /cancelled by deadline/);
+		else assert.equal((await promise).code, 0);
+		assert.equal(cleared, 1); assert.equal(signals.listenerCount("SIGTERM"), 0);
+		await assert.rejects(access(join(m.profileDir, "launch.lock")));
+		if (expires) await assert.rejects(access(join(m.runDir, "identity.json")));
+	}
+});
+
+test("failed session cleanup rejects without hanging or unlocking a live child", { skip: skipWindows }, async (t) => {
+	const { manifest: m, manifestPath, checkout } = await fixture(t);
+	const c = child(); const signals = new EventEmitter(); const kills = []; let deadline;
+	c.kill = (signal) => { kills.push(signal); };
+	await assert.rejects(launchDesktop({ manifest: manifestPath, checkout, sessionTimeoutMs: 100 }, {
+		signals, spawnChild: () => c, setTimer: (fn) => { deadline = fn; return 123; }, clearTimer: () => {},
+		wait: async () => { await privateJson(join(m.profileDir, "runtime.json"), runtime(m, c.pid)); },
+		onReady: () => deadline(), quit: async () => { throw new Error("quit failed"); },
+	}), /owned QA child did not exit/);
+	assert.deepEqual(kills, ["SIGTERM", "SIGKILL"]);
+	await access(join(m.profileDir, "launch.lock"));
+	assert.equal(signals.listenerCount("SIGTERM"), 0);
+});
+
+test("session revokes attach before pending quit while preserving historical identity", { skip: skipWindows }, async (t) => {
+	const { manifest: m, manifestPath, checkout } = await fixture(t);
+	const c = child(); const signals = new EventEmitter();
+	const options = { manifest: manifestPath, checkout, sessionTimeoutMs: 900000 };
+	const deps = { inspect: async () => ({ executable: m.executable, parentPid: process.pid }) };
+	const result = await launchDesktop(options, {
+		signals, spawnChild: () => c,
+		wait: async () => { await privateJson(join(m.profileDir, "runtime.json"), runtime(m, c.pid)); },
+		onReady: async () => {
+			await sessionTarget(options, deps);
+			signals.emit("SIGTERM");
+		},
+		quit: async () => {
+			// Child, runtime and identity still exist, but new attach is revoked.
+			await access(join(m.runDir, "identity.json"));
+			await assert.rejects(sessionTarget(options, deps), /no live owned/);
+			c.emit("exit", 0, null);
+		},
+	});
+	assert.equal(result.code, 143);
 });

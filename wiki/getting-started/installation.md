@@ -136,8 +136,8 @@ Desktop has a separate configuration profile:
 ```
 
 Project overrides live at `<workspace>/.pi/pix-desktop.jsonc`. See
-[Pix Desktop](../desktop/guide.md) for features, first-run behavior and Linux-specific
-troubleshooting.
+[Pix Desktop](../desktop/guide.md) for features, first-run behavior and
+troubleshooting on the supported macOS platform.
 
 ## Checksums
 

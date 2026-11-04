@@ -1317,6 +1317,11 @@ setTimeout(() => {}, 2000);
 				}), `Timed out waiting for ${id}`);
 				const payload = JSON.parse(fs.readFileSync(captured, "utf8"));
 				const args = (getLive(runDir, id)?.launchArgs ?? []).join("\n").split("\n");
+				const backgroundIndex = args.findIndex((arg) => arg.endsWith(path.join("background-shell", "index.ts")));
+				if (qa) {
+					expect(backgroundIndex).toBeGreaterThan(0);
+					expect(backgroundIndex).toBeLessThan(args.findIndex((arg) => arg.endsWith(path.join("model-tools", "index.ts"))));
+				} else expect(backgroundIndex).toBe(-1);
 				expect(payload.message).toBe(generatePrompt(resolved.task));
 				expect(args.filter((arg) => arg === "--no-skills")).toHaveLength(1);
 				expect(args).not.toContain("injected.md");
@@ -1471,6 +1476,39 @@ setTimeout(() => {}, 1000);
 		expect(fs.existsSync(path.join(agentDir, "events.jsonl"))).toBe(false);
 		if (process.platform !== "win32") {
 			expect(getRecord(runDir, "agent-1")?.processGroup).toBe(true);
+		}
+	});
+
+	test.serial("loads tracked background jobs for every shell-capable role, not read-only selections", async () => {
+		const cwd = tempDir();
+		const piScript = path.join(tempDir(), "pi.js");
+		writeFile(piScript, `
+process.stdin.on("data", () => {
+  console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "done" }] }] }));
+  setTimeout(() => process.exit(0), 0);
+});
+setTimeout(() => {}, 1000);
+`);
+		process.argv[1] = piScript;
+		const cases = [
+			{ role: "ui-qa", tools: ["bash"], extra: [], enabled: true },
+			{ role: "implement-core", tools: ["bash"], extra: [], enabled: true },
+			{ role: "verify", tools: ["bash"], extra: [], enabled: true },
+			{ role: "custom", tools: undefined, extra: [], enabled: true },
+			{ role: "research", tools: ["read", "ast_grep"], extra: [], enabled: false },
+			{ role: "ui-qa", tools: ["bash"], extra: ["--no-tools"], enabled: false },
+			{ role: "verify", tools: ["bash"], extra: ["--exclude-tools", "shell"], enabled: false },
+		];
+		for (const [index, entry] of cases.entries()) {
+			const runDir = createBatch(cwd, resolveScope(undefined), `background-${index}`);
+			await withTimeout(new Promise<any>((resolve) => {
+				spawnAgent(runDir, { id: "agent", task: "Check tools", subagentType: entry.role, model: "openai/gpt-test", tools: entry.tools }, cwd, entry.extra, undefined, resolve);
+			}), "Timed out waiting for background tool selection");
+			const args = getLive(runDir, "agent")?.launchArgs ?? [];
+			const background = args.findIndex((arg) => arg.endsWith(path.join("background-shell", "index.ts")));
+			expect(background >= 0).toBe(entry.enabled);
+			if (entry.enabled) expect(background).toBeLessThan(args.findIndex((arg) => arg.endsWith(path.join("model-tools", "index.ts"))));
+			expect(args).toContain("--no-extensions");
 		}
 	});
 

@@ -117,7 +117,8 @@ export class PromptAutocompleteController {
 export function isAutocompleteEligible(state: PromptAutocompleteState): boolean {
   if (!state.enabled || state.hasAttachments) return false;
   if (state.selectionStart !== state.selectionEnd || state.selectionEnd !== state.text.length) return false;
-  return state.text.trim().length >= 3 && !state.text.startsWith("/") && !state.text.startsWith("!");
+  return (state.text.length === 0 || state.text.trim().length >= 3)
+    && !state.text.startsWith("/") && !state.text.startsWith("!");
 }
 
 export function cleanAutocompleteSuffix(raw: string, draft: string): string {

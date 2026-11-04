@@ -231,8 +231,15 @@ The base/detail guides are `android.md`/`android-adb.md`, loaded through
 - PTY-presentation runs automatically retain a bounded asciicast v2 replay in
   `artifacts.videos`. It is generated from timestamped PTY output and resize
   events, capped at 1 MiB, and is explicitly terminal-state replay rather than
-  pixel evidence. Native-terminal presentation instead retains real-window
-  screenshots and, when exact-window capture is available, a bounded MP4 from
+  pixel evidence. Top-level `recordWindowVideo` is supported only as a boolean
+  for desktop and native-terminal targets. Setting it to `false` skips the
+  native window recorder before its startup wait or process creation and reports
+  `windowVideo` as `disabled`; omission or `true` keeps best-effort recording.
+  This opt-out does not change reported host capabilities, PTY diagnostic
+  asciicast, or browser video. Malformed values and unsupported targets fail
+  before probing. Native-terminal presentation retains real-window
+  screenshots regardless of this option and, when recording is enabled and
+  exact-window capture is available, a bounded MP4 from
   the owned native terminal host; its asciicast/headless captures remain
   diagnostic-only and are never promoted as proof of colors/glyphs/window
   geometry.

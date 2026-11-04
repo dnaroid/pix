@@ -22,6 +22,9 @@ For the native application, see [Pix Desktop](../desktop/guide.md).
 
 ![Pix searchable command picker](../assets/screenshots/pix-command-menu.png)
 
+Images on this page show the real TUI renderer with deterministic test fixtures,
+not live-agent execution. See [media provenance](../development/testing/task-to-diff-demo.md#existing-media-and-evidence-limits).
+
 Start in a project:
 
 ```bash

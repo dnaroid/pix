@@ -22,8 +22,12 @@ function state(overrides: Partial<PromptAutocompleteState> = {}): PromptAutocomp
 afterEach(() => vi.useRealTimers());
 
 describe("prompt autocomplete", () => {
-  it("matches TUI draft eligibility", () => {
+  it("allows empty drafts while preserving typed-prefix eligibility", () => {
     expect(isAutocompleteEligible(state())).toBe(true);
+    expect(isAutocompleteEligible(state({ text: "" }))).toBe(true);
+    expect(isAutocompleteEligible(state({ text: "   " }))).toBe(false);
+    expect(isAutocompleteEligible(state({ text: "", hasAttachments: true }))).toBe(false);
+    expect(isAutocompleteEligible(state({ text: "", enabled: false }))).toBe(false);
     expect(isAutocompleteEligible(state({ text: "ab", selectionStart: 2, selectionEnd: 2 }))).toBe(false);
     expect(isAutocompleteEligible(state({ text: "/model" }))).toBe(false);
     expect(isAutocompleteEligible(state({ text: "!pwd" }))).toBe(false);
@@ -106,5 +110,56 @@ describe("prompt autocomplete", () => {
   it("cleans fences and caps unexpected long output", () => {
     expect(cleanAutocompleteSuffix("```text\nimplement safely\n```", "implement")).toBe(" safely");
     expect(cleanAutocompleteSuffix("x".repeat(700), "draft")).toHaveLength(320);
+  });
+
+  it("debounces, dismisses and accepts a next-message suggestion without sending it", async () => {
+    vi.useFakeTimers();
+    const request = vi.fn(async () => "Добавь тесты");
+    const controller = new PromptAutocompleteController({ request, onSuggestion: () => {}, debounceMs: 350 });
+    const empty = state({ text: "" });
+    controller.observe(empty);
+    await vi.advanceTimersByTimeAsync(349);
+    expect(request).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(request).toHaveBeenCalledWith("", expect.any(AbortSignal));
+    expect(controller.currentSuggestion(empty)).toBe("Добавь тесты");
+    controller.dismiss();
+    controller.observe(empty);
+    await vi.runOnlyPendingTimersAsync();
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(controller.currentSuggestion(empty)).toBe("");
+    controller.observe(state({ text: "", enabled: false }));
+    controller.observe(empty);
+    await vi.runOnlyPendingTimersAsync();
+    expect(controller.accept(empty)).toBe("Добавь тесты");
+    expect(controller.currentSuggestion(empty)).toBe("");
+    controller.dispose();
+  });
+
+  it.each([
+    state({ text: "abc" }),
+    state({ text: "", contextKey: "session-2" }),
+    state({ text: "", hasAttachments: true }),
+    state({ text: "", enabled: false }),
+  ])("discards pending empty-draft results when context changes: %j", async (next) => {
+    vi.useFakeTimers();
+    let resolve!: (value: string) => void;
+    let signal!: AbortSignal;
+    const controller = new PromptAutocompleteController({
+      request: (_draft, requestSignal) => {
+        signal = requestSignal;
+        return new Promise<string>((done) => { resolve = done; });
+      },
+      onSuggestion: () => {}, debounceMs: 0,
+    });
+    const empty = state({ text: "" });
+    controller.observe(empty);
+    await vi.runOnlyPendingTimersAsync();
+    controller.observe(next);
+    expect(signal.aborted).toBe(true);
+    resolve("stale next message");
+    await Promise.resolve();
+    expect(controller.currentSuggestion(next)).toBe("");
+    controller.dispose();
   });
 });

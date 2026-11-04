@@ -13,6 +13,9 @@ sessions.
 
 ![Pix workspace with tabs, compact thinking and tool activity, and live status](assets/screenshots/pix-overview.png)
 
+TUI renderer preview with deterministic `MockModel` fixtures, not a live-agent
+run or a Desktop capture. See [media provenance and the recording script](development/testing/task-to-diff-demo.md).
+
 ## Start
 
 Download the latest **TUI** archive for your OS/CPU, or the **Pix Desktop**

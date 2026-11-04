@@ -16,6 +16,7 @@ interface PromptComposerTextareaControllerOptions {
   readonly questionMode: () => boolean;
   readonly autocompleteEnabled: () => boolean;
   readonly ready: () => boolean;
+  readonly promptRunning?: () => boolean;
   readonly pathCompletionActive?: () => boolean;
   readonly requestAutocomplete: (draft: string, signal: AbortSignal) => Promise<string>;
 }
@@ -77,6 +78,7 @@ export function createPromptComposerTextareaController(options: PromptComposerTe
         && !options.questionMode()
         && options.autocompleteEnabled()
         && options.ready()
+        && (text.length > 0 || !options.promptRunning?.())
         && !!options.activeSessionId()
         && !composing
         && !options.pathCompletionActive?.(),

@@ -102,12 +102,18 @@ export async function acquireLaunchLock(manifest) {
 /** Direct child inherits runner PGID. Quit and fallback signals target only that child. */
 export async function launchDesktop(options, dependencies = {}) {
 	const { spawnChild = spawn, quit = quitMacDesktopApp, wait = sleep, now = Date.now,
-		signals = process, startupTimeoutMs = 15000, onReady = () => {} } = dependencies;
+		signals = process, startupTimeoutMs = 15000, onReady = () => {},
+		setTimer = setTimeout, clearTimer = clearTimeout } = dependencies;
+	const lifetime = options.sessionTimeoutMs;
+	if (lifetime !== undefined && (!Number.isSafeInteger(lifetime) || lifetime < 100 || lifetime > 900000)) throw new Error("session timeout must be 100..900000 ms");
 	const manifest = await validateManifest(options.manifest, options.checkout);
 	const unlock = await acquireLaunchLock(manifest);
+	const expiresAt = lifetime === undefined ? undefined : now() + lifetime;
 	let child, exited = false, stopping, cancelled;
 	let resolveExit;
 	const exit = new Promise((resolve) => { resolveExit = resolve; });
+	let resolveCancellation;
+	const cancellation = new Promise((resolve) => { resolveCancellation = resolve; });
 	const finish = (result) => { if (!exited) { exited = true; resolveExit(result); } };
 	const waitForExit = async (_pid, timeout) => {
 		if (exited) return true;
@@ -117,20 +123,36 @@ export async function launchDesktop(options, dependencies = {}) {
 		finally { controller.abort(); }
 		return exited;
 	};
-	const stop = () => stopping ||= (async () => {
-		if (!child || exited) return;
-		try { await quit(child.pid, waitForExit); }
-		catch {
-			if (!exited) child.kill("SIGTERM");
-			if (!(await waitForExit(child.pid, 2000)) && !exited) child.kill("SIGKILL");
-			if (!(await waitForExit(child.pid, 2000))) throw new Error("owned QA child did not exit; profile lock retained");
-		}
-	})();
+	const stop = () => {
+		// A cancellation before spawn must not memoize a no-op cleanup.
+		if (stopping) return stopping;
+		if (!child || exited) return Promise.resolve();
+		return stopping = (async () => {
+			let revokeError;
+			if (lifetime !== undefined) {
+				try { await privateJson(join(manifest.profileDir, "launch.lock", "owner.json"), { version: 1, pid: process.pid, profileId: manifest.profileId, stopping: true }); }
+				catch (error) { revokeError = error; } // Still clean up the child if marking fails.
+			}
+			try { await quit(child.pid, waitForExit); }
+			catch {
+				if (!exited) child.kill("SIGTERM");
+				if (!(await waitForExit(child.pid, 2000)) && !exited) child.kill("SIGKILL");
+				if (!(await waitForExit(child.pid, 2000))) throw new Error("owned QA child did not exit; profile lock retained");
+			}
+			if (revokeError) throw new Error("could not revoke QA session attach before cleanup", { cause: revokeError });
+		})();
+	};
+	const cancel = (reason) => {
+		cancelled ||= reason;
+		resolveCancellation();
+		void stop().catch(() => {}); // finally awaits/reports cleanup failure; keep the lock.
+	};
 	const listeners = ["SIGINT", "SIGTERM", "SIGHUP"].map((signal) => {
-		const handler = () => { cancelled = signal; void stop().catch(() => {}); };
+		const handler = () => cancel(signal);
 		signals.on(signal, handler);
 		return [signal, handler];
 	});
+	const timer = lifetime === undefined ? undefined : setTimer(() => cancel("deadline"), lifetime);
 	try {
 		await rm(join(manifest.profileDir, "runtime.json"), { force: true });
 		await rm(join(manifest.runDir, "identity.json"), { force: true });
@@ -154,6 +176,7 @@ export async function launchDesktop(options, dependencies = {}) {
 					version: 1, contract: marker.contract, pid: child.pid,
 					executable: manifest.executable, profileDir: manifest.profileDir,
 					profileId: manifest.profileId, appIdentifier: marker.appIdentifier, isolated: true,
+					...(expiresAt === undefined ? {} : { ownerPid: process.pid, expiresAt }),
 					...(manifest.persistentWebview ? { persistentWebview: true, webviewStoreId: marker.webviewStoreId } : {}),
 				});
 				ready = true;
@@ -165,11 +188,12 @@ export async function launchDesktop(options, dependencies = {}) {
 		if (!ready) throw new Error("pinned Desktop did not prove isolated native profile support; owned QA app closed, working app not tested");
 		await onReady({ pid: child.pid, executable: manifest.executable, profileId: manifest.profileId, isolated: true,
 			identityPath: join(manifest.runDir, "identity.json") });
-		const result = await exit;
-		if (cancelled) return { code: cancelled === "SIGINT" ? 130 : cancelled === "SIGHUP" ? 129 : 143, signal: cancelled };
+		const result = await Promise.race([exit, cancellation]);
+		if (cancelled) return { code: { deadline: 124, SIGINT: 130, SIGHUP: 129, SIGTERM: 143 }[cancelled], signal: cancelled };
 		if (result.error) throw new Error(result.error);
 		return result;
 	} finally {
+		if (timer !== undefined) clearTimer(timer);
 		try { await stop(); }
 		finally {
 			for (const [signal, handler] of listeners) signals.removeListener(signal, handler);

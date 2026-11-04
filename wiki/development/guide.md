@@ -312,7 +312,7 @@ acp/                         ACP adapter embedding Pi for Desktop/editors
 external/pi-tools-suite/     bundled tools/extensions
 schemas/                     published JSON schemas
 skills/                      packaged agent skills
-docs/                        user/developer/release documentation
+wiki/                        user/developer/release documentation
 tests/                       TUI unit/integration/PTY tests
 scripts/                     build, release, sync and capture tooling
 ```

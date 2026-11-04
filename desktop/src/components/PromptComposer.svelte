@@ -154,6 +154,7 @@
     questionMode: () => !!questionMode,
     autocompleteEnabled: () => autocompleteEnabled,
     ready: () => ready,
+    promptRunning: () => promptRunning,
     requestAutocomplete: (draft, signal) => onAutocomplete(draft, signal),
     pathCompletionActive: () => mentionsController.open,
   });
@@ -298,6 +299,7 @@
   }
 
   function composerPlaceholder(): string {
+    if (textareaController.suggestion) return "";
     if (placeholder) return placeholder;
     if (questionMode) return "Type a custom answer or paste an image…";
     return hasConversationTarget

@@ -29,6 +29,19 @@ The tool profile exposes `BashOutput`/`KillShell` for the Claude profile and
 the module is disabled, `run_in_background` fails with an explicit error. Stdin
 is not connected and there is no `shell_input` tool.
 
+Isolated sub-agents of every role also load this module when their final,
+model-adjusted CLI tool selection permits shell execution. With an explicit
+`--tools` allowlist, the profile's output/kill aliases are also added to that
+allowlist because the SDK filters extension registration through it; exclusions
+remain effective. Without an explicit allowlist, shell eligibility is based on
+the selected model's shell alias. The module loads before `model-tools` so the
+aliases are available when model tools initialize. Explicit read-only or
+`--no-tools` selections do not gain background execution. Other extensions
+remain disabled unless explicitly allowlisted for the child. Jobs belong to the
+child session, not the parent: finishing the child process ends its jobs, and a
+resumed child does not inherit live jobs from the previous process. Win32
+remains unsupported.
+
 ## Execution, policy and output
 
 - Jobs use the same tool names as synchronous shell calls, so the same

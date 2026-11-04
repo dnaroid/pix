@@ -98,6 +98,7 @@ offline("coding tools gain only AST; CLI exclusions can remove optional capabili
 	const coding = await inventory(["read", "grep", "bash", "edit", "write", "ast_grep"], true);
 	expect(coding.tools).toContain("ast_grep");
 	expect(coding.tools).toContain("Bash");
+	for (const name of ["BashOutput", "KillShell"]) expect(coding.tools).toContain(name);
 	for (const name of ["ast_apply", "web_search", "web_fetch"]) expect(coding.all).not.toContain(name);
 	const removed = await inventory(["read", "ast_grep", "web_search", "web_fetch"], true, ["-xt", "ast_grep,web_search,web_fetch"]);
 	expect(removed.piArgs.some((arg) => arg.endsWith("async-subagents/work-tools.ts"))).toBe(false);
@@ -120,6 +121,7 @@ offline("default role: private todo is active; provider web search and other sui
 	expect(tools).toContain("todo");
 	expect(tools).toContain("compress");
 	expect(tools).toContain("project_search");
+	for (const name of ["BashOutput", "KillShell"]) expect(tools).toContain(name);
 	for (const name of ["repo_context", "repo_inspect", "repo_audit"]) expect(all).not.toContain(name);
 	expect(piArgs).toContain("--session-dir");
 	expect(piArgs).not.toContain("--no-session");

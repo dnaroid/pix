@@ -51,6 +51,11 @@ rendering claims. macOS can additionally publish bounded exact-window MP4 when
 Screen Recording/ScreenCaptureKit are available. Windows/Linux currently do not
 advertise native-terminal window video.
 
+Top-level `"recordWindowVideo": false` prevents the native window recorder from
+starting and reports a `windowVideo: disabled` observation. Omission/`true`
+preserves best-effort window recording. This does not disable the diagnostic
+PTY asciicast replay; do not use it to promise absence of all replay artifacts.
+
 Real-window evidence still does not replace deterministic PTY assertions.
 Inspect at least one meaningful screenshot before claiming colors/layout/glyph
 fidelity.

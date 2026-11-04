@@ -16,7 +16,7 @@ import { getAgentState } from "./state.js";
 import { settleStructuredResult } from "./structured-result.js";
 import { resolveSubagentLogLimits } from "./log-limits.js";
 import { filterSubagentTools } from "./tool-guard.js";
-import { selectSubagentToolsForModel, subagentWorkTools, SUBAGENT_WORK_TOOLS_ENV, withSubagentCapabilities } from "./child-tools.js";
+import { selectSubagentToolsForModel, subagentHasShell, subagentWorkTools, SUBAGENT_WORK_TOOLS_ENV, withSubagentBackgroundTools, withSubagentCapabilities } from "./child-tools.js";
 import type { AgentCompletionHandler, AgentState, AgentTask, RpcEventHandler, RpcEventRecord, SpawnedAgent } from "./types.js";
 import { isRecord, isoNow, serializeJsonLine } from "./utils.js";
 import { forgetOwnedHandle, launchPreparedOwnedAgent, ownedOutcomeSync, readOwnedMetadata, requestOwnedCancel, writeOwnedBootstrapFailureResult, OWNED_METADATA, type OwnedLaunchBinaries, type OwnedLaunchHandle } from "./owned-launch-integration.js";
@@ -176,6 +176,12 @@ export function spawnAgent(
 	// User-supplied extra args (e.g. --thinking high)
 	piArgs.push(...forwardedExtraArgs);
 	piArgs = withSubagentCapabilities(piArgs);
+	if (subagentHasShell(piArgs, selectedModel)) {
+		piArgs = withSubagentBackgroundTools(piArgs, selectedModel);
+		// The service must register before model-tools builds its background aliases.
+		const modelToolsIndex = piArgs.indexOf(getModelToolsExtensionPath()) - 1;
+		piArgs.splice(modelToolsIndex, 0, "--extension", path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "background-shell", "index.ts"));
+	}
 	const workTools = subagentWorkTools(piArgs);
 	if (workTools.optional.length) {
 		piArgs.push("--extension", path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "work-tools.ts"));

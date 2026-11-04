@@ -263,17 +263,7 @@ export async function runDesktopBackend(context) {
 			}
 		}
 		if (!selector) throw new Error("desktop target requires an app selector or a launch contract");
-		if (probe.supportedCapabilities.includes("windowVideo")) {
-			recorder = await startWindowVideoRecorder({ context, helper, selector, observations });
-		} else {
-			observations.push({
-				action: "windowVideo",
-				status: "unavailable",
-				reason: process.platform === "darwin"
-					? "exact-window recording requires macOS 12.3+ and Screen Recording permission"
-					: `exact-window video recording is not implemented by the ${probe.platformDriver} driver`,
-			});
-		}
+		recorder = await maybeStartWindowVideoRecorder({ context, helper, selector, observations, probe });
 		for (let index = 0; index < steps.length; index += 1) {
 			const step = steps[index];
 			context.progress("desktop_action_started", { index, action: step.action });
@@ -317,9 +307,7 @@ export async function runDesktopBackend(context) {
 
 export async function createWindowEvidenceController({ context, selector, observations, artifacts }) {
 	const helper = await ensureDesktopHelper(context);
-	const recorder = context.selection?.supportedCapabilities?.includes("windowVideo")
-		? await startWindowVideoRecorder({ context, helper, selector, observations })
-		: null;
+	const recorder = await maybeStartWindowVideoRecorder({ context, helper, selector, observations, probe: context.selection });
 	let finished = false;
 	return {
 		async capture(name, options = {}) {
@@ -338,6 +326,26 @@ export async function createWindowEvidenceController({ context, selector, observ
 
 // Compatibility export for the original macOS-native-terminal integration.
 export const createMacosWindowEvidenceController = createWindowEvidenceController;
+
+// Shared by desktop and native-terminal evidence. Opt-out is checked before
+// any recorder readiness wait, process spawn, or output-file creation.
+export async function maybeStartWindowVideoRecorder({ context, helper, selector, observations, probe }) {
+	if (context.flow?.recordWindowVideo === false) {
+		observations.push({ action: "windowVideo", status: "disabled", reason: "flow.recordWindowVideo is false" });
+		return null;
+	}
+	if (!probe?.supportedCapabilities?.includes("windowVideo")) {
+		observations.push({
+			action: "windowVideo",
+			status: "unavailable",
+			reason: process.platform === "darwin"
+				? "exact-window recording requires macOS 12.3+ and Screen Recording permission"
+				: `exact-window video recording is not implemented by the ${probe?.platformDriver ?? "selected"} driver`,
+		});
+		return null;
+	}
+	return startWindowVideoRecorder({ context, helper, selector, observations });
+}
 
 async function finalizeWindowRecorder(recorder, artifacts, observations) {
 	if (!recorder) return;

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { fauxProvider } from "@earendil-works/pi-ai";
 import workTools from "../../src/async-subagents/work-tools.js";
-import { selectSubagentToolsForModel, subagentWorkTools, SUBAGENT_COMMON_TOOLS, SUBAGENT_WORK_TOOLS_ENV, withSubagentCapabilities } from "../../src/async-subagents/core/child-tools.js";
+import { selectSubagentToolsForModel, subagentHasShell, subagentWorkTools, SUBAGENT_COMMON_TOOLS, SUBAGENT_WORK_TOOLS_ENV, withSubagentBackgroundTools, withSubagentCapabilities } from "../../src/async-subagents/core/child-tools.js";
 import { loadSubagentConfig } from "../../src/async-subagents/core/config.js";
 
 const previous = process.env[SUBAGENT_WORK_TOOLS_ENV];
@@ -19,6 +19,33 @@ afterEach(() => {
 function config(tools: string[], extra: string[] = []) {
 	return subagentWorkTools(withSubagentCapabilities(["--tools", tools.join(","), ...extra]));
 }
+
+test("background shell eligibility respects final CLI tool restrictions", () => {
+	expect(subagentHasShell(withSubagentCapabilities([]))).toBe(true);
+	expect(subagentHasShell(withSubagentCapabilities(["--exclude-tools", "shell"]), "openai/gpt-test")).toBe(false);
+	expect(subagentHasShell(withSubagentCapabilities(["--exclude-tools", "Bash"]), "anthropic/claude-test")).toBe(false);
+	for (const name of ["bash", "Bash", "shell"]) {
+		expect(subagentHasShell(withSubagentCapabilities(["--tools", `read,${name}`]))).toBe(true);
+		expect(subagentHasShell(withSubagentCapabilities(["--tools", name, "--exclude-tools", name]))).toBe(false);
+	}
+	for (const args of [["--no-tools"], ["--tools", "read,grep"], ["--tools", "shell", "-t", "read"], ["--tools", "shell", "-nt"]]) {
+		expect(subagentHasShell(withSubagentCapabilities(args))).toBe(false);
+	}
+});
+
+test("shell-capable CLI allowlists include profile output and kill tools without removing exclusions", () => {
+	for (const [model, shell, output, kill] of [["anthropic/claude-test", "Bash", "BashOutput", "KillShell"], ["openai/gpt-test", "shell", "shell_output", "shell_kill"]]) {
+		const args = withSubagentCapabilities(["--tools", shell, "--exclude-tools", kill]);
+		const result = withSubagentBackgroundTools(args, model);
+		expect(result[result.indexOf("--tools") + 1].split(",")).toEqual([shell, ...SUBAGENT_COMMON_TOOLS, output, kill]);
+		expect(result[result.indexOf("--exclude-tools") + 1]).toBe(kill);
+		expect(withSubagentBackgroundTools(result, model)).toEqual(result);
+	}
+	for (const args of [[], ["--no-tools"], ["--tools", "read,ast_grep"]]) {
+		const normalized = withSubagentCapabilities(args);
+		expect(withSubagentBackgroundTools(normalized)).toEqual(normalized);
+	}
+});
 
 function workspace(): string {
 	const scratch = resolve(import.meta.dir, "../../../../.pi/artifacts/subagent-work-tools");

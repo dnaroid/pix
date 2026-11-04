@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { RequestError } from "@agentclientprotocol/sdk";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import type { PiAgentMessage } from "../src/pi/pi-rpc-client.js";
 import {
 	autocompleteConfigFromParsed,
 	autocompleteSettings,
@@ -159,4 +160,91 @@ test("the production completer turns the explicit empty sentinel into no suggest
 		signal: new AbortController().signal,
 		getMessages: async () => [],
 	}), "");
+});
+
+function nextMessageFixture(maxPromptTokens = 1_200, output = "Добавь тесты") {
+	let prompt = "";
+	let runtimeCalls = 0;
+	const runtime = {
+		getModel: () => ({ provider: "test", id: "model", maxTokens: 4_096 }),
+		streamSimple: (_model: unknown, context: { messages: Array<{ content: string }> }) => {
+			prompt = context.messages[0]!.content;
+			return (async function* () { yield { type: "text_delta", delta: output }; })();
+		},
+	} as unknown as ModelRuntime;
+	const complete = createAutocompleteCompleter({
+		logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+		loadConfig: () => ({
+			modelRef: "test/model", fallbackModels: [], debounceMs: 350, timeoutMs: 1_250,
+			maxTokens: 48, maxPromptTokens, includeRecentMessages: 0,
+		}),
+		createModelRuntime: async () => { runtimeCalls++; return runtime; },
+	});
+	return { complete, get prompt() { return prompt; }, get runtimeCalls() { return runtimeCalls; } };
+}
+
+test("empty drafts predict the next user message with bounded history even with prefix history disabled", async () => {
+	const fixture = nextMessageFixture();
+	const messages: PiAgentMessage[] = Array.from({ length: 8 }, (_, index) => ({
+		role: index % 2 === 0 ? "user" : "assistant",
+		content: [{ type: "text", text: `message-${index}` }],
+	}));
+	assert.equal(await fixture.complete({
+		cwd: "/tmp/project", draft: "", signal: new AbortController().signal,
+		getMessages: async () => messages,
+	}), "Добавь тесты");
+	assert.match(fixture.prompt, /Predict the human user's next message/u);
+	assert.match(fixture.prompt, /<draft>\n\n<cursor>/u);
+	assert.doesNotMatch(fixture.prompt, /message-[01]/u);
+	assert.match(fixture.prompt, /message-2/u);
+	assert.match(fixture.prompt, /message-7/u);
+});
+
+test("empty drafts do not initialize a model without usable user context or prompt budget", async () => {
+	for (const messages of [[], [{ role: "assistant", content: [{ type: "text", text: "Welcome" }] }]]) {
+		const fixture = nextMessageFixture();
+		assert.equal(await fixture.complete({
+			cwd: "/tmp/project", draft: "", signal: new AbortController().signal,
+			getMessages: async () => messages,
+		}), "");
+		assert.equal(fixture.runtimeCalls, 0);
+	}
+	const fixture = nextMessageFixture(256);
+	assert.equal(await fixture.complete({
+		cwd: "/tmp/project", draft: "", signal: new AbortController().signal,
+		getMessages: async () => [{ role: "user", content: [{ type: "text", text: "Fix the bug" }] }],
+	}), "");
+	assert.equal(fixture.runtimeCalls, 0);
+});
+
+test("empty-draft history failure and cancellation do not start generation", async () => {
+	const fixture = nextMessageFixture();
+	assert.equal(await fixture.complete({
+		cwd: "/tmp/project", draft: "", signal: new AbortController().signal,
+		getMessages: async () => { throw new Error("unavailable"); },
+	}), "");
+	const controller = new AbortController();
+	const pending = fixture.complete({
+		cwd: "/tmp/project", draft: "", signal: controller.signal,
+		getMessages: () => new Promise(() => {}),
+	});
+	controller.abort();
+	await assert.rejects(pending);
+	assert.equal(fixture.runtimeCalls, 0);
+});
+
+test("next-message uncertainty returns no suggestion and short drafts still skip generation", async () => {
+	const fixture = nextMessageFixture(1_200, "<EMPTY>");
+	assert.equal(await fixture.complete({
+		cwd: "/tmp/project", draft: "", signal: new AbortController().signal,
+		getMessages: async () => [{ role: "user", content: [{ type: "text", text: "Fix the bug" }] }],
+	}), "");
+	for (const draft of [" ", "ab", "/help", "!pwd"]) {
+		const skipped = nextMessageFixture();
+		assert.equal(await skipped.complete({
+			cwd: "/tmp/project", draft, signal: new AbortController().signal,
+			getMessages: async () => { throw new Error("should not load history"); },
+		}), "");
+		assert.equal(skipped.runtimeCalls, 0);
+	}
 });
