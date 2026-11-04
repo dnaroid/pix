@@ -115,13 +115,13 @@ describe("telegram-bridge config", () => {
 
 	test("is missing without a token and reports the file path", () => {
 		const result = loadTelegramBridgeConfig({ env: {}, homeDir: "/home/me", readFile: read(undefined) });
-		expect(result).toMatchObject({ ok: false, reason: "missing", path: "/home/me/.config/pi/telegram-bridge.jsonc" });
+		expect(result).toMatchObject({ ok: false, reason: "missing", path: join("/home/me", ".config", "pi", "telegram-bridge.jsonc") });
 	});
 
 	test("reads JSONC credentials and lets the environment override them", () => {
 		const file = `{ // comment\n "botToken": "${TOKEN}", "chatId": ${CHAT}, "allowedUserIds": [${USER}] }`;
 		const result = loadTelegramBridgeConfig({ env: {}, homeDir: "/home/me", readFile: read(file) });
-		expect(result).toEqual({ ok: true, config: { botToken: TOKEN, chatId: CHAT, allowedUserIds: [USER], stateDir: "/home/me/.pi/agent/telegram-bridge" } });
+		expect(result).toEqual({ ok: true, config: { botToken: TOKEN, chatId: CHAT, allowedUserIds: [USER], stateDir: join("/home/me", ".pi", "agent", "telegram-bridge") } });
 		const overridden = loadTelegramBridgeConfig({
 			env: { PIX_TELEGRAM_CHAT_ID: "-1009", PIX_TELEGRAM_ALLOWED_USER_IDS: "1, 2", PIX_TELEGRAM_BRIDGE_DIR: "/state" },
 			homeDir: "/home/me", readFile: read(file),
