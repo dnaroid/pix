@@ -22,6 +22,8 @@ const child = spawn(process.execPath, ["dist/main.js"], {
 	},
 	stdio: ["pipe", "pipe", "pipe"],
 });
+// Register before exercising RPC, including the early-failure cleanup path.
+const childClosed = new Promise((resolve) => child.once("close", resolve));
 const output = createInterface({ input: child.stdout });
 const messages = [];
 const waiters = new Set();
@@ -105,10 +107,18 @@ try {
 	assert.equal(signal, null);
 	assert.equal(code, 0, stderr);
 	console.log("pix-acp dist stdio session flow: ok");
+} catch (error) {
+	// Preserve the original assertion/timeout even if teardown itself fails.
+	console.error("pix-acp stdio flow failed:", error);
+	if (stderr) console.error("pix-acp stderr:", stderr);
+	throw error;
 } finally {
 	output.close();
 	if (child.exitCode === null && child.signalCode === null) child.kill();
-	rmSync(scratch, { recursive: true, force: true });
+	await withTimeout(childClosed, 5_000, "pix-acp stdio closure");
+	// Windows can briefly retain filesystem handles after the child has closed.
+	// Bound retries and still fail if the fixture remains locked.
+	rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 
 function send(message) {

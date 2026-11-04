@@ -6,6 +6,7 @@ import { macosHelperSources } from "../../src/async-subagents/agents/ui-qa/drive
 import { prepareMacosHelper } from "../../src/async-subagents/agents/ui-qa/drivers/macos/helper-cache.mjs";
 
 const driver = path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/drivers/macos");
+const sourceNames = ["macos-accessibility.swift", "textedit-lease.swift", "textedit-supervisor.swift", "menu-navigation.swift", "window-selection.swift"];
 const artifacts = process.env.PI_TEXTEDIT_TEST_ARTIFACTS ?? path.resolve(import.meta.dir, "../../../../.pi/artifacts");
 function scratch() {
 	fs.mkdirSync(artifacts, { recursive: true });
@@ -27,15 +28,20 @@ test.skipIf(process.platform !== "darwin")("pure native lifecycle policy compile
 
 test("source discovery includes all native lease sources and rejects missing or symlink companions", () => {
 	const actual = macosHelperSources(path.join(driver, "macos-accessibility.swift"));
-	expect(actual.map(file => path.basename(file))).toEqual(["macos-accessibility.swift", "textedit-lease.swift", "textedit-supervisor.swift"]);
+	expect(actual.map(file => path.basename(file))).toEqual(sourceNames);
 	const directory = scratch();
 	try {
 		const source = path.join(directory, "macos-accessibility.swift");
-		fs.writeFileSync(source, "main");
-		expect(() => macosHelperSources(source)).toThrow();
-		fs.writeFileSync(path.join(directory, "textedit-lease.swift"), "lease");
-		fs.symlinkSync(source, path.join(directory, "textedit-supervisor.swift"));
-		expect(() => macosHelperSources(source)).toThrow(/regular file/);
+		for (const name of sourceNames) fs.writeFileSync(path.join(directory, name), name);
+		for (const name of sourceNames.slice(1)) {
+			const companion = path.join(directory, name);
+			fs.unlinkSync(companion);
+			expect(() => macosHelperSources(source)).toThrow(/ENOENT/);
+			fs.symlinkSync(source, companion);
+			expect(() => macosHelperSources(source)).toThrow(/regular file/);
+			fs.unlinkSync(companion);
+			fs.writeFileSync(companion, name);
+		}
 	} finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -43,7 +49,7 @@ test.skipIf(process.platform === "win32")("cache hashes every companion and comp
 	const directory = scratch();
 	try {
 		const source = path.join(directory, "macos-accessibility.swift");
-		const files = [source, path.join(directory, "textedit-lease.swift"), path.join(directory, "textedit-supervisor.swift")];
+		const files = sourceNames.map(name => path.join(directory, name));
 		files.forEach(file => fs.writeFileSync(file, path.basename(file)));
 		const calls: string[][] = [];
 		const options = { source, homeDirectory: directory, projectRoot: directory, signingIdentity: "-", deadline: Date.now() + 10_000,
@@ -59,7 +65,7 @@ test.skipIf(process.platform === "win32")("cache hashes every companion and comp
 			fs.appendFileSync(file, "changed");
 			await prepareMacosHelper(options);
 		}
-		expect(calls.length).toBe(4);
+		expect(calls.length).toBe(files.length + 1);
 		for (const args of calls) expect(args.slice(0, -1)).toEqual(["swiftc", "-O", ...macosHelperSources(source), "-o"]);
 	} finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });

@@ -16,6 +16,8 @@ export const EXTENSION_EVAL_COVERAGE: Record<string, EvalCoverageEntry> = {
 	"coding-discipline": { deterministic: ["test/coding-discipline.test.ts"], live: ["quality.two-hypotheses-before-fix", "quality.behavior-over-structural-check", "quality.async-stale-state"] },
 	"ast-grep": { deterministic: ["test/ast-grep.test.ts"], live: ["tool.ast-structural"] },
 	"async-subagents": { deterministic: ["test/async-subagents/core.test.ts", "test/async-subagents/tools.test.ts", "test/async-subagents/ui.test.ts", "test/async-subagents/retired-roles.test.ts", "test/evals/delegation-policy.test.ts", "test/evals/decision-policy.test.ts"], live: ["orchestration.size-alone-stays-parent", "orchestration.keeps-tiny-edit", "orchestration.explicit-implementation", "orchestration.architecture-advice-first", "orchestration.large-mechanical", "decision.auditor-accepts-no-record", "decision.auditor-escalates-missing-record"] },
+	"background-shell": { deterministic: ["test/background-shell.test.ts", "test/background-shell-tools.test.ts"] },
+	"telegram-bridge": { deterministic: ["test/telegram-bridge.test.ts", "test/telegram-menu.test.ts", "test/telegram-notifications.test.ts"] },
 	"lsp": { deterministic: ["test/lsp.test.ts"] },
 	"comment-checker": { deterministic: ["test/comment-checker.test.ts"] },
 	session: { deterministic: ["test/session-name.test.ts", "test/session-recovery.test.ts", "test/session.test.ts", "test/evals/session-cases.test.ts"], live: SESSION_LIVE_IDS },

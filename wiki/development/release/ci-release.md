@@ -14,9 +14,11 @@ remain true when CI or UI-QA tests change.
 
 ## CI contract
 
-- `check.yml` runs `build-and-test` on Ubuntu, macOS, and Windows for pull requests
-  and `master` pushes only. Each job uses the `node` and `npm` already selected
-  in the runner's system PATH. Release tags do not repeat this matrix.
+- `check.yml` runs `build-and-test` on Ubuntu, pinned macOS 15 ARM64, and Windows
+  for pull requests and `master` pushes only. Pinning the macOS image retains
+  native ARM64 coverage and does not guarantee runner availability. Each job uses
+  the `node` and `npm` already selected in the runner's system PATH. Release tags
+  do not repeat this matrix.
 - Browser QA E2E runs once on the Ubuntu job.
 - A native-host preflight runs before the full gate on each matrix leg. It
   checks deterministic test contracts on all hosts and platform-specific
