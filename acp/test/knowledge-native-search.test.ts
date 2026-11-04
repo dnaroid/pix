@@ -79,7 +79,10 @@ async function fixture(t: TestContext, body: string, longRunning = false) {
         await waitForExit(pid);
       }
     }
-    await rm(root, { recursive: true, force: true });
+    // Immediate cancellation can settle before the killed worker releases its
+    // Windows cwd handle (and before it writes worker.pid). Persistent locks
+    // must still fail cleanup; do not weaken cancellation/exit assertions.
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   await mkdir(cwd, { recursive: true });
   await mkdir(join(extension, "src", "project-search"), { recursive: true });
