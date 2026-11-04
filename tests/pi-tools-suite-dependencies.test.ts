@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -10,6 +10,16 @@ import {
 } from "../scripts/pi-tools-suite-dependencies.mjs";
 
 describe("pi-tools-suite dependency synchronization", () => {
+	it("ships every suite runtime dependency in the host production install", async () => {
+		// CI and standalone packaging install from the host manifest, without a
+		// nested suite install. Local suite node_modules must not hide omissions.
+		const host = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+		const suite = JSON.parse(await readFile(new URL("../external/pi-tools-suite/package.json", import.meta.url), "utf8"));
+		for (const name of Object.keys(suite.dependencies)) {
+			assert.ok(Object.prototype.hasOwnProperty.call(host.dependencies, name), `missing host production dependency: ${name}`);
+		}
+	});
+
 	it("installs on manifest drift and repairs a missing direct dependency", async () => {
 		const root = await mkdtemp(join(tmpdir(), "pix-suite-deps-"));
 		const sourceRoot = join(root, "source");

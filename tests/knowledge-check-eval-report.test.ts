@@ -110,7 +110,10 @@ describe("atomic live eval reports", () => {
     assert.ok(markdown.includes("[call-0012.json](requests/call-0012.json)"));
     assert.ok(!markdown.includes("call-N.json"));
     assert.deepEqual((await readdir(directory)).sort(), ["report.json", "report.md"]);
-    assert.equal((await stat(join(directory, "report.json"))).mode & 0o777, 0o600);
+    // Windows reports synthesized mode bits, not POSIX access permissions.
+    if (process.platform !== "win32") {
+      assert.equal((await stat(join(directory, "report.json"))).mode & 0o777, 0o600);
+    }
   });
 
   it("cleans only its temporary file after a failed rename and preserves existing destinations", async t => {

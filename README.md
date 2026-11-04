@@ -105,7 +105,7 @@ See the [TUI guide](wiki/tui/guide.md).
 
 ## Development
 
-For source setup, Node.js requirements and the native macOS Desktop toolchain,
+Source development requires Node.js `>=22.19.0 <27`. For source setup and the native macOS Desktop toolchain,
 follow the [development guide](wiki/development/guide.md).
 
 ## Documentation

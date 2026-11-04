@@ -358,6 +358,13 @@ export const PiToolsSuiteConfigSchema = Type.Object(
 			quorum: Type.Optional(Type.Union([Type.Integer({ minimum: 2, maximum: 6 }), Type.Null()], { description: "Minimum successful participants per round; default max(2, roster − 1). Missing participants are recorded as coverage gaps." })),
 		}, { description: "Multi-model brainstorm council skill settings, read by its council.mjs helper. Requires async-subagents and its research role." })),
 		terminalBell: Type.Optional(TerminalBellConfig),
+		backgroundShell: Type.Optional(Type.Object({
+			notifyOnExit: Type.Optional(Type.Union([Type.Literal("context"), Type.Literal("ui-only"), Type.Literal("off")], {
+				default: "context", description: "Report background job exits at turn boundaries, only in the UI, or not at all.",
+			})),
+			maxJobsPerSession: Type.Optional(Type.Integer({ minimum: 1, maximum: 64, default: 8,
+				description: "Maximum number of running background shell jobs per session." })),
+		}, { description: "Background shell job limits and exit notifications." })),
 		commentChecker: Type.Optional(CommentCheckerConfig),
 		dcp: Type.Optional(DcpConfig),
 		toolRenderer: Type.Optional(ToolRendererConfig),

@@ -78,6 +78,18 @@ describe("pi-tools-suite config schema", () => {
 		assertTemplateKeysAreModeled(template, PiToolsSuiteConfigSchema);
 	});
 
+	it("models background shell notification modes and bounded job limits", () => {
+		for (const notifyOnExit of ["context", "ui-only", "off"]) {
+			for (const maxJobsPerSession of [1, 8, 64]) {
+				assert.equal(Value.Check(PiToolsSuiteConfigSchema, { backgroundShell: { notifyOnExit, maxJobsPerSession } }), true);
+			}
+		}
+		for (const backgroundShell of [
+			{ notifyOnExit: "always" }, { notifyOnExit: null },
+			{ maxJobsPerSession: 0 }, { maxJobsPerSession: 65 }, { maxJobsPerSession: 1.5 },
+		]) assert.equal(Value.Check(PiToolsSuiteConfigSchema, { backgroundShell }), false);
+	});
+
 	it("accepts todo thinking ranges and null but rejects single-level strings", () => {
 		assert.equal(Value.Check(PiToolsSuiteConfigSchema, {
 			todoThinkingOverrides: { "opus/*": { min: "low", max: "medium" }, "glm-*": { min: "max", max: "max" }, "inherited/*": null },
