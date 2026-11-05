@@ -63,10 +63,13 @@ describe("pix-actions contract", () => {
 		assert.equal(examples[1]?.items[0]?.checked, true);
 	});
 
-	it("briefly rejects JSON actions and premature prerequisites", () => {
-		const guidance = "No JSON or label/prompt objects: each item is the full instruction to send, with prerequisites already satisfied.";
+	it("requires plain-text Markdown steps and satisfied prerequisites without priming JSON", () => {
+		assert.ok(CHOICE_ACTIONS_CAPABILITY.includes('Every body line is a Markdown task item, "- [x] step" (recommended) or "- [ ] step", holding one plain-text step'));
+		const guidance = "Each item is the full instruction to send, with prerequisites already satisfied.";
 		assert.ok(CHOICE_ACTIONS_CAPABILITY.includes(guidance));
 		assert.ok(guidance.split(/\s+/).length <= 22);
+		// Describe the canonical format, not the legacy Desktop fallback's object shape.
+		assert.doesNotMatch(CHOICE_ACTIONS_CAPABILITY, /\bJSON\b|label\/prompt/u);
 	});
 
 	it("does not re-open supplied completed work merely to offer optional next steps", () => {

@@ -28,12 +28,19 @@ test("question schemas keep the prompt required and describe it concisely", () =
 	}
 });
 
-test("choice explanations use descriptions without inventing action formats", () => {
+test("choice explanations use descriptions and affirmative question routing", () => {
 	for (const tool of [pix, cleanPi]) {
 		const guidance = tool.promptGuidelines.join("\n");
 		assert.match(guidance, /Put per-choice explanations, including risks and tradeoffs, in choices\[\]\.description/u);
 		assert.match(guidance, /Every choice must include both value and label/u);
-		assert.match(guidance, /do not replace question with JSON action menus or add a risk field/u);
+		assert.match(guidance, /Use question when you need the user's answer before you can continue/u);
+		// Naming unsupported formats/fields in the prompt primes models to emit them.
+		assert.doesNotMatch(guidance, /JSON action menus|risk field/u);
 		assert.match(guidance, /Do not use question merely to offer optional follow-ups/u);
+	}
+	for (const parameters of [pixParameters, cleanPiParameters]) {
+		const choice = parameters.properties.questions.items.properties.choices.items;
+		assert.deepEqual(Object.keys(choice.properties).sort(), ["description", "label", "value"]);
+		assert.deepEqual([...choice.required!].sort(), ["label", "value"]);
 	}
 });

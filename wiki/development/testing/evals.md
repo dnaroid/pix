@@ -224,8 +224,9 @@ argument validity without exercising the real UI, simulating a question error,
 or supplying user answers. Validators reject truncated selection checkpoints
 and still enforce tool-call budgets across the full batch. This
 does not establish normal pending-question behavior in a real host.
-Renderer/parser behavior is not changed by this routing guidance and
-does not support JSON action envelopes. A live model result is an observation,
+Renderer/parser behavior is not changed by this routing guidance. Desktop
+retains a compatibility fallback for legacy JSON menus, but they are not an
+advertised generation format; the TUI requires the canonical list syntax. A live model result is an observation,
 not a statistical reliability guarantee.
 
 ## Framework responsibilities
