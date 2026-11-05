@@ -1,0 +1,33 @@
+{
+  "status": "feasibility-only-not-a-product-download-catalog",
+  "provenance": "SHA-256 values observed from official HTTPS downloads on 2026-11-05; not upstream signatures. Redistribution license notices, hardened-runtime signing and release packaging remain unverified.",
+  "runtime": {
+    "version": "0.3.42",
+    "url": "https://github.com/alphacep/vosk-api/releases/download/v0.3.42/vosk-osx-0.3.42.zip",
+    "sha256": "65395f196c9d0583d79949142b25560acaf9c295f36284e18433097f3adb0ea1",
+    "archiveBytes": 4702506,
+    "libraryEntry": "vosk-osx-0.3.42/libvosk.dylib",
+    "observedArchitectures": ["x86_64", "arm64"],
+    "observedArm64Dependencies": ["Accelerate.framework", "/usr/lib/libc++.1.dylib", "/usr/lib/libSystem.B.dylib"]
+  },
+  "models": [
+    {
+      "language": "ru",
+      "name": "vosk-model-small-ru-0.22",
+      "url": "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip",
+      "sha256": "961d5ff98a17f4aa6de69864d0aa71fa5bac682301d2b5d17a3f24c5c99a46d4",
+      "archiveBytes": 46236750,
+      "uncompressedBytes": 91289240,
+      "catalogLicense": "Apache-2.0"
+    },
+    {
+      "language": "en",
+      "name": "vosk-model-small-en-us-0.15",
+      "url": "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip",
+      "sha256": "30f26242c4eb449f948e42cb302dd7a686cb29a3423a8367f99ff41780942498",
+      "archiveBytes": 41205931,
+      "uncompressedBytes": 70898967,
+      "catalogLicense": "Apache-2.0"
+    }
+  ]
+}
