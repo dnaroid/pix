@@ -1037,6 +1037,38 @@ describe("ACP JSON-RPC client", () => {
     await expect(prompt).rejects.toThrow("pix-acp exited with code 1");
   });
 
+  it.each(["complete", "reject", "dispose", "exit"] as const)(
+    "scopes prompt update wakeups and releases them on %s", async (ending) => {
+      const transport = new FakeTransport();
+      const onSessionUpdate = vi.fn();
+      const client = await startedClient(transport, { onSessionUpdate });
+      const onUpdate = vi.fn();
+      const pending = client.prompt("source", [], [], onUpdate);
+      const result = pending.catch(() => undefined);
+      await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+      const emit = (sessionId: string) => transport.message({
+        jsonrpc: "2.0", method: "session/update", params: {
+          sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "working" } },
+        },
+      });
+      emit("other");
+      expect(onUpdate).not.toHaveBeenCalled();
+      emit("source");
+      expect(onUpdate).toHaveBeenCalledTimes(1);
+      expect(onSessionUpdate).toHaveBeenCalledTimes(2);
+      if (ending === "complete") {
+        transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result: { stopReason: "end_turn" } });
+      } else if (ending === "reject") {
+        transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, error: { code: -32000, message: "failed" } });
+      } else if (ending === "dispose") await client.dispose();
+      else transport.exit({ generation: 1, code: 1, success: false, requested: false, error: null });
+      await result;
+      emit("source");
+      expect(onUpdate).toHaveBeenCalledTimes(1);
+      await client.dispose();
+    },
+  );
+
   it("sends file-backed images as Pix metadata instead of embedding base64", async () => {
     const transport = new FakeTransport();
     const client = await startedClient(transport);

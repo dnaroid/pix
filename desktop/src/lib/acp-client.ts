@@ -103,6 +103,7 @@ export class AcpClient {
   private readonly ragUpdates = new Map<string, (update: RagProgress) => void>();
   private readonly annotateUpdates = new Map<string, (progress: FileAnnotationProgress) => void>();
   private readonly selectionUpdates = new Map<string, (delta: SelectionAssistDelta) => void>();
+  private readonly promptUpdates = new Map<string, Set<() => void>>();
 
   constructor(
     transport: AcpTransport,
@@ -388,20 +389,33 @@ export class AcpClient {
     return this.request("session/close", { sessionId });
   }
 
-  prompt(
+  async prompt(
     sessionId: string,
     prompt: ContentBlock[],
     fileImages: readonly PromptFileImage[] = [],
+    onUpdate?: () => void,
   ): Promise<PromptResponse> {
-    return this.request(
-      "session/prompt",
-      {
-        sessionId,
-        prompt,
-        ...(fileImages.length > 0 ? { _meta: { "pix.fileImages": fileImages } } : {}),
-      },
-      null,
-    );
+    const listeners = this.promptUpdates.get(sessionId) ?? new Set<() => void>();
+    if (onUpdate) {
+      listeners.add(onUpdate);
+      this.promptUpdates.set(sessionId, listeners);
+    }
+    try {
+      return await this.request<PromptResponse>(
+        "session/prompt",
+        {
+          sessionId,
+          prompt,
+          ...(fileImages.length > 0 ? { _meta: { "pix.fileImages": fileImages } } : {}),
+        },
+        null,
+      );
+    } finally {
+      if (onUpdate) listeners.delete(onUpdate);
+      if (listeners.size === 0 && this.promptUpdates.get(sessionId) === listeners) {
+        this.promptUpdates.delete(sessionId);
+      }
+    }
   }
 
   autocomplete(sessionId: string, draft: string, signal?: AbortSignal): Promise<string> {
@@ -535,6 +549,7 @@ export class AcpClient {
   async dispose(): Promise<void> {
     this.cancelTaskRuns();
     this.ragUpdates.clear();
+    this.promptUpdates.clear();
     await this.rpc.dispose();
   }
 
@@ -577,6 +592,9 @@ export class AcpClient {
         && params.sourceIds.every(id => typeof id === "string" && id.length <= 512)) listener({ sourceIds: params.sourceIds as string[] });
     } else if (method === "session/update" && isRecord(params)) {
       this.handlers.onSessionUpdate(params as SessionNotification);
+      if (typeof params.sessionId === "string") {
+        for (const listener of this.promptUpdates.get(params.sessionId) ?? []) listener();
+      }
     } else if (method === PIX_SESSION_CATALOG_CHANGED_METHOD && isRecord(params)) {
       if (typeof params.cwd === "string" && params.cwd.length > 0) {
         this.handlers.onSessionCatalogChanged?.(params.cwd);

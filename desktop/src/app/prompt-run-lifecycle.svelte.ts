@@ -123,20 +123,56 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
         return;
       }
       if (generation(sessionId) !== runGeneration || requestClient !== options.client()) return;
+      const beforeIds = new Set(before?.map((message) => message.entryId));
+      const isCurrent = () => !cancellation.requested
+        && generation(sessionId) === runGeneration && requestClient === options.client();
+      let bound = false;
+      let earlyBindingClosed = false;
+      let snapshotPending: Promise<void> | undefined;
+      let updatePending = false;
+      // Notifications are only a wakeup: identity comes from the live Pi branch,
+      // never from streamed text or visible transcript offsets. Coalesce chunks
+      // while a snapshot is in flight; retry if persistence lagged that snapshot.
+      const bindDuringPrompt = () => {
+        if (!transcriptMessageId || !before || bound || earlyBindingClosed || !isCurrent()) return;
+        updatePending = true;
+        if (snapshotPending) return snapshotPending;
+        snapshotPending = (async () => {
+          while (updatePending && !bound && !earlyBindingClosed && isCurrent()) {
+            updatePending = false;
+            const messages = await Promise.race([requestClient.branchUserMessages(sessionId), snapshotCancelled]);
+            if (!messages || earlyBindingClosed || !isCurrent()) return;
+            const entryId = messages.find((message) => !beforeIds.has(message.entryId))?.entryId;
+            if (entryId) {
+              bound = true;
+              options.bindPromptSessionEntry(sessionId, transcriptMessageId, entryId);
+            }
+          }
+        })().catch((error) => {
+          if (!earlyBindingClosed && isCurrent()) options.reportError(error);
+          // Keep the settlement fallback, but do not retry failures per chunk.
+          earlyBindingClosed = true;
+        }).finally(() => {
+          snapshotPending = undefined;
+          if (updatePending) void bindDuringPrompt();
+        });
+        return snapshotPending;
+      };
       let promptError: unknown;
       try {
-        const response = await requestClient.prompt(sessionId, blocks, fileImages);
+        const response = await requestClient.prompt(sessionId, blocks, fileImages, bindDuringPrompt);
         stopReason = response.stopReason;
       } catch (error) {
         promptError = error;
+      } finally {
+        earlyBindingClosed = true;
       }
-      if (transcriptMessageId && before && !cancellation.requested) {
+      if (!bound && transcriptMessageId && before && isCurrent()) {
         const after = await Promise.race([
           requestClient.branchUserMessages(sessionId).catch(() => undefined),
           snapshotCancelled,
         ]);
-        if (after && generation(sessionId) === runGeneration && requestClient === options.client()) {
-          const beforeIds = new Set(before.map((message) => message.entryId));
+        if (after && isCurrent()) {
           // The submitted prompt is the first new user entry; steering/follow-up
           // entries can be appended before the same prompt request settles.
           const sessionEntryId = after.find((message) => !beforeIds.has(message.entryId))?.entryId;
@@ -151,6 +187,7 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
       .finally(() => {
         const cancelled = cancellation.requested;
         if (cancelled) stopReason = "cancelled";
+        cancelSnapshotWaits.get(runGeneration)?.();
         cancelSnapshotWaits.delete(runGeneration);
         if (promptRunsBySessionId.get(sessionId) !== tracked) return;
         promptRunsBySessionId.delete(sessionId);
