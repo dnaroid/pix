@@ -73,7 +73,7 @@ describe("desktop prompt handoff integration", () => {
     } as any);
 
     const handoff = services.handoff.start();
-    await vi.waitFor(() => expect(client.prompt).toHaveBeenCalledWith("fresh", expect.any(Array), []));
+    await vi.waitFor(() => expect(client.prompt).toHaveBeenCalledWith("fresh", expect.any(Array), [], expect.any(Function)));
     // Exercise the actual history and prompt lifecycle while continuation is
     // pending: a mocked history store would miss the stuck loading flag.
     expect(history.generation).toBeGreaterThan(sourceHistoryGeneration);
