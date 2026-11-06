@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import { prepareMacosHelper } from "../drivers/macos/helper-cache.mjs";
 import { bundledMacosHelper } from "../drivers/macos/release-helper.mjs";
 import { textEditFixtureContract, runTextEditFixture, validateTextEditFixtureSteps } from "./textedit-fixture.mjs";
+import { gameInputArgs } from "./game-input.mjs";
+import { appAudioEvidence, validateAppAudioPolicy } from "./app-audio.mjs";
 
 const MACOS_DRIVER_SOURCE = fileURLToPath(new URL("../drivers/macos/macos-accessibility.swift", import.meta.url));
 const WINDOWS_DRIVER_SOURCE = fileURLToPath(new URL("../drivers/windows/windows-uia.ps1", import.meta.url));
@@ -26,6 +28,7 @@ const ACTION_FIELDS = {
 	setValue: new Set(["action", "selector", "value", "windowTitle", "timeoutMs"]),
 	inputText: new Set(["action", "text", "timeoutMs"]),
 	pressKey: new Set(["action", "key", "modifiers", "timeoutMs"]),
+	gameInput: new Set(["action", "keys", "durationMs", "dx", "dy", "button", "timeoutMs", "delivery"]),
 	waitForText: new Set(["action", "text", "selector", "windowTitle", "timeoutMs"]),
 	assertText: new Set(["action", "text", "selector", "windowTitle", "timeoutMs"]),
 	assertState: new Set(["action", "selector", "attribute", "equals", "windowTitle", "timeoutMs"]),
@@ -78,6 +81,8 @@ async function probeMacosDesktopBackend(context, supportedCapabilities) {
 		const sck = /(?:^|\n)sck=available(?:\n|$)/.test(doctor.stdout);
 		const menuActivation = /(?:^|\n)menu_activation=available(?:\n|$)/.test(doctor.stdout);
 		const windowTargeting = /(?:^|\n)window_targeting=available(?:\n|$)/.test(doctor.stdout);
+		const gameInput = /(?:^|\n)game_input=available(?:\n|$)/.test(doctor.stdout);
+		const appAudio = /(?:^|\n)app_audio=available(?:\n|$)/.test(doctor.stdout);
 		const supported = [...supportedCapabilities];
 		const missing = [];
 		if (accessibility) supported.push("semanticAccessibility", "accessibilitySnapshot", "semanticActivation", "valueInput", "keyboardInput", "stateAssertions");
@@ -88,8 +93,12 @@ async function probeMacosDesktopBackend(context, supportedCapabilities) {
 		else missing.push("windowTargeting");
 		if (screenRecording) supported.push("windowScreenshot");
 		else missing.push("windowScreenshot");
+		if (accessibility && gameInput) supported.push("gameInput");
+		else missing.push("gameInput");
 		if (screenRecording && sck) supported.push("windowVideo");
 		else missing.push("windowVideo");
+		if (screenRecording && sck && appAudio) supported.push("appAudio");
+		else missing.push("appAudio");
 		return {
 			available: accessibility,
 			platformDriver: "macos-accessibility",
@@ -235,6 +244,8 @@ export async function runDesktopBackend(context) {
 	const probe = await probeDesktopBackend(context);
 	if (!probe.available) return blocked(probe.reason, probe.remediation);
 	const flow = context.flow;
+	validateAppAudioPolicy(flow);
+	if (flow.recordAppAudio && !probe.supportedCapabilities.includes("appAudio")) return blocked("requested app audio is unavailable", "app audio requires macOS 13+, an updated helper and Screen Recording permission");
 	const application = validateApplication(flow.target.application, context.projectRoot);
 	const steps = validateSteps(flow.steps, probe);
 	validateTextEditFixtureSteps(steps, application.fixture);
@@ -264,6 +275,7 @@ export async function runDesktopBackend(context) {
 		}
 		if (!selector) throw new Error("desktop target requires an app selector or a launch contract");
 		recorder = await maybeStartWindowVideoRecorder({ context, helper, selector, observations, probe });
+		if (flow.recordAppAudio && !recorder) throw new Error("requested app audio recorder could not start");
 		for (let index = 0; index < steps.length; index += 1) {
 			const step = steps[index];
 			context.progress("desktop_action_started", { index, action: step.action });
@@ -286,8 +298,11 @@ export async function runDesktopBackend(context) {
 		// Automatic window video is best-effort evidence: recorders run
 		// concurrently with the remaining flow and are stopped and finalized
 		// here, and their outcome is always a structured observation that can
-		// never fail deterministic UI assertions.
+		// never fail deterministic UI assertions unless app audio was explicitly required.
 		await finalizeWindowRecorder(recorder, artifacts, observations);
+		if (flow.recordAppAudio && !observations.some((item) => item.action === "windowVideo" && item.audio?.status === "recorded")) {
+			failure ??= new Error("requested app audio was not recorded; see windowVideo observations");
+		}
 		if (failure && selector) {
 			await captureAccessibility({ context, helper, selector, name: "failure", artifacts, depth: 10, limit: 100 }).catch(() => {});
 			if (probe.supportedCapabilities.includes("windowScreenshot")) {
@@ -352,7 +367,7 @@ async function finalizeWindowRecorder(recorder, artifacts, observations) {
 	const outcome = await recorder.stop().catch((error) => ({ name: recorder.name, status: "unavailable", reason: safeReason(error) }));
 	if (outcome.status === "recorded") {
 		artifacts.videos.push(outcome.artifact);
-		observations.push({ action: "windowVideo", name: outcome.name, status: "recorded", durationMs: outcome.durationMs, bytes: outcome.bytes });
+		observations.push({ action: "windowVideo", name: outcome.name, status: "recorded", durationMs: outcome.durationMs, bytes: outcome.bytes, audio: outcome.audio });
 	} else {
 		observations.push({ action: "windowVideo", name: outcome.name, status: "unavailable", reason: outcome.reason });
 	}
@@ -394,6 +409,12 @@ async function executeStep(options) {
 			await helperCall(helper, ["type", ...selector, "--text", step.text], context, timeoutMs);
 			observations.push({ action: step.action, characters: [...step.text].length });
 			return;
+		case "gameInput": {
+			const args = gameInputArgs(step, timeoutMs);
+			await helperCall(helper, ["game-input", ...selector, ...args], context, timeoutMs);
+			observations.push({ action: step.action, keys: step.keys ?? [], durationMs: step.durationMs ?? 100, dx: step.dx ?? 0, dy: step.dy ?? 0, button: step.button, syntheticOnly: true });
+			return;
+		}
 		case "pressKey": {
 			const key = requireBoundedString(step.key, "pressKey.key", 32);
 			const args = ["key", ...selector, "--key", key];
@@ -540,6 +561,7 @@ function validateSteps(steps, probe) {
 // Exported for focused unit tests: capability gating must be honest about what
 // the probed producer actually supports on this host.
 export function validateDesktopStepCapabilities(step, supportedCapabilities) {
+	if (step.action === "gameInput") gameInputArgs(step, step.timeoutMs ?? 15_000);
 	if (step.windowTitle !== undefined) {
 		desktopWindowSelector([], step.windowTitle);
 		if (!supportedCapabilities.includes("windowTargeting")) throw new Error("desktop windowTitle requires windowTargeting");
@@ -561,6 +583,7 @@ export function validateDesktopStepCapabilities(step, supportedCapabilities) {
 		setValue: "valueInput",
 		inputText: "keyboardInput",
 		pressKey: "keyboardInput",
+		gameInput: "gameInput",
 		assertState: "stateAssertions",
 	}[step.action];
 	if (required && !supportedCapabilities.includes(required)) {
@@ -666,7 +689,7 @@ function runHelperProcess(helper, args, options) {
 }
 
 async function helperCall(helper, args, context, timeoutMs) {
-	const result = await runHelperProcess(helper, args, { cwd: context.projectRoot, timeoutMs: Math.min(timeoutMs, remainingTimeout(context, timeoutMs)) });
+	const result = await runHelperProcess(helper, args, { cwd: context.projectRoot, timeoutMs: Math.min(timeoutMs, remainingTimeout(context, timeoutMs)), terminationGraceMs: args[0] === "game-input" ? 500 : 0 });
 	if (result.code !== 0) throw new Error(result.stderr || `${helper.label} exited ${result.code}`);
 	return result.stdout.trim();
 }
@@ -723,7 +746,8 @@ async function startWindowVideoRecorder({ context, helper, selector, observation
 		await helperCall(helper, ["wait-window", ...selector, "--timeout", "10"], context, 15_000);
 		const filename = `${name}.mp4`;
 		const target = path.join(context.evidenceDir, filename);
-		const child = spawn(helper.file, [...helper.argsPrefix, "record-window", ...selector, "--out", target, "--duration", String(durationMs / 1000)], {
+		const audioArgs = context.flow?.recordAppAudio === true ? ["--app-audio", "true"] : [];
+		const child = spawn(helper.file, [...helper.argsPrefix, "record-window", ...selector, "--out", target, "--duration", String(durationMs / 1000), ...audioArgs], {
 			cwd: context.projectRoot,
 			env: launchEnvironment({}),
 			stdio: ["ignore", "pipe", "pipe"],
@@ -810,6 +834,7 @@ function windowVideoRecorderHandle({ context, child, name, durationMs, filename,
 				status: "recorded",
 				durationMs: recordedDurationMs,
 				bytes: stat.size,
+				audio: appAudioEvidence(stdout.toString("utf8"), context.flow?.recordAppAudio === true),
 				artifact: { ...context.artifact(filename, "window video"), format: "mp4", durationMs: recordedDurationMs },
 			};
 		},
@@ -842,26 +867,34 @@ export function runOwnedProcess(file, args, options) {
 		let stdout = Buffer.alloc(0);
 		let stderr = Buffer.alloc(0);
 		let settled = false;
+		let timeoutError;
+		let killTimer;
 		const append = (current, chunk) => Buffer.concat([current, Buffer.from(chunk)]).subarray(0, MAX_CAPTURE_BYTES);
 		child.stdout?.on("data", (chunk) => { stdout = append(stdout, chunk); });
 		child.stderr?.on("data", (chunk) => { stderr = append(stderr, chunk); });
 		const timer = setTimeout(() => {
 			if (settled) return;
-			settled = true;
-			killOwnedPid(child.pid, "SIGKILL");
 			const diagnostic = stderr.toString("utf8").trim().slice(-2000);
-			reject(new Error(`desktop driver stage timed out after ${options.timeoutMs} ms${diagnostic ? `; helper diagnostic: ${diagnostic}` : ""}`));
+			timeoutError = new Error(`desktop driver stage timed out after ${options.timeoutMs} ms${diagnostic ? `; helper diagnostic: ${diagnostic}` : ""}`);
+			const force = () => { if (settled) return; settled = true; killOwnedPid(child.pid, "SIGKILL"); reject(timeoutError); };
+			if (options.terminationGraceMs > 0) {
+				killOwnedPid(child.pid, "SIGTERM");
+				killTimer = setTimeout(force, Math.min(options.terminationGraceMs, 1000));
+			} else force();
 		}, Math.max(1, options.timeoutMs));
 		child.once("error", (error) => {
 			if (settled) return;
 			settled = true;
 			clearTimeout(timer);
+			clearTimeout(killTimer);
 			reject(error);
 		});
 		child.once("close", (code) => {
 			if (settled) return;
 			settled = true;
 			clearTimeout(timer);
+			clearTimeout(killTimer);
+			if (timeoutError) { reject(timeoutError); return; }
 			resolve({ code: code ?? 1, stdout: stdout.toString("utf8"), stderr: stderr.toString("utf8").trim() });
 		});
 	});

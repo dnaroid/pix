@@ -39,7 +39,9 @@ restrictions. Common steps are:
   `path` containing 1–8 exact titles, e.g.
   `{"action":"activateMenu","path":["Tools","Scripting..."]}`;
 - inspection: `snapshotAccessibility`;
-- input: `setValue`, `inputText`, `pressKey`;
+- input: `setValue`, `inputText`, `pressKey`; macOS-only `gameInput` when
+  advertised by the probe (details and examples in the
+  [macOS desktop guide](desktop-macos.md#game-input));
 - assertions: `waitForText`, `assertText`, `assertState`;
 - evidence: `screenshot`, `capture`.
 

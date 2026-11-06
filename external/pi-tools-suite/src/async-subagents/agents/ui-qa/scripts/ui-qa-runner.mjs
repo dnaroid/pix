@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parse as parseJsonc, printParseErrorCode } from "jsonc-parser";
 import { probeBrowserBackend, runBrowserBackend } from "../backends/browser.mjs";
 import { probeDesktopBackend, runDesktopBackend } from "../backends/desktop.mjs";
+import { validateAppAudioPolicy } from "../backends/app-audio.mjs";
 import { probeTuiBackend, runTuiBackend } from "../backends/tui.mjs";
 import { probeAndroidBackend, runAndroidBackend } from "../backends/android.mjs";
 
@@ -331,6 +332,7 @@ function readFlow(flowPath, requireSteps) {
 	}
 	if (!isObject(flow) || !isObject(flow.target)) throw new UiQaError("FAILED", "UI QA flow must define target");
 	if (flow.version !== undefined && flow.version !== 1) throw new UiQaError("FAILED", "UI QA flow version must be 1");
+	try { validateAppAudioPolicy(flow); } catch (error) { throw new UiQaError("FAILED", error.message); }
 	if (flow.recordWindowVideo !== undefined) {
 		if (typeof flow.recordWindowVideo !== "boolean") throw new UiQaError("FAILED", "recordWindowVideo must be a boolean");
 		if (!isObject(flow.target.application) && flow.target.command?.presentation !== "native-terminal") {

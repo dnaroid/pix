@@ -56,6 +56,9 @@ describe("native window video policy", () => {
 		fs.writeFileSync(path.join(agentDir, "subagent_type"), "ui-qa", { mode: 0o600 });
 		const runner = path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/scripts/ui-qa-runner.mjs");
 		const cases = [
+			{ target: { application: { pid: 123 } }, recordAppAudio: "true", reason: "recordAppAudio must be a boolean" },
+			{ target: { application: { pid: 123 } }, recordAppAudio: true, recordWindowVideo: false, reason: "recordAppAudio requires window video" },
+			{ target: { url: "https://example.invalid" }, recordAppAudio: true, reason: "recordAppAudio is supported only for non-fixture desktop applications" },
 			...["false", 0, null, {}].map((recordWindowVideo) => ({ target: { application: { pid: 123 } }, recordWindowVideo, reason: "recordWindowVideo must be a boolean" })),
 			...[{ url: "https://example.invalid" }, { command: { argv: ["not-executed"] } }].map((target) => ({ target, recordWindowVideo: false, reason: "recordWindowVideo is supported only for desktop and native-terminal targets" })),
 		];

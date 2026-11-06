@@ -6,7 +6,7 @@ import { macosHelperSources } from "../../src/async-subagents/agents/ui-qa/drive
 import { prepareMacosHelper } from "../../src/async-subagents/agents/ui-qa/drivers/macos/helper-cache.mjs";
 
 const driver = path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/drivers/macos");
-const sourceNames = ["macos-accessibility.swift", "textedit-lease.swift", "textedit-supervisor.swift", "menu-navigation.swift", "window-selection.swift"];
+const sourceNames = ["macos-accessibility.swift", "textedit-lease.swift", "textedit-supervisor.swift", "menu-navigation.swift", "window-selection.swift", "game-input.swift", "app-audio.swift"];
 const artifacts = process.env.PI_TEXTEDIT_TEST_ARTIFACTS ?? path.resolve(import.meta.dir, "../../../../.pi/artifacts");
 function scratch() {
 	fs.mkdirSync(artifacts, { recursive: true });

@@ -29,7 +29,7 @@ struct Arguments {
         let valueOptions: Set<String> = [
             "--app", "--bundle-id", "--pid", "--pgid", "--depth", "--limit", "--match",
             "--role", "--occurrence", "--path", "--value", "--text",
-            "--key", "--modifiers", "--x", "--y", "--out", "--timeout", "--duration", "--menu-path", "--window-title",
+            "--key", "--modifiers", "--x", "--y", "--out", "--timeout", "--duration", "--menu-path", "--window-title", "--keys", "--dx", "--dy", "--button", "--app-audio", "--delivery",
         ]
         var parsedOptions: [String: String] = [:]
         var parsedFlags = Set<String>()
@@ -101,6 +101,7 @@ struct Arguments {
       set-value SELECTOR (--path PATH | --match TEXT) --value TEXT
       type SELECTOR --text TEXT
       key SELECTOR --key KEY [--modifiers cmd,shift,ctrl,opt]
+      game-input SELECTOR [--keys w,shift] [--duration 0.1] [--dx 0 --dy 0] [--button left|right] [--delivery pid|foreground]
       menu SELECTOR --menu-path '["Tools","Action..."]' [--timeout 10]
       click-point SELECTOR --x X --y Y
       quit SELECTOR [--force]
@@ -826,6 +827,8 @@ final class WindowVideoRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
     private let writer: AVAssetWriter
     private let input: AVAssetWriterInput
     private let adaptor: AVAssetWriterInputPixelBufferAdaptor
+    private let audio: AppAudioTrack?
+    var audioEvidence: String? { audio?.evidence }
     private let completed = DispatchSemaphore(value: 0)
     private var stream: SCStream?
     private var duration: Double
@@ -837,7 +840,7 @@ final class WindowVideoRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
     private var lastPixelBuffer: CVPixelBuffer?
     private var firstFrameUptime: UInt64?
 
-    init(output: URL, width: Int, height: Int, duration: Double) throws {
+    init(output: URL, width: Int, height: Int, duration: Double, appAudio: Bool = false) throws {
         writer = try AVAssetWriter(outputURL: output, fileType: .mp4)
         input = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.h264,
@@ -847,6 +850,7 @@ final class WindowVideoRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
         input.expectsMediaDataInRealTime = true
         adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: nil)
         writer.add(input)
+        audio = appAudio ? try AppAudioTrack(writer: writer) : nil
         self.duration = duration
         super.init()
     }
@@ -854,6 +858,9 @@ final class WindowVideoRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
     func start(filter: SCContentFilter, configuration: SCStreamConfiguration) throws {
         let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
+        if #available(macOS 13.0, *), audio != nil {
+            try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
+        }
         self.stream = stream
         guard writer.startWriting() else {
             throw Failure("could not start the video asset writer: \(writer.error.map { String(describing: $0) } ?? "unknown error")")
@@ -904,6 +911,7 @@ final class WindowVideoRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
             }
             self.appendFinalFrame()
             self.input.markAsFinished()
+            self.audio?.input.markAsFinished()
             self.writer.finishWriting {
                 if self.writer.status != .completed, self.failure == nil {
                     self.failure = "video asset writer finished with status \(self.writer.status.rawValue)"
@@ -941,7 +949,12 @@ final class WindowVideoRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
-        guard outputType == .screen, !stopping else { return }
+        guard !stopping else { return }
+        if #available(macOS 13.0, *), outputType == .audio {
+            audio?.append(sampleBuffer, start: firstSourceTime, writer: writer)
+            return
+        }
+        guard outputType == .screen else { return }
         let status = frameStatus(sampleBuffer)
         // ScreenCaptureKit marks unchanged-window frames as `idle`; they still
         // carry the current window surface and must be encoded so a static UI
@@ -1060,12 +1073,22 @@ func recordWindowVideo(app: NSRunningApplication, window: AXUIElement, arguments
     configuration.scalesToFit = true
     configuration.minimumFrameInterval = CMTime(value: 1, timescale: 15)
     configuration.showsCursor = false
+    let audioOption = arguments.value("app-audio") ?? "false"
+    guard audioOption == "true" || audioOption == "false" else { throw Failure("--app-audio must be true or false") }
+    let appAudio = audioOption == "true"
+    if appAudio {
+        guard #available(macOS 13.0, *) else { throw Failure("app audio requires macOS 13+") }
+        configuration.capturesAudio = true
+        configuration.sampleRate = 48_000
+        configuration.channelCount = 2
+    }
 
     let recorder = try WindowVideoRecorder(
         output: temporary,
         width: pixelWidth,
         height: pixelHeight,
-        duration: duration
+        duration: duration,
+        appAudio: appAudio
     )
     activeRecorder = recorder
     try recorder.start(filter: SCContentFilter(desktopIndependentWindow: target), configuration: configuration)
@@ -1083,6 +1106,7 @@ func recordWindowVideo(app: NSRunningApplication, window: AXUIElement, arguments
     }
     try FileManager.default.moveItem(at: temporary, to: output)
     try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: output.path)
+    if let evidence = recorder.audioEvidence { print(evidence) }
     print(output.path)
 }
 
@@ -1120,6 +1144,9 @@ func run(_ arguments: Arguments) throws {
         print("accessibility=\(accessibility ? "granted" : "missing")")
         print("menu_activation=available")
         print("window_targeting=available")
+        print("game_input=available")
+        if #available(macOS 13.0, *) { print("app_audio=available") }
+        else { print("app_audio=unavailable") }
         print("screen_recording=\(screenRecording ? "granted" : "missing")")
         print("sck=\(screenCaptureKit ? "available" : "unsupported")")
 
@@ -1289,6 +1316,12 @@ func run(_ arguments: Arguments) throws {
         let key = try arguments.required("key")
         try sendKey(name: key, modifiers: arguments.value("modifiers"))
         print("key=\(key)")
+
+    case "game-input":
+        try requireAccessibility()
+        let app = try findApplication(arguments)
+        try activate(app)
+        try gameInput(app: app, arguments: arguments)
 
     case "click-point":
         try requireAccessibility()

@@ -151,11 +151,69 @@ Recording before claiming visual evidence.
 Never change macOS privacy settings from this child.
 
 Supported semantic actions/selectors are those in the desktop base guide.
-Prefer Accessibility roles/names/state as the oracle. Generic supported runs attempt a
-silent exact-window video automatically; no extra recording action is needed.
+Prefer Accessibility roles/names/state as the oracle. Generic supported runs attempt an
+exact-window video automatically; it is silent unless authorized opt-in app audio
+recording is requested below.
 The recorder scales the captured independent window to fill its Retina output
 surface, so the window rather than an oversized empty canvas is the visual
 evidence.
+
+### Game input
+
+When advertised by the probe, macOS `gameInput` provides one bounded synthetic
+input action. Delivery defaults to `pid` (target process). Explicit
+`delivery: "foreground"` instead posts system HID events and requires explicit
+authorization; use it only when the task authorizes foreground system input.
+It accepts up to eight distinct lowercase keys from `a`–`z`,
+`0`–`9`, `space`, `shift`, `ctrl`, `escape`, `enter`, `tab`, `left`, `right`,
+`up`, `down`; duration is 20–5000 ms (default 100), `dx`/`dy` are integers in
+−2000..2000 (default 0), and optional `button` is `left` or `right`. Set the
+step's `timeoutMs` to at least `durationMs + 2000` for setup and release. Keys
+are automatically released when the action completes or is cooperatively
+cancelled; no key lease persists across steps. Focus loss, target loss, parent
+loss, and cooperative SIGTERM/SIGINT cancellation stop the action. Do not
+assume release is guaranteed after SIGKILL, crash, or other uncooperative
+termination. Foreground mode checks focus, parent ownership, target liveness,
+and cancellation before downs and pointer motion, but checking and posting are
+not atomic: a focus race remains. Requested keys/buttons already held are
+refused in foreground mode. On cancellation, releases for posted downs still
+go to the HID event stream even if focus was lost. There are no arbitrary
+Command/Option shortcut modifiers. This is intended for games without semantic
+controls; it does not establish game-side event-counter results or runtime
+verification of any particular game.
+
+Examples (include each step in the flow's `steps` array):
+
+```json
+{"action":"gameInput","keys":["w","shift"],"durationMs":800,"timeoutMs":3000}
+{"action":"gameInput","dx":240,"dy":-60,"durationMs":250,"timeoutMs":2250}
+{"action":"gameInput","button":"left","durationMs":120,"timeoutMs":2120}
+```
+
+To explicitly select the foreground route for an authorized task, add
+`"delivery":"foreground"` to the step, for example:
+
+```json
+{"action":"gameInput","delivery":"foreground","keys":["w","shift"],"durationMs":800,"timeoutMs":3000}
+```
+
+Do not add an unrequested shortcut or assume focus validation eliminates the
+check/post race. Use default PID delivery unless foreground input is authorized.
+
+An explicitly authorized non-fixture desktop flow may set top-level
+`recordAppAudio: true` to request audio with the exact-window video. For example,
+add this property beside `target` and `steps` in the flow object:
+
+```json
+{"target":{"application":{"name":"Example Game"}},"recordAppAudio":true,"steps":[{"action":"waitForWindow"}]}
+```
+
+This option is not available for fixtures. It
+requires macOS 13+, Screen Recording and the video recorder capability. Audio
+is selected-application audio, including that app's other windows; it is not
+isolated to the captured window and does not include microphone input. Default
+window video remains silent and best-effort, but explicitly requested audio
+that cannot start or finalize fails the flow.
 
 Attached applications remain externally owned. For generic launched applications,
 cleanup is limited to the runner-owned process group and correlated GUI target.
