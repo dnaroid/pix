@@ -186,6 +186,10 @@ export function formatDoctorSummary(input: DoctorSummaryInput): string {
       oneshot: "tool-free newest-session borrow",
     };
     lines.push(`Working directory source: ${sources[metrics.sessionResolution ?? ""] ?? "unresolved"}`);
+    if (metrics.preStreamRetries) {
+      const { count, last } = metrics.preStreamRetries;
+      lines.push(`Pre-stream retries: ${count}, last ${JSON.stringify(last)}`);
+    }
     const contextWindow = servedContextWindowNote(input, metrics);
     if (contextWindow) lines.push(contextWindow);
     const promptCache = promptCacheNote(metrics);

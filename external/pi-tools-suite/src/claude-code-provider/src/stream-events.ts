@@ -2,6 +2,7 @@ import { parseStreamingJson } from "@earendil-works/pi-ai";
 import type { AssistantMessageEventStream, ToolCall } from "@earendil-works/pi-ai";
 import { TRANSCRIPT_BREAKPOINT_ENV } from "./claude-args.ts";
 import { ClaudeCodeError } from "./errors.ts";
+import { parseApiRetryNotice, type ApiRetryNotice } from "./api-retry.ts";
 import { diagnoseToolNameMismatch } from "./tool-name-diagnostics.ts";
 import { resolveToolName } from "./tool-name-resolution.ts";
 import {
@@ -58,6 +59,8 @@ export interface ClaudeEventMapperOptions {
   /** Current subscription-window consumption, reported even without a warning. */
   onRateLimitWindows?: RateLimitWindowsSink;
   onResponseAnnouncement?: ResponseAnnouncementSink;
+  /** Advisory retries after validated init, before the first model message. */
+  onPreStreamRetry?: (notice: ApiRetryNotice) => void;
   privatePaths?: readonly string[];
 }
 
@@ -99,6 +102,7 @@ export class ClaudeEventMapper {
   private readonly onRateLimitNotice: RateLimitNoticeSink;
   private readonly onRateLimitWindows: RateLimitWindowsSink;
   private readonly onResponseAnnouncement: ResponseAnnouncementSink;
+  private readonly onPreStreamRetry: (notice: ApiRetryNotice) => void;
   private assistantDiagnostic: string | undefined;
   private rejectedToolName: ToolNameMismatch | undefined;
   private normalizedToolNames = 0;
@@ -114,6 +118,7 @@ export class ClaudeEventMapper {
     this.onRateLimitNotice = options.onRateLimitNotice ?? (() => {});
     this.onRateLimitWindows = options.onRateLimitWindows ?? (() => {});
     this.onResponseAnnouncement = options.onResponseAnnouncement ?? (() => {});
+    this.onPreStreamRetry = options.onPreStreamRetry ?? (() => {});
     this.privatePaths = options.privatePaths ?? [];
   }
 
@@ -265,7 +270,13 @@ export class ClaudeEventMapper {
     // Claude for handoff, and records about Claude's own next request must not
     // invalidate a complete proposal. A length stop is followed by Claude Code's own
     // continuation, which the length handoff owns.
-    if (!this.messageStarted || this.stopReason === "tool_use" || isLengthStop(this.stopReason)) return;
+    if (!this.messageStarted) {
+      if (record.type === "system" && record.subtype === "api_retry") {
+        this.onPreStreamRetry(parseApiRetryNotice(record as Record<string, unknown>));
+      }
+      return;
+    }
+    if (this.stopReason === "tool_use" || isLengthStop(this.stopReason)) return;
     const raw = record as Record<string, unknown>;
     let cause: string | undefined;
     if (record.type === "system" && record.subtype === "api_retry") {

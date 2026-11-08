@@ -284,6 +284,20 @@ selection and recovery-budget subtraction are unchanged. The optional
 `PI_CLAUDE_CODE_PROVIDER_METRICS_LOG` persists finalized per-attempt metrics;
 diagnostics do not add a new always-on log or startup write.
 
+After validated initialization and before the first model `message_start`,
+Claude's `api_retry` records are advisory observations only. They do not alter
+protocol acceptance, retry/recovery behavior, idle touching, or total, idle,
+and MCP-ready deadlines. Schema-5 request metrics add optional
+`preStreamRetries: { count, last }` per provider attempt; it is omitted when
+there were no such retries and retained by normal finalization on success,
+error, or abort. `last` contains an allowlisted category and only valid optional
+integer fields (`httpStatus`, `attempt`, `retryDelayMs`). The first retry in an
+attempt emits a content-free `suite:pre-stream-retry` warning through the
+existing optional Pix `suiteDiagnostics` channel (subject to its usual
+cross-request coalescing). The count/latest observation are also available in
+the existing optional metrics log and doctor's **Pre-stream retries** line;
+this adds neither a log file nor a UI banner.
+
 ### Unknown tool name diagnostics
 
 Pi tool names are exposed to Claude Code only as qualified MCP names

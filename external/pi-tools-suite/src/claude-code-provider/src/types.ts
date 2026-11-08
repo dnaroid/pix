@@ -1,5 +1,6 @@
 import type { AssistantMessage, Context, Tool } from "@earendil-works/pi-ai";
 import type { SessionResolution } from "./session-registry.ts";
+import type { ApiRetryNotice } from "./api-retry.ts";
 
 export type ClaudeSubscriptionType = "pro" | "max" | "team" | "enterprise";
 
@@ -81,6 +82,8 @@ export interface RequestMetrics {
   toolNameMismatch?: ToolNameMismatch;
   /** Bare names normalized at proposal start, including requests that later fail. */
   toolNameNormalizationCount?: number;
+  /** Advisory retries after validated init and before message_start, per attempt. */
+  preStreamRetries?: { count: number; last: ApiRetryNotice };
   exitCode?: number | null;
   exitSignal?: NodeJS.Signals | null;
   terminationExpected: boolean;

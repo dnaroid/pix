@@ -85,6 +85,24 @@ test("same warnings are coalesced by project, with suppressed count on next wind
 	expect(records[2]![2]).toEqual({ suppressed: 30 });
 });
 
+test("Claude retry diagnostics keep only classified categories and bounded integers", async () => {
+	const { records, sink } = capture();
+	const reporter = createSuiteDiagnostics({ enabled: () => true, loadSink: async () => sink });
+	reporter.report("warn", "claude-code-provider", "pre-stream-retry", "/workspace", {
+		count: 1, retryCategory: "overloaded", httpStatus: 529, attempt: 2, retryDelayMs: 527,
+	});
+	reporter.report("info", "claude-code-provider", "invalid-details", "/workspace", {
+		retryCategory: "/private/secret", httpStatus: 99, attempt: -1, retryDelayMs: Infinity,
+	});
+	reporter.report("info", "claude-code-provider", "invalid-details", "/workspace", {
+		httpStatus: 600, attempt: 0.5, retryDelayMs: 2_147_483_648,
+	});
+	await tick();
+	expect(records[0]?.[2]).toEqual({ count: 1, retryCategory: "overloaded", httpStatus: 529, attempt: 2, retryDelayMs: 527 });
+	expect(records[1]?.[2]).toEqual({});
+	expect(records[2]?.[2]).toEqual({});
+});
+
 test("debug is opt-in and the shared record receives only bounded safe scalar metadata", async () => {
 	const { records, sink } = capture();
 	const reporter = createSuiteDiagnostics({ enabled: () => true, debug: () => false, loadSink: async () => sink });

@@ -11,6 +11,7 @@ import type {
   TranscriptContext,
 } from "@earendil-works/pi-ai";
 import * as piAi from "@earendil-works/pi-ai";
+import { suiteDiagnostics } from "../../lib/suite-diagnostics.js";
 import { bridgeArgv, formatBridgeArgv, providerArgs, thinkingDisplay, transcriptBreakpointEnabled } from "./claude-args.ts";
 import { claimClaudeLaunch, settleFailure, spawnClaudeProcess, type ClaudeProcess } from "./claude-process.ts";
 import { prepareRequest } from "./context-serializer.ts";
@@ -376,6 +377,18 @@ function createClaudeAttempt(
           },
           onRateLimitWindows: (windows) => onRateLimitWindows?.(windows, `${model.provider}/${model.id}`),
           onResponseAnnouncement: announceResponse,
+          onPreStreamRetry: (notice) => {
+            const count = (metrics.preStreamRetries?.count ?? 0) + 1;
+            metrics.preStreamRetries = { count, last: notice };
+            // One warning per request, not per Claude backoff tick. Final metrics
+            // retain every retry and the latest safe details, even on abort/error.
+            if (count === 1) {
+              const { category, ...fields } = notice;
+              suiteDiagnostics.report("warn", "claude-code-provider", "pre-stream-retry", cwd,
+                { count, retryCategory: category, ...fields },
+                { sessionManager: { getSessionId: () => options?.sessionId } });
+            }
+          },
           privatePaths: [prepared.directory, ...(prepared.imageStoreDirectory ? [prepared.imageStoreDirectory] : [])],
         });
 

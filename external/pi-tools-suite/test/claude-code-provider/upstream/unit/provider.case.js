@@ -159,6 +159,7 @@ setTimeout(() => {
         assert.ok(captured.files.some((name) => /^image-[0-9a-f]{64}\.png$/.test(name)));
         const metrics = await waitForRequestMetrics((entry) => entry.stopReason === "stop");
         assert.equal(metrics.schemaVersion, 5);
+        assert.equal(metrics.preStreamRetries, undefined);
         assert.equal(metrics.messageCount, replacement.messages.length);
         assert.equal(metrics.toolCount, 1);
         assert.equal(metrics.imageCount, 1);

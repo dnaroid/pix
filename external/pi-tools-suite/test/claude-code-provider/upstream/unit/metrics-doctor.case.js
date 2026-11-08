@@ -131,6 +131,13 @@ test("metrics logging exposes only a sanitized latest failure", async () => {
 function doctorBase() {
     return { platformStatus: platformStatus("linux", "x64", "6.6-microsoft-standard-WSL2", "Ubuntu"), piStatus: versionStatus("Pi", "1", "1"), claudeStatus: versionStatus("Claude Code", "2", "1"), installation: { executable: "/usr/bin/claude", version: "2", subscriptionType: "pro" }, modelIds: ["sonnet"], runtimeCleanup: { removed: 0, failures: 0 } };
 }
+test("doctor and serialized metrics report optional pre-stream retry observations", () => {
+    assert.doesNotMatch(formatDoctorSummary({ ...doctorBase(), metrics }), /Pre-stream retries:/);
+    const preStreamRetries = { count: 3, last: { category: "overloaded", httpStatus: 529, attempt: 3, retryDelayMs: 527 } };
+    const observed = { ...metrics, preStreamRetries };
+    assert.match(formatDoctorSummary({ ...doctorBase(), metrics: observed }), /^Pre-stream retries: 3, last .*overloaded.*529.*527/m);
+    assert.deepEqual(JSON.parse(serializeRequestMetrics(observed)).preStreamRetries, preStreamRetries);
+});
 test("doctor names the model each alias would be served, or says it cannot", () => {
     const base = { ...doctorBase(), modelIds: ["sonnet", "fable", "opus", "haiku"] };
     // No map at all: the doctor stays exactly as it was before the scan existed.

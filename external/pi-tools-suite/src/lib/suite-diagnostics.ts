@@ -23,6 +23,10 @@ const SOURCES = new Set(["code", "knowledge", "sessions", "tasks", "commits"]);
 const ACTIONS = new Set(["spawn", "status", "wait", "result", "stop", "cleanup", "configure", "off", "reset-history"]);
 const PHASES = new Set(["preflight", "resolve", "summary", "commit", "blocked", "degraded", "failed", "needs_continue", "candidate_failed"]);
 const SCALAR_FIELDS = new Set(["count", "indexed", "total", "durationMs", "capacityGapTokens", "complete", "attempts", "skipped"]);
+const RETRY_CATEGORIES = new Set(["overloaded", "server_error", "unknown", "rate_limit", "billing_error", "authentication_failed", "invalid_request", "other"]);
+const RETRY_INTEGER_LIMITS = new Map<string, readonly [number, number]>([
+	["httpStatus", [100, 599]], ["attempt", [0, 2_147_483_647]], ["retryDelayMs", [0, 2_147_483_647]],
+]);
 
 function sessionIdFromContext(context: unknown): string | undefined {
 	try {
@@ -142,7 +146,13 @@ export function createSuiteDiagnostics(options: Options = {}) {
 			// A fixed small set of caller-owned metadata keys, not arbitrary payloads.
 			const details: Fields = {};
 			for (const [key, value] of Object.entries(fields).slice(0, 8)) {
+				const retryLimits = RETRY_INTEGER_LIMITS.get(key);
 				if (SCALAR_FIELDS.has(key) && (typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value)))) {
+					details[key] = value;
+				} else if (retryLimits && typeof value === "number" && Number.isInteger(value)
+					&& value >= retryLimits[0] && value <= retryLimits[1]) {
+					details[key] = value;
+				} else if (key === "retryCategory" && typeof value === "string" && RETRY_CATEGORIES.has(value)) {
 					details[key] = value;
 				} else if (key === "reason" && typeof value === "string") {
 					details.reason = diagnosticDcpReason(value);
