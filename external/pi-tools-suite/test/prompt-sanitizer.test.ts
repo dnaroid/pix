@@ -2,10 +2,11 @@ import { describe, expect, test } from "bun:test";
 import type { SystemMessage } from "@earendil-works/pi-ai";
 import { registerPromptSanitizer, sanitizeSystemPrompt, stripUpstreamPiDocs } from "../src/prompt-sanitizer.js";
 
-const docs = "Pi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: /sdk/README.md\n- New upstream advice added after an SDK update";
+const docs = "Pi documentation (read only when the user asks about the harness itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: /sdk/README.md\n- New upstream advice added after an SDK update";
+const legacyDocs = docs.replace("the harness itself", "pi itself");
 
 describe("upstream prompt sanitization", () => {
-	for (const block of [docs, `<docs>\n${docs}\n</docs>`]) {
+	for (const block of [docs, legacyDocs, `<docs>\n${docs}\n</docs>`, `<docs>\n${legacyDocs}\n</docs>`]) {
 		for (const newline of ["\n", "\r\n"]) test(`removes docs at boundaries with ${JSON.stringify(newline)}: ${block.startsWith("<")}`, () => {
 			for (const prompt of [block, `${block}\n\n<skills>keep</skills>`, `base\n\n${block}`]) {
 				const result = stripUpstreamPiDocs(prompt.replaceAll("\n", newline));

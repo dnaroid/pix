@@ -9,7 +9,8 @@ import {
 	createAgentSession, createCodemodeExtension, DefaultResourceLoader,
 	SessionManager, SettingsManager, type ExtensionFactory,
 } from "@earendil-works/pi-coding-agent";
-import { createAssistantMessageEventStream, fauxAssistantMessage, fauxProvider, fauxToolCall, Type } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import codemode from "../src/codemode/index.js";
 import sessionTools from "../src/session/index.js";
 

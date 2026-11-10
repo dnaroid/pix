@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { keyHint, keyText } from "@earendil-works/pi-coding-agent";
 
 import type { PixConfig } from "../src/config.js";
 import { APP_ICONS } from "../src/app/icons.js";
@@ -54,6 +55,8 @@ describe("renderConversationEntry", () => {
 		const renderer: NonNullable<Parameters<typeof renderRegisteredExtensionEntry>[2]> = (sessionEntry, options, theme) => {
 			componentCreations += 1;
 			seenExpanded = options.expanded;
+			assert.equal(options.keyText, keyText);
+			assert.equal(options.keyHint, keyHint);
 			assert.deepEqual(sessionEntry.data, { label: "ready" });
 			return { render: () => [theme.fg("accent", renderedLabel), "\x1b[1mdetails\x1b[22m"] } as never;
 		};

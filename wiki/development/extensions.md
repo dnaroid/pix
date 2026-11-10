@@ -36,6 +36,10 @@ Pix implements the Pi extension UI surface used for:
 Extensions should use public Pi/Pix SDK contracts rather than assuming stock
 renderer internals.
 
+Registered custom-entry renderers receive `keyText` and `keyHint` through their
+options. Use those host callbacks instead of importing keybinding helpers from
+another SDK copy, so hints follow the host's active bindings.
+
 When the same extension can run without an interactive renderer, protect UI-only
 paths with `ctx.hasUI`.
 
@@ -45,6 +49,12 @@ The bundled [pi-tools-suite](../tools/suite.md) is a useful
 reference for extensions that need to work in Pix while remaining usable in
 other Pi contexts. Suite-spawned sub-agents intentionally use a smaller isolated
 extension set rather than inheriting the complete parent UI environment.
+
+Code that also runs directly in tests or SDK hosts should import TypeBox types
+and builders from `typebox`, not rely on the extension loader's compatibility
+view of `@earendil-works/pi-ai`. When combining schemas, keep string enums
+compatible with both the provider JSON schema and TypeBox static inference; the
+pi-ai root `StringEnum` is not a TypeBox builder.
 
 Pix also bundles the TUI-only `choice-actions` extension. It advertises optional
 next-step checklists in the system prompt and presents valid `pix-actions`

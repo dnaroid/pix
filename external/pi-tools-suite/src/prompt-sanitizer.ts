@@ -1,7 +1,7 @@
 import type { SystemMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-const HEADER = "Pi documentation \\(read only when the user asks about pi itself";
+const HEADER = "Pi documentation \\(read only when the user asks about (?:pi|the harness) itself";
 const TAGGED_DOCS = new RegExp(`<docs>\\s*${HEADER}[^\\n]*\\n[\\s\\S]*?</docs>[ \\t]*(?:\\r?\\n)?`, "g");
 const LEGACY_DOCS = new RegExp(`^${HEADER}[^\\n]*\\r?\\n(?:- [^\\r\\n]*(?:\\r?\\n|$))+(?:\\r?\\n)?`, "gm");
 const PROTECTED_SECTIONS = /(<(?:project_context|project_instructions|skills|available_skills|addendum)(?:\s[^>]*)?>[\s\S]*?<\/(?:project_context|project_instructions|skills|available_skills|addendum)>)/g;

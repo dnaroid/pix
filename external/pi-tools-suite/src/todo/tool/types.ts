@@ -1,4 +1,4 @@
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "../../lib/string-enum.js";
 import { type Static, Type } from "typebox";
 import { TODO_THINKING_LEVELS } from "../thinking-policy.js";
 

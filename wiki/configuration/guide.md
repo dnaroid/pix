@@ -5,6 +5,20 @@
 Pix uses Pi's provider ecosystem and authentication stores, but the TUI and Pix
 Desktop keep separate frontend configuration profiles.
 
+## SDK prompt cache warming
+
+Pi SDK sessions default to `cacheWarming: "idle"`. For eligible provider
+requests, the SDK may make paid cache-refresh requests between turns for up to
+30 minutes when its estimated savings justify them. This does not guarantee
+lower costs. Warming stops when its context is no longer current or the session
+is disposed.
+
+To disable it, set `"cacheWarming": "off"` in the active Pi agent directory's
+global `settings.json`, then restart existing sessions. `"streaming"` limits
+warming to active runs; `"idle"` also permits it between runs. This is an SDK
+setting, not a field in `pix.jsonc` or `pix-desktop.jsonc`. Project settings cannot
+override this global setting because warming can spend money.
+
 ## TUI configuration
 
 User profile:

@@ -1348,8 +1348,7 @@ Supporting docs and historical standalone README content are kept in `docs/`; th
 This suite runs inside the Pi host process, so its `@earendil-works/*`
 peerDependencies (`pi-ai`, `pi-coding-agent`, `pi-tui`) must match the host Pi
 SDK version exactly. Otherwise npm can resolve a stale copy in this package's
-own `node_modules` and cause a double-load (e.g. `0.75.4` here vs `0.79.4` in
-the host).
+own `node_modules` and cause a double-load when the versions drift.
 
 The host repo keeps these aligned: `npm run sync:sdk-pin` rewrites these
 peerDeps to the host version, and `npm run sync:sdk-pin:check` reports drift

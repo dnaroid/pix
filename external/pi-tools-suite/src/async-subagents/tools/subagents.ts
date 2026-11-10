@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { Text } from "@earendil-works/pi-tui";
 import { asyncSubagentToolDescriptions } from "../../tool-descriptions.js";
 import { SUBAGENT_TYPE_SELECTION_GUIDANCE } from "../core/agent-catalog.js";

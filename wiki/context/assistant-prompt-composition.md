@@ -8,8 +8,10 @@ status: active
 ## Behavior
 
 The suite removes the upstream SDK's automatic **Pi documentation** reference
-block from provider-bound assistant prompts for every model, not only GLM.
-Removal covers tagged `<docs>` sections, the legacy flat block, initial requests,
+block from provider-bound assistant prompts for every model, not only GLM. It
+recognizes both the legacy “Pi itself” and current “the harness itself”
+documentation headers. Removal covers tagged `<docs>` sections, the legacy flat
+block, initial requests,
 subsequent tool-loop requests and new turns. The suite registers sanitization
 after its other prompt hooks. Structured prompts remain structured: the request
 transform removes only the upstream `docs` section. Existing forced/opaque prompt

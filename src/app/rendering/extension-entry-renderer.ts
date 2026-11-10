@@ -1,4 +1,4 @@
-import { Theme as PiTheme, type EntryRenderer, type ThemeColor } from "@earendil-works/pi-coding-agent";
+import { Theme as PiTheme, keyHint, keyText, type EntryRenderer, type ThemeColor } from "@earendil-works/pi-coding-agent";
 import type { Theme as PixTheme } from "../../theme.js";
 import type { Entry, RenderedLine } from "../types.js";
 import { ansiStyledLine } from "./tool-block-renderer.js";
@@ -23,7 +23,7 @@ export function renderRegisteredExtensionEntry(
 		const cached = components.get(entry);
 		let component = cached?.component;
 		if (!cached || cached.renderer !== renderer || cached.theme !== theme || cached.expanded !== entry.expanded) {
-			component = renderer(entry.sessionEntry, { expanded: entry.expanded }, extensionRendererTheme(theme)) ?? undefined;
+			component = renderer(entry.sessionEntry, { expanded: entry.expanded, keyText, keyHint }, extensionRendererTheme(theme)) ?? undefined;
 			if (!component) {
 				components.delete(entry);
 				return [];

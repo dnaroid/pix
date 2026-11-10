@@ -1,4 +1,4 @@
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "../lib/string-enum.js";
 import { Type } from "typebox";
 
 const AstGrepParamProperties = {

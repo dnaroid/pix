@@ -43,7 +43,8 @@ test("image-only queue compatibility text is consumed by the real SDK with its i
 		await session.bindExtensions({});
 		const run = session.prompt("Work");
 		await pending;
-		const image = { type: "image" as const, data: "aW1hZ2U=", mimeType: "image/png" };
+		// Real PNG: the SDK now validates/resizes queued images before delivery.
+		const image = { type: "image" as const, data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==", mimeType: "image/png" };
 		await session.steer("(image message)", [image]);
 		assert.deepEqual(session.getSteeringMessages(), ["(image message)"]);
 		finishFirst();
