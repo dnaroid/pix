@@ -60,6 +60,7 @@ Render Pix Desktop chat tool rows with the same compact headers and mutation out
 - Apply-patch input is rendered as one diff surface for both `*** Begin Patch` and unified-diff forms.
 - Failed mutations do not present their requested patch as an applied diff.
 - The mutation result text follows the diff and preserves all text blocks in order, including normal success output, `LSP diagnostics:`, and `comment-checker` notices.
+- A completed image `read` with an image attachment hides only the standalone `Read image file [image/...]` boilerplate; errors, diagnostics, other output, and results without an image attachment remain visible.
 - Completed mutation rows with LSP output use an alert icon: error-colored when diagnostics contain an error, otherwise warning-colored, matching the TUI rule.
 - Activity-group summaries show no lifecycle status, settled outcome, or aggregate status icon — only the muted per-entry icon trail and elapsed time on one line. They do not inherit failed/success outcome color or LSP warning/error attention from child tool rows; those signals, including the failed status icon, stay on the concrete child call that produced them.
 - LSP headers/alerts, error lines, warning lines, hints, and clean diagnostic lines receive semantic colors; comment-checker headings use the warning role.

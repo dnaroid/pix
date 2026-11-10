@@ -14,6 +14,7 @@
   import type { ToolItem } from "../lib/transcript";
   import { languageForToolInput, toolInputText } from "../lib/tool-input";
   import { subagentToolTargets } from "../lib/subagent-tool-targets";
+  import { imageRead } from "../lib/tool-image-read";
   import DiffView from "./DiffView.svelte";
   import MarkdownText from "./MarkdownText.svelte";
 
@@ -38,11 +39,17 @@
   } = $props();
 
   let language = $derived(languageForReadTool(tool.kind, tool.title, tool.path));
+  let content = $derived(
+    tool.status === "completed" && imageRead(tool)
+      && tool.attachments.some((attachment) => attachment.kind === "image")
+      && /^\s*Read image file \[image\/[^\]\r\n]+\]\s*$/u.test(tool.content)
+      ? "" : tool.content,
+  );
   let inputText = $derived(toolInputText(tool));
   let inputLanguage = $derived(languageForToolInput(tool));
   let highlightedInput = $derived(inputText !== undefined && inputLanguage ? highlightCode(inputText, inputLanguage) : undefined);
   let renderAsMarkdown = $derived(language === "markdown");
-  let highlighted = $derived(language && !renderAsMarkdown ? highlightCode(tool.content, language) : undefined);
+  let highlighted = $derived(language && !renderAsMarkdown ? highlightCode(content, language) : undefined);
   let shellDiff = $derived(isShellDiffTool(tool.kind, tool.title) && tool.content ? unifiedDiffModel(tool.content) : undefined);
   let mutationDiffs = $derived(mutationDiffPresentations(tool));
   let mutationLines = $derived(isMutationTool(tool) ? mutationOutputLines(tool.content) : undefined);
@@ -54,7 +61,7 @@
     <div class="tool-section-label">Input</div>
     <pre class="tool-result tool-input">{#if highlightedInput}<code class="highlighted-code" data-language={highlightedInput.language}>{@html highlightedInput.html}</code>{:else}{inputText}{/if}</pre>
   </section>
-  {#if tool.content || shellDiff || mutationDiffs.length > 0}
+  {#if content || shellDiff || mutationDiffs.length > 0}
     <div class="tool-section-label">Result</div>
   {/if}
 {/if}
@@ -65,15 +72,15 @@
 
 {#if shellDiff}
   <DiffView model={shellDiff} label="git diff" />
-{:else if tool.content}
+{:else if content}
   {#if renderAsMarkdown}
-    <div class="tool-result markdown-result"><MarkdownText text={tool.content} compact dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} /></div>
+    <div class="tool-result markdown-result"><MarkdownText text={content} compact dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} /></div>
   {:else if highlighted}
     <pre class="tool-result"><code class="highlighted-code" data-language={highlighted.language}>{@html highlighted.html}</code></pre>
   {:else if mutationLines}
     <pre class="tool-result mutation-result">{#each mutationLines as line}<span data-tone={line.tone}>{line.text || " "}</span>{/each}</pre>
   {:else}
-    <pre class="tool-result">{tool.content}</pre>
+    <pre class="tool-result">{content}</pre>
   {/if}
 {/if}
 

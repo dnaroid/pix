@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import Moon from "@lucide/svelte/icons/moon";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import type { ModelUsageLimitWindow } from "../lib/acp-client";
   import { quotaCycleTimeline } from "../lib/quota-calendar";
@@ -68,7 +67,7 @@
     {#if sleepPosition !== null}
       <span class="absolute -top-1 z-[5] h-[calc(100%+8px)] w-0 text-tool-agent" style={`left: clamp(5px, ${sleepPosition}%, calc(100% - 5px))`} data-weekly-sleep-marker>
         <span class="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-tool-agent ring-1 ring-popover"></span>
-        <Moon class="absolute -top-1.5 left-1/2 h-2.5 w-2.5 -translate-x-1/2 bg-popover" aria-hidden="true" />
+        <span class="absolute -top-2 left-1/2 -translate-x-1/2 whitespace-nowrap bg-popover px-0.5 text-[9px] leading-none tabular-nums">+{sleepDurationHours}h</span>
       </span>
     {/if}
     {#if timeline}

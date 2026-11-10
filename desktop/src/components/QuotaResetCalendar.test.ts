@@ -62,17 +62,20 @@ describe("QuotaResetCalendar continuous weekly timeline", () => {
     const visible = body.replace(/<[^>]*>/g, "");
     expect(visible).not.toMatch(/Now|used|Resets in|Weekly reset|2026|Local time/);
     expect(visible).not.toMatch(/sleep|After|hours/i);
+    expect(visible).toContain("+6h");
     expect(body).toContain("data-quota-reset-time");
     expect(visible).toContain("Reset ");
     expect(body).not.toContain("title=");
   });
 
-  it("adds a moon marker six hours after now without changing quota fill", () => {
+  it("adds a +6h marker six hours after now without changing quota fill", () => {
     const body = renderCalendar();
     const expected = quotaCycleTimeline(window, now + 6 * 3_600_000)!.timePosition;
     expect(body).toContain("data-weekly-sleep-marker");
     expect(body).toContain(`left: clamp(5px, ${expected}%, calc(100% - 5px))`);
     expect(body).toContain("After 6 hours of sleep:");
+    expect(body).toContain("+6h</span>");
+    expect(body).not.toContain("lucide-moon");
     expect(body).toContain("bg-tool-agent ring-1 ring-popover");
     expect(fills(body)).toEqual([57]);
   });
@@ -85,6 +88,7 @@ describe("QuotaResetCalendar continuous weekly timeline", () => {
       const expected = (at + sleepHours * 3_600_000 - start) / (window.windowSeconds * 1000) * 100;
       expect(body).toContain(`left: clamp(5px, ${expected}%, calc(100% - 5px))`);
       expect(body).toContain("After 8.5 hours of sleep:");
+      expect(body).toContain("+8.5h</span>");
       expect(fills(body)).toEqual([57]);
     }
   });

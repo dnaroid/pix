@@ -10,6 +10,30 @@ const tool: ToolItem = {
 };
 
 describe("tool input and output blocks", () => {
+  const imageReadTool: ToolItem = {
+    ...tool, name: "read", title: "read preview.png", kind: "read", rawInput: { path: "preview.png" },
+    content: "Read image file [image/png]",
+    attachments: [{ id: "image", name: "preview.png", kind: "image", mimeType: "image/png", deferredImageId: "image" }],
+  };
+
+  it.each(["image/png", "image/jpeg", "image/webp"])("hides redundant image-read output for %s", (mime) => {
+    const html = render(ToolResult, { props: { tool: { ...imageReadTool, content: `Read image file [${mime}]` } } }).body;
+    expect(html).not.toContain("Read image file");
+    expect(html).not.toContain('class="tool-result"');
+  });
+
+  it.each([
+    { content: "Failed to read image: permission denied", status: "failed" as const },
+    { status: "failed" as const },
+    { attachments: [] },
+    { name: "shell", title: "shell", kind: "execute" },
+    { content: "Read image file [image/png]\nAdditional diagnostic" },
+  ])("preserves real output or a missing-preview fallback: %j", (override) => {
+    const item = { ...imageReadTool, ...override };
+    const html = render(ToolResult, { props: { tool: item } }).body;
+    expect(html).toContain(item.content);
+  });
+
   it("highlights GDScript read results", () => {
     const html = render(ToolResult, { props: { tool: { ...tool, name: "read", kind: "read", title: "read mission_result.gd:25+50", rawInput: undefined, content: "func display() -> void:\n\tpass" } } }).body;
     expect(html).toContain('data-language="gdscript"');
