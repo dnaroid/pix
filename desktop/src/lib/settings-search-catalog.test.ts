@@ -5,6 +5,14 @@ import searchPreferencesSource from "../components/settings/SettingsSearchPrefer
 import { SETTINGS_SEARCH_CATALOG, settingsFieldId } from "./settings-search-catalog";
 
 describe("authored settings search catalogue", () => {
+  it("makes sleep duration searchable and editable with a six-hour default", () => {
+    const entry = SETTINGS_SEARCH_CATALOG.find(entry => entry.id === "sleep-duration-hours");
+    expect(entry?.section).toBe("desktop-general");
+    expect(entry?.synonyms).toContain("сон");
+    expect(entry?.description).toContain("6 hours");
+    expect(desktopEditorSource).toContain('number(["desktop", "sleepHours"])');
+    expect(desktopEditorSource).toContain('onReset={() => reset(["desktop", "sleepHours"])}');
+  });
   it("routes report-language searches to both the suite default and Desktop override", () => {
     const entries = SETTINGS_SEARCH_CATALOG.filter(entry => entry.id === "contradiction-report-language");
     expect(entries.map(entry => entry.section).sort()).toEqual(["desktop-assistant", "pi-tools-suite-general"]);

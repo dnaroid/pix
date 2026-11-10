@@ -128,6 +128,12 @@ const DesktopAppConfig = Type.Object(
 			default: false,
 			description: "Show the diagnostic Logs view in the Desktop sidebar. Global user preference only; disabled by default. Does not change log collection.",
 		})),
+		sleepHours: Type.Optional(Type.Number({
+			default: 6,
+			minimum: 0.5,
+			maximum: 24,
+			description: "Sleep duration in hours for the second marker on the Desktop weekly quota timeline. Global user preference only. Defaults to 6; does not predict usage or future resets.",
+		})),
 		trayOnly: Type.Optional(Type.Boolean({
 			default: false,
 			description: "macOS: add a Pix menu bar icon while keeping the Dock icon and application menus. The menu lists all open windows. Legacy key name; no longer hides the Dock. Global user preference only; takes effect after restarting Pix.",

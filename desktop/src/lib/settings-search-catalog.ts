@@ -23,6 +23,7 @@ const tools = (section: string, label: string, description = "", ...synonyms: st
 export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   desktop("general", "Theme", "Follow the macOS appearance or force a light or dark theme.", "appearance", "dark mode", "light mode", "тема", "тёмная", "светлая"),
   desktop("general", "Logs panel", "Show Logs in the sidebar to browse and monitor shared diagnostics. Off by default.", "logging", "errors", "логи", "журнал"),
+  desktop("general", "Sleep duration (hours)", "Offset of the sleep marker on the weekly quota timeline. Defaults to 6 hours; applies after saving.", "sleepHours", "sleep", "quota", "сон", "сна", "часы"),
   desktop("general", "Ignore context files", "Do not discover AGENTS.md or CLAUDE.md for Desktop sessions.", "agents", "claude"),
   desktop("general", "Notifications", "Enable alerts for completed work, questions, pauses and errors.", "alerts", "system notifications"),
   desktop("general", "Sound only (no popups)", "Play a short sound without Pix popups or macOS system notifications.", "audio", "sound", "звуковые уведомления", "уведомления"),
