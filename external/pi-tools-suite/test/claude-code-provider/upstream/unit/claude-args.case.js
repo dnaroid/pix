@@ -83,6 +83,7 @@ test("pins cache-stable Claude settings", () => {
             "agents-md@builtin": false,
             "plugin-authoring@builtin": false,
             "cc-plugin-plugin-authoring@builtin": false,
+            "cc-plugin-privacy@builtin": false,
         },
     });
 });

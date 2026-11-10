@@ -78,8 +78,8 @@ test("names a record by its bounded type and subtype", () => {
     assert.equal(recordKind({ type: "sys<tem>\n", subtype: 7 }), "system");
 });
 
-test("still rejects plugin-authoring if explicit suppression fails", () => {
-    for (const name of ["plugin-authoring", "cc-plugin-plugin-authoring"]) {
+test("still rejects built-in plugins if explicit suppression fails", () => {
+    for (const name of ["plugin-authoring", "cc-plugin-plugin-authoring", "cc-plugin-privacy"]) {
         assert.throws(
             () => validateClaudeInitialization({
                 ...base,

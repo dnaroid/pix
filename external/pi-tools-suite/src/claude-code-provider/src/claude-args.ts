@@ -12,6 +12,7 @@ import type { NativeImageAttachment, PreparedRequest } from "./types.ts";
 // sources; initialization would then report it and fail the isolation check.
 // 2.1.296 also loads plugin-authoring. Disable both its legacy alias and current
 // canonical name without relaxing initialization's empty-plugin requirement.
+// 2.1.322 also includes cc-plugin-privacy in its built-in plugin inventory.
 const SETTINGS = JSON.stringify({
   disableAllHooks: true,
   autoMemoryEnabled: false,
@@ -20,6 +21,7 @@ const SETTINGS = JSON.stringify({
     "agents-md@builtin": false,
     "plugin-authoring@builtin": false,
     "cc-plugin-plugin-authoring@builtin": false,
+    "cc-plugin-privacy@builtin": false,
   },
 });
 export const EMPTY_MCP = JSON.stringify({ mcpServers: {} });
