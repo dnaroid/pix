@@ -10,13 +10,14 @@ suite setting `pruneHistoricalThinking` (default `false`;
 - Runs in Pi's `context` event before every model call, so it applies to all
   providers (zai, OpenAI, Gemini, Anthropic, Claude Code, ...).
 - Removes `thinking` blocks from assistant messages before the turn boundary:
-  the latest `user` message not directly preceded by a `toolResult`. A user
-  message after a tool result is a steer inside a running tool loop, so that
-  loop keeps its thinking (required by Anthropic for tool continuation).
+  the start of the latest consecutive `user` group not directly preceded by a
+  `toolResult`. An entire group after a tool result is treated as steering inside
+  a running tool loop, so multiple queued steers keep that loop's thinking.
 - Assistant messages left empty are dropped; tool calls, results and text stay.
 - Input messages are not mutated; unchanged messages are reused.
-- The rule is deterministic, so the history prefix is byte-stable within a turn
-  and stays cacheable. Enabling the setting rewrites the cache once.
+- The rule is deterministic for an unchanged history prefix within a turn.
+  Pruning at later turn boundaries can change the prefix again; cross-turn cache
+  hits and WebSocket continuation are not guaranteed.
 - Only the model request changes. The session file and Desktop transcript keep
   all thinking; disabling the setting restores full replay.
 - Config is read per request (`ensureUserConfig: false`); a read failure logs one
@@ -25,7 +26,16 @@ suite setting `pruneHistoricalThinking` (default `false`;
 
 ## Regression coverage
 
-Coverage includes pruning, preservation of the current tool loop, steer
-boundaries, prefix stability and no-op cases.
+Coverage includes pruning, preservation of signed active thinking through batches
+of steers, a real new turn after the loop finishes, missing-boundary no-op cases,
+prefix stability and input immutability.
+
+## Experimental limitations
+
+The filter still removes entire historical thinking blocks for every provider,
+including signatures or encrypted reasoning stored on those blocks. The steering
+fix does not establish provider-contract compatibility or measured cost savings.
+Provider-aware preservation is not implemented yet. Disabling the setting
+restores full replay; the steering fix itself does not change configuration.
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"864ddc617b554fb8c37f9703ebfabfb2594f2c454492ce96446e1573fc2d29ac","checkedAt":"2026-10-30T23:14:53.135Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":51,"reportLanguage":"ru"} -->

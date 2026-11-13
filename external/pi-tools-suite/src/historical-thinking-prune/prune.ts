@@ -1,9 +1,9 @@
 /**
  * Provider-neutral removal of thinking from earlier turns.
  *
- * The boundary is the latest user message that starts a turn, meaning one not
- * directly after a tool result. A user message after a tool result is a steer or
- * injected note inside a running tool loop, and providers such as Anthropic
+ * The boundary is the start of the latest consecutive user-message group not
+ * directly after a tool result. A group after a tool result contains steers or
+ * injected notes inside a running tool loop, and providers such as Anthropic
  * require that loop's thinking to stay. The rule depends only on the message
  * list, so an unchanged history prefix serializes identically on every request
  * of a turn and stays cacheable.
@@ -20,6 +20,8 @@ export interface HistoricalThinkingPruneResult<T> {
 export function turnBoundaryIndex(messages: readonly Message[]): number {
 	for (let index = messages.length - 1; index >= 0; index--) {
 		if (messages[index]?.role !== "user") continue;
+		// Inspect the whole batch: later steers follow users, not the tool result.
+		while (index > 0 && messages[index - 1]?.role === "user") index--;
 		if (messages[index - 1]?.role === "toolResult") continue;
 		return index;
 	}

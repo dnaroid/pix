@@ -49,6 +49,39 @@ describe("historical thinking pruning", () => {
 		expect(JSON.stringify(second.slice(0, first.length))).toBe(JSON.stringify(first));
 	});
 
+	test("keeps signed active reasoning and the prefix across a batch of steers", () => {
+		const input = history();
+		input[6].content = [{ type: "thinking", thinking: "current-loop", thinkingSignature: "active-signature" }, { type: "toolCall", id: "c2", name: "read", arguments: {} }];
+		const snapshot = structuredClone(input);
+		const prefix = pruneHistoricalThinking(input).messages;
+		for (let count = 1; count <= 3; count++) {
+			const steered = [...input, ...Array.from({ length: count }, (_, i) => user(`steer ${i}`, 9 + i))];
+			expect(turnBoundaryIndex(steered)).toBe(5);
+			const output = pruneHistoricalThinking(steered);
+			expect(output.prunedBlocks).toBe(3);
+			expect(output.messages.slice(0, prefix.length)).toEqual(prefix);
+			expect(output.messages[5]).toBe(input[6]);
+			expect(output.messages.slice(prefix.length)).toEqual(steered.slice(input.length));
+		}
+		expect(input).toEqual(snapshot);
+	});
+
+	test("recognizes a real new turn after a steered loop finishes", () => {
+		const input = [...history(), user("steer 1", 9), user("steer 2", 10),
+			assistant([{ type: "text", text: "done" }], 11), user("new task", 12), user("detail", 13)];
+		expect(turnBoundaryIndex(input)).toBe(11);
+		expect(pruneHistoricalThinking(input).prunedBlocks).toBe(4);
+	});
+
+	test("does not invent a turn boundary for tool results followed only by steers", () => {
+		const input = history().slice(6);
+		input.push(user("steer 1", 9), user("steer 2", 10));
+		expect(turnBoundaryIndex(input)).toBe(-1);
+		expect(pruneHistoricalThinking(input).messages).toEqual(input);
+		expect(pruneHistoricalThinking(input).prunedBlocks).toBe(0);
+		expect(turnBoundaryIndex([user("task", 1), user("detail", 2)])).toBe(0);
+	});
+
 	test("is a no-op without an earlier turn or without thinking", () => {
 		const single = [user("only", 1), assistant([{ type: "thinking", thinking: "t" }, { type: "text", text: "a" }], 2)];
 		expect(pruneHistoricalThinking(single).prunedBlocks).toBe(0);
