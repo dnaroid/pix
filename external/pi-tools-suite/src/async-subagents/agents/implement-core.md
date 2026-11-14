@@ -1,7 +1,7 @@
 ---
 description: Bounded implementation when the parent identifies a concrete capability gap, or the user explicitly requests delegated code/docs/tests/UI changes. Not an automatic choice for large or parallel tasks; architecture advice belongs to oracle, prescribed transformations to mechanical.
 icon: code
-models: [openai-codex/gpt-6.1-sol]
+models: [openai-codex/gpt-6.1-sol, pi-claude-code-provider/sonnet]
 thinking: high
 tools: [read, grep, find, ls, bash, edit, write, ast_grep]
 ---

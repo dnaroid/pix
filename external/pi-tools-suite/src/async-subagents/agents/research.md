@@ -1,7 +1,7 @@
 ---
 description: Read-only evidence gathering - trace behavior, investigate a named uncertainty, or answer a focused review/readiness question. Return findings with paths, not raw source. Use oracle for justified strong opinions or complex architectural review, verify for checks; changes remain parent-owned.
 icon: search
-models: [openai-codex/gpt-6-luna, zai/glm-5.3-flash]
+models: [openai-codex/gpt-6-luna, pi-claude-code-provider/haiku, zai/glm-5.3-flash]
 thinking: medium
 tools: [read, grep, ast_grep, web_search, web_fetch]
 ---

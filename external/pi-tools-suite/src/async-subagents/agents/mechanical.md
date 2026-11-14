@@ -1,7 +1,7 @@
 ---
 description: Prescribed behavior-preserving transformations with exact scope and deterministic checks, large enough to justify briefing and verification overhead. Not a few replacements, migrations, interface redesign, ambiguous bugs, new behavior, or changes to regression-test meaning.
 icon: code
-models: [zai/glm-5.3]
+models: [openai-codex/gpt-6-luna, pi-claude-code-provider/haiku, zai/glm-5.3]
 thinking: medium
 tools: [read, grep, find, ls, bash, edit, write, ast_grep]
 ---

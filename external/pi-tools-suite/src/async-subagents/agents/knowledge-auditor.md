@@ -1,7 +1,7 @@
 ---
 description: Docs-only specialist run before task completion to update documentation against the final task changes. Fix small, proven drift; return substantial or ambiguous discrepancies to the parent. No knowledge dirty-state tracking or review receipts.
 icon: book-open
-models: [openai-codex/gpt-6-luna, zai/glm-5.3-flash]
+models: [openai-codex/gpt-6-luna, pi-claude-code-provider/haiku, zai/glm-5.3-flash]
 thinking: low
 tools: [read, grep, bash, edit, write]
 timeoutMs: 1200000

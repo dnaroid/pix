@@ -1,7 +1,7 @@
 ---
 description: Use for real UI QA across browsers, terminal/TUI apps, desktop GUIs and explicitly selected Android emulators/devices - reproduce user-visible bugs and verify fixes with concrete postconditions and inspectable evidence.
 icon: bug
-models: [openai-codex/gpt-6-luna, zai/glm-5.3-flash, pi-claude-code-provider/haiku]
+models: [openai-codex/gpt-6-luna, pi-claude-code-provider/haiku, zai/glm-5.3-flash]
 thinking: medium
 timeoutMs: 600000
 tools: [read, grep, bash]
