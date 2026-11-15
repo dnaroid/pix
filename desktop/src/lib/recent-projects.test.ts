@@ -13,7 +13,7 @@ import {
 } from "./recent-projects";
 
 describe("recent projects", () => {
-  it("puts the selected project first, deduplicates paths, and keeps at most 20", () => {
+  it("puts the selected project first, deduplicates paths, and keeps at most 100", () => {
     const paths = Array.from({ length: MAX_RECENT_PROJECTS + 5 }, (_, index) => `/projects/project-${index}`);
     expect(buildRecentProjects(paths, "/projects/project-4")).toEqual([
       "/projects/project-4",

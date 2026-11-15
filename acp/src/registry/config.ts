@@ -67,6 +67,8 @@ export async function saveProjectKeyConfig(cwd: string, projectKey: string | und
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 	}
+	// Nothing to delete from a document without an override.
+	if (projectKey === undefined && !/"projectKey"/.test(source)) return;
 	const edits = modify(source, ["resourceRegistry", "projectKey"], projectKey, {
 		formattingOptions: { insertSpaces: true, tabSize: 2 },
 	});

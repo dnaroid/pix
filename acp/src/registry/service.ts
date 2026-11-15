@@ -10,6 +10,7 @@ import { ensureRegistryCache, resolveProjectKey, resourceRevision } from "./git.
 import { editResourceTags } from "./metadata.js";
 import { SKILL_FILE, type RegistryUiSnapshot } from "./model.js";
 import { pathExists, projectResourcePath, registryResourcePath, validateName } from "./paths.js";
+import { keepProjectKey, migrateProjectKey } from "./project-key-migration.js";
 import { pullProjectState, pushProjectState } from "./projects.js";
 import { installResource, makeResourceLocal, pushResource, removeResource, uninstallResource, updateResource } from "./resources.js";
 import { collectRegistryUiSnapshot } from "./status.js";
@@ -90,6 +91,8 @@ export class DesktopRegistryService {
 				switch (request.action) {
 					case "set-agent-model": await setAgentModelOverride(ctx.cwd, request.name, request.model); break;
 					case "reset-agent-model": await setAgentModelOverride(ctx.cwd, request.name); break;
+					case "keep-project-key": await keepProjectKey(ctx); break;
+					case "migrate-project-key": await migrateProjectKey(this.executor, ctx); break;
 					case "push-project-resources": await pushProjectResourceChanges(this.executor, ctx); break;
 					case "install": await installResource(this.executor, ctx, request.type, request.name); break;
 					case "update": await updateResource(this.executor, ctx, request.type, request.name); break;

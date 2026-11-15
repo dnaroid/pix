@@ -64,6 +64,7 @@
   let menuRoot = $state<HTMLElement | null>(null);
 
   const projectItems = $derived((snapshot?.items ?? []).filter((item) => item.type === "project"));
+  const keyMismatch = $derived(projectItems.some((item) => item.status === "registry-changed"));
   const projectKeyRequired = $derived(Boolean(snapshot?.projectIssue && !snapshot?.projectKey));
   const projectSync = $derived(registryProjectSyncPresentation(projectItems, backgroundSync, snapshot?.error, projectKeyRequired));
   // Routine local writes sync automatically; only genuine review states expand the row.
@@ -180,6 +181,27 @@
         <span class="block truncate text-xs font-semibold text-foreground">{projectSync.title}</span>
         <span class="block truncate text-xs text-muted-foreground">{projectSync.description}</span>
       </span>
+      {#if keyMismatch}
+        <button
+          class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-tool-warning/30 bg-panel-strong px-2 text-xs font-medium text-foreground hover:bg-panel-hover disabled:opacity-40"
+          type="button"
+          disabled={remoteBusy}
+          title="Keep the key your published project state already uses"
+          onclick={() => onAction({ action: "keep-project-key" }, "keep-project-key")}
+        >
+          <KeyRound class="h-3 w-3" aria-hidden="true" />
+          Keep current key
+        </button>
+        <button
+          class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-tool-warning/30 bg-panel-strong px-2 text-xs font-medium text-foreground hover:bg-panel-hover disabled:opacity-40"
+          type="button"
+          disabled={remoteBusy}
+          title="Move published project state to the key derived from Git origin"
+          onclick={() => onAction({ action: "migrate-project-key" }, "migrate-project-key")}
+        >
+          Migrate to origin key
+        </button>
+      {/if}
       {#if projectKeyRequired}
         <button
           class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-tool-warning/30 bg-panel-strong px-2 text-xs font-medium text-foreground hover:bg-panel-hover disabled:opacity-40"

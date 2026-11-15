@@ -197,7 +197,15 @@ JSONC/task overlay import or fallback.
     appears, its derived key takes precedence automatically, while the stored
     fallback remains available if `origin` is removed. Existing publications
     under a previous key are not silently moved or overwritten: provenance
-    mismatch continues to require review. Missing `.pi` is not created by
+    mismatch continues to require review. The project-sync row then offers two
+    actions (ACP `keep-project-key` / `migrate-project-key`, implemented in
+    `acp/src/registry/project-key-migration.ts`): **Keep current key** saves the
+    key already tracked in provenance as `resourceRegistry.projectKey`;
+    **Migrate to origin key** renames `projects/<old>` to `projects/<origin key>`
+    in the registry (one commit, pushed), rewrites provenance keys/revisions
+    (hashes unchanged), and clears the explicit override. Migration refuses when
+    the target key already has registry state or tracked keys are ambiguous.
+    Missing `.pi` is not created by
     catalog refresh and does not generate a project-key warning; reads remain
     side-effect free, while Desktop writes lazily create only their required
     `.pi` storage. Full project-state scaffold initialization remains optional.

@@ -45,7 +45,7 @@ without blocking desktop interactions.
   than exposing an I-beam/text-selection cursor over its abbreviation.
 - The `Project` sidebar view starts with a compact project switcher above the file
   explorer. It shows the active project, keeps an explicit chevron affordance at
-  the right edge of the row, and opens an inline menu of at most 20 recent projects.
+  the right edge of the row, and opens an inline menu of at most 100 recent projects.
   The switcher measures the rendered fixed controls/padding/gaps and reports a
   dynamic minimum width to the sidebar. The sidebar uses that value both for drag
   clamping and as its CSS minimum, so resizing cannot clip the project name or chevron.

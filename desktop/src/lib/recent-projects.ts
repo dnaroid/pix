@@ -1,7 +1,7 @@
 export const RECENT_PROJECTS_STORAGE_KEY = "pix.desktop.recentProjects";
 export const WORKSPACE_STORAGE_KEY = "pix.desktop.workspace";
 export const WORKSPACE_QUERY_PARAM = "workspace";
-export const MAX_RECENT_PROJECTS = 20;
+export const MAX_RECENT_PROJECTS = 100;
 
 export function projectName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? "workspace";

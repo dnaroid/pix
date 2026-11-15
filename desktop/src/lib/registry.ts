@@ -76,7 +76,7 @@ export type RegistryDiffState =
 export type RegistryActionRequest =
   | { readonly action: "set-agent-model"; readonly type: "agent"; readonly name: string; readonly model: string }
   | { readonly action: "reset-agent-model"; readonly type: "agent"; readonly name: string }
-  | { readonly action: "refresh" | "configure" | "project-key" | "push-project-resources" }
+  | { readonly action: "refresh" | "configure" | "project-key" | "push-project-resources" | "keep-project-key" | "migrate-project-key" }
   | {
       readonly action: "install" | "update" | "push" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope";
       readonly type: "skill" | "agent";

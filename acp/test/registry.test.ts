@@ -969,6 +969,42 @@ test("switching to Git origin never silently overwrites previously published fal
 	assert.equal(git(root, ["--git-dir", remote, "show", `main:projects/${previousKey}/workspace.jsonc`]), '{"local":true}');
 });
 
+async function publishedThenOrigin(): Promise<{ root: string; project: string; remote: string; previousKey: string; h: ReturnType<typeof harness> }> {
+	const root = tempRoot();
+	isolate(root);
+	const project = path.join(root, "project");
+	fs.mkdirSync(path.join(project, ".pi"), { recursive: true });
+	fs.writeFileSync(path.join(project, ".pi", "workspace.jsonc"), '{"local":true}\n');
+	const { remote } = createRegistry(root);
+	await saveRegistryConfig(remote, "main");
+	const h = harness(project);
+	const published = await act(project, { action: "push-project", scope: "workspace" }, h.ctx);
+	assert.equal(published.error, undefined);
+	git(project, ["init"]);
+	git(project, ["remote", "add", "origin", "https://github.com/example/new-name.git"]);
+	const refreshed = await act(project, { action: "refresh" }, h.ctx);
+	assert.equal(item(refreshed, "project:workspace").status, "registry-changed");
+	return { root, project, remote, previousKey: published.projectKey!, h };
+}
+
+test("keep-project-key pins the published key so sync resumes", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
+	const { project, previousKey, h } = await publishedThenOrigin();
+	const kept = await act(project, { action: "keep-project-key" }, h.ctx);
+	assert.equal(kept.error, undefined);
+	assert.equal(kept.projectKey, previousKey);
+	assert.equal(item(kept, "project:workspace").status, "up-to-date");
+});
+
+test("migrate-project-key moves published state to the Git origin key", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
+	const { root, project, remote, previousKey, h } = await publishedThenOrigin();
+	const migrated = await act(project, { action: "migrate-project-key" }, h.ctx);
+	assert.equal(migrated.error, undefined);
+	assert.equal(migrated.projectKey, "github.com__example__new-name");
+	assert.equal(item(migrated, "project:workspace").status, "up-to-date");
+	assert.equal(git(root, ["--git-dir", remote, "show", "main:projects/github.com__example__new-name/workspace.jsonc"]), '{"local":true}');
+	assert.throws(() => git(root, ["--git-dir", remote, "show", `main:projects/${previousKey}/workspace.jsonc`]));
+});
+
 test("interactive remote setup prompts for remote and branch and cancelling saves nothing", async () => {
 	const root = tempRoot();
 	isolate(root);
