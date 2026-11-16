@@ -62,7 +62,7 @@ colors in both light and dark mode.
 - A successful `continue` response includes the final ACP `stopReason` from the resumed run after it settles, alongside the resulting agent-control state. Desktop uses that settled reason for the same completion/error classification as a normal prompt; `state` and `pause` responses do not need a stop reason.
 - ACP publishes session-scoped state changes over the existing private `pix/session-state` notification on the `agent-control` channel.
 - ACP republishes active-run state during refresh, using `running` for an otherwise-idle active run except while that run is settling. Busy prompt rejection and load/resume refresh also republish state before returning or propagating the error, allowing Desktop to recover lost run ownership from protocol state rather than error text or polling.
-- ACP and Desktop both recognize the pause-ready `running` state. See [0026 — Pause-ready adopted continuations](../../decisions/0026-pause-ready-adopted-continuations.md).
+- ACP and Desktop both recognize the pause-ready `running` state. See [0075 — Pause-ready adopted continuations](../../decisions/0075-pause-ready-adopted-continuations.md).
 - The default ACP Pi entry is a thin Pix RPC shim around the pinned Pi RPC runtime. It intercepts private control messages before they can enter the transcript and implements the turn-boundary pause algorithm by wrapping `Agent.finishTurn` and using `Agent.continue()`. Existing explicit `continue` decisions remain authoritative, so a pause request stays pending until the next boundary that can be resumed through `Agent.continue()`.
 - Explicit `PIX_ACP_PI_ENTRY` overrides remain supported, but a replacement entry must implement the Pix control shim for Desktop pause/continue to work.
 

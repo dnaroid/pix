@@ -99,10 +99,8 @@ errors, not invent or approve decisions.
 - [0024 — Native Desktop close warnings](0024-desktop-close-warning.md)
 - [0025 — Sparse read-only sidebar health](0025-sidebar-health-polling.md)
 - [0026 — Cross-instance Project Explorer clipboard](0026-cross-instance-file-clipboard.md)
-- [0026 — Pause-ready adopted continuations](0026-pause-ready-adopted-continuations.md)
 - [0027 — Cause-specific sidebar quick actions](0027-sidebar-reason-actions.md)
 - [0028 — Native Project Explorer context menu](0028-native-explorer-context-menu.md)
-- [0028 — Scoped file-operation reservations](0028-scoped-file-operation-reservations.md)
 
 - [0033 — Assistant prompt hygiene](0033-assistant-prompt-hygiene.md)
 - [0034 — Bounded, opt-in Heads up observer](0034-heads-up-observer.md)
@@ -117,6 +115,8 @@ errors, not invent or approve decisions.
 - [0055 — Temporary, isolated BTW side chat](0055-temporary-btw-side-chat.md)
 - [0056 — Monitoring-only LSP panels](0056-lsp-monitoring.md)
 - [0057 — Canonical LSP reuse and bounded idle retention](0057-lsp-reuse-idle-cleanup.md)
+- [0075 — Pause-ready adopted continuations](0075-pause-ready-adopted-continuations.md)
+- [0076 — Scoped file-operation reservations](0076-scoped-file-operation-reservations.md)
 
 Workflow contract: [repository knowledge workflow](../search/repo-knowledge-agent-workflow.md).
 

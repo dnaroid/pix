@@ -63,7 +63,6 @@ Fixed-path documents and fixture/upstream exclusions are accounted for in the [m
 | [0014 — Transactional conversation workspace rebinding](../decisions/0014-conversation-workspace-rebinding.md) | `decisions` | superseded |
 | [0015 — Canonical disposable harness output](../decisions/0015-harness-artifact-storage.md) | `decisions` | accepted |
 | [0016 — Native notification activation routing](../decisions/0016-native-notification-activation.md) | `decisions` | accepted |
-| [0016 — Retain Markdown image DOM during streaming](../decisions/0016-streaming-image-dom-retention.md) | `decisions` | accepted |
 | [0017 — Brainstorm v4: local protocol storage, quorum and ledger history](../decisions/0017-brainstorm-v4-protocol-storage.md) | `decisions` | accepted |
 | [0018 — Identity-only Desktop message actions](../decisions/0018-desktop-message-action-identity.md) | `decisions` | accepted |
 | [0019 — Desktop councils own persistent participant sessions](../decisions/0019-desktop-persistent-council-sessions.md) | `decisions` | accepted |
@@ -74,10 +73,8 @@ Fixed-path documents and fixture/upstream exclusions are accounted for in the [m
 | [0024 — Native Desktop close warnings](../decisions/0024-desktop-close-warning.md) | `decisions` | accepted |
 | [0025 — Sparse read-only sidebar health](../decisions/0025-sidebar-health-polling.md) | `decisions` | accepted |
 | [0026 — Cross-instance Project Explorer clipboard](../decisions/0026-cross-instance-file-clipboard.md) | `decisions` | accepted |
-| [0026 — Pause-ready adopted continuations](../decisions/0026-pause-ready-adopted-continuations.md) | `decisions` | accepted |
 | [0027 — Cause-specific sidebar quick actions](../decisions/0027-sidebar-reason-actions.md) | `decisions` | accepted |
 | [0028 — Native Project Explorer context menu](../decisions/0028-native-explorer-context-menu.md) | `decisions` | accepted |
-| [0028 — Scoped file-operation reservations](../decisions/0028-scoped-file-operation-reservations.md) | `decisions` | accepted |
 | [0029 — Current-display-first window tiling](../decisions/0029-window-tiling.md) | `decisions` | accepted |
 | [0030 — Default-on suite codemode alongside direct tools](../decisions/0030-suite-codemode.md) | `decisions` | accepted |
 | [0031 — Single-channel subagent completion delivery](../decisions/0031-subagent-completion-delivery.md) | `decisions` | superseded |
@@ -121,6 +118,9 @@ Fixed-path documents and fixture/upstream exclusions are accounted for in the [m
 | [0070 — Source-isolated search indexes and bounded uncertain recovery](../decisions/0070-search-source-work-recovery.md) | `decisions` | accepted |
 | [0071 — Brainstorm council as a skill on ordinary sub-agents](../decisions/0071-brainstorm-skill-on-subagents.md) | `decisions` | accepted |
 | [0072 — Session-native sub-agents without run directories](../decisions/0072-session-native-subagents.md) | `decisions` | accepted |
+| [0074 — Retain Markdown image DOM during streaming](../decisions/0074-streaming-image-dom-retention.md) | `decisions` | accepted |
+| [0075 — Pause-ready adopted continuations](../decisions/0075-pause-ready-adopted-continuations.md) | `decisions` | accepted |
+| [0076 — Scoped file-operation reservations](../decisions/0076-scoped-file-operation-reservations.md) | `decisions` | accepted |
 | [Decision log](../decisions/README.md) | `decisions` | decision-log guidance/template |
 | [NNNN — Decision title](../decisions/TEMPLATE.md) | `decisions` | proposed \| accepted \| superseded \| withdrawn |
 | [Desktop agent pause and continuation](../desktop/conversations/desktop-agent-pause.md) | `desktop/conversations` | Active implemented contract. |

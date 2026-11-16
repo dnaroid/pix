@@ -1772,13 +1772,13 @@
   },
   {
     "old": "docs/decisions/0016-streaming-image-dom-retention.md",
-    "new": "wiki/decisions/0016-streaming-image-dom-retention.md",
-    "title": "0016 — Retain Markdown image DOM during streaming",
+    "new": "wiki/decisions/0074-streaming-image-dom-retention.md",
+    "title": "0074 — Retain Markdown image DOM during streaming",
     "disposition": "moved",
     "sourceSha256": "9bd81334f9cbf86cfa0f336cfb65d6312f662d64aa35ba0af69e828646ac1e3a",
     "migratedSha256": "348f5704d89cb2e38e5b578b9c08edc68578c0dd1de81e086626d9c740a72a99",
     "topic": "decisions",
-    "purpose": "0016 — Retain Markdown image DOM during streaming",
+    "purpose": "0074 — Retain Markdown image DOM during streaming",
     "lifecycle": "accepted"
   },
   {
@@ -1893,13 +1893,13 @@
   },
   {
     "old": "docs/decisions/0026-pause-ready-adopted-continuations.md",
-    "new": "wiki/decisions/0026-pause-ready-adopted-continuations.md",
-    "title": "0026 — Pause-ready adopted continuations",
+    "new": "wiki/decisions/0075-pause-ready-adopted-continuations.md",
+    "title": "0075 — Pause-ready adopted continuations",
     "disposition": "moved",
     "sourceSha256": "771d5dea1f988d77492b72ed8912dbe7c7600b891dc380fda3f40316ed8403db",
     "migratedSha256": "6a35d6fb0ad9cb9f223a8b9f73ca1fa53db376ac3f90219e402dff1956ad1841",
     "topic": "decisions",
-    "purpose": "0026 — Pause-ready adopted continuations",
+    "purpose": "0075 — Pause-ready adopted continuations",
     "lifecycle": "accepted"
   },
   {
@@ -1926,13 +1926,13 @@
   },
   {
     "old": "docs/decisions/0028-scoped-file-operation-reservations.md",
-    "new": "wiki/decisions/0028-scoped-file-operation-reservations.md",
-    "title": "0028 — Scoped file-operation reservations",
+    "new": "wiki/decisions/0076-scoped-file-operation-reservations.md",
+    "title": "0076 — Scoped file-operation reservations",
     "disposition": "moved",
     "sourceSha256": "b44c7451bee4ed6965cda9d75048cb2474cb28d35ec24a42cc747dc58efe2c8a",
     "migratedSha256": "2966d34a589fc8f28193eb3c7dc7236b34d046b876706fbfd1b6cfb4266d3523",
     "topic": "decisions",
-    "purpose": "0028 — Scoped file-operation reservations",
+    "purpose": "0076 — Scoped file-operation reservations",
     "lifecycle": "accepted"
   },
   {

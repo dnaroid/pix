@@ -200,7 +200,7 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   (scope, path and caption); duplicate occurrences remain distinct. Removed or
   changed previews are not resurrected, and teardown releases retained nodes.
   Videos and remote images are outside this retention policy.
-  See [image retention decision](../../decisions/0016-streaming-image-dom-retention.md).
+  See [image retention decision](../../decisions/0074-streaming-image-dom-retention.md).
 - Media path resolution is cached per rendered Markdown block (shared by all its
   segments, so one file resolves once) and released only when its last segment
   unmounts. Only successful resolutions are cached: a missing or failed

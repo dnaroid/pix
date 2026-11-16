@@ -1,4 +1,4 @@
-# 0026 — Pause-ready adopted continuations
+# 0075 — Pause-ready adopted continuations
 
 - Status: accepted
 - Recorded: 2026-10-03

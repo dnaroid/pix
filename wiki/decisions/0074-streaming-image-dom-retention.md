@@ -1,4 +1,4 @@
-# 0016 — Retain Markdown image DOM during streaming
+# 0074 — Retain Markdown image DOM during streaming
 
 - Status: accepted
 - Recorded: 2026-10-03

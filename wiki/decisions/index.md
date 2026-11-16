@@ -22,7 +22,6 @@ Why consequential choices were made. Status and replacement metadata govern each
 - [0014 — Transactional conversation workspace rebinding](0014-conversation-workspace-rebinding.md) — superseded
 - [0015 — Canonical disposable harness output](0015-harness-artifact-storage.md) — accepted
 - [0016 — Native notification activation routing](0016-native-notification-activation.md) — accepted
-- [0016 — Retain Markdown image DOM during streaming](0016-streaming-image-dom-retention.md) — accepted
 - [0017 — Brainstorm v4: local protocol storage, quorum and ledger history](0017-brainstorm-v4-protocol-storage.md) — accepted
 - [0018 — Identity-only Desktop message actions](0018-desktop-message-action-identity.md) — accepted
 - [0019 — Desktop councils own persistent participant sessions](0019-desktop-persistent-council-sessions.md) — accepted
@@ -33,10 +32,8 @@ Why consequential choices were made. Status and replacement metadata govern each
 - [0024 — Native Desktop close warnings](0024-desktop-close-warning.md) — accepted
 - [0025 — Sparse read-only sidebar health](0025-sidebar-health-polling.md) — accepted
 - [0026 — Cross-instance Project Explorer clipboard](0026-cross-instance-file-clipboard.md) — accepted
-- [0026 — Pause-ready adopted continuations](0026-pause-ready-adopted-continuations.md) — accepted
 - [0027 — Cause-specific sidebar quick actions](0027-sidebar-reason-actions.md) — accepted
 - [0028 — Native Project Explorer context menu](0028-native-explorer-context-menu.md) — accepted
-- [0028 — Scoped file-operation reservations](0028-scoped-file-operation-reservations.md) — accepted
 - [0029 — Current-display-first window tiling](0029-window-tiling.md) — accepted
 - [0030 — Default-on suite codemode alongside direct tools](0030-suite-codemode.md) — accepted
 - [0031 — Single-channel subagent completion delivery](0031-subagent-completion-delivery.md) — superseded
@@ -81,6 +78,9 @@ Why consequential choices were made. Status and replacement metadata govern each
 - [0071 — Brainstorm council as a skill on ordinary sub-agents](0071-brainstorm-skill-on-subagents.md) — accepted
 - [0072 — Session-native sub-agents without run directories](0072-session-native-subagents.md) — accepted
 - [0073 — Telegram bridge as an in-session extension with an elected broker](0073-telegram-session-bridge.md) — accepted
+- [0074 — Retain Markdown image DOM during streaming](0074-streaming-image-dom-retention.md) — accepted
+- [0075 — Pause-ready adopted continuations](0075-pause-ready-adopted-continuations.md) — accepted
+- [0076 — Scoped file-operation reservations](0076-scoped-file-operation-reservations.md) — accepted
 - [Decision log](README.md)
 - [NNNN — Decision title](TEMPLATE.md) — template, not a decision
 

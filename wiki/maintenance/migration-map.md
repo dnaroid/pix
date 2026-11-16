@@ -49,7 +49,7 @@ the migration does not stage or commit the pre-existing working tree.
 | `docs/decisions/0014-conversation-workspace-rebinding.md` | [wiki/decisions/0014-conversation-workspace-rebinding.md](../decisions/0014-conversation-workspace-rebinding.md) | moved |
 | `docs/decisions/0015-harness-artifact-storage.md` | [wiki/decisions/0015-harness-artifact-storage.md](../decisions/0015-harness-artifact-storage.md) | moved |
 | `docs/decisions/0016-native-notification-activation.md` | [wiki/decisions/0016-native-notification-activation.md](../decisions/0016-native-notification-activation.md) | moved |
-| `docs/decisions/0016-streaming-image-dom-retention.md` | [wiki/decisions/0016-streaming-image-dom-retention.md](../decisions/0016-streaming-image-dom-retention.md) | moved |
+| `docs/decisions/0016-streaming-image-dom-retention.md` | [wiki/decisions/0074-streaming-image-dom-retention.md](../decisions/0074-streaming-image-dom-retention.md) | moved |
 | `docs/decisions/0017-brainstorm-v4-protocol-storage.md` | [wiki/decisions/0017-brainstorm-v4-protocol-storage.md](../decisions/0017-brainstorm-v4-protocol-storage.md) | moved |
 | `docs/decisions/0018-desktop-message-action-identity.md` | [wiki/decisions/0018-desktop-message-action-identity.md](../decisions/0018-desktop-message-action-identity.md) | moved |
 | `docs/decisions/0019-desktop-persistent-council-sessions.md` | [wiki/decisions/0019-desktop-persistent-council-sessions.md](../decisions/0019-desktop-persistent-council-sessions.md) | moved |
@@ -60,10 +60,10 @@ the migration does not stage or commit the pre-existing working tree.
 | `docs/decisions/0024-desktop-close-warning.md` | [wiki/decisions/0024-desktop-close-warning.md](../decisions/0024-desktop-close-warning.md) | moved |
 | `docs/decisions/0025-sidebar-health-polling.md` | [wiki/decisions/0025-sidebar-health-polling.md](../decisions/0025-sidebar-health-polling.md) | moved |
 | `docs/decisions/0026-cross-instance-file-clipboard.md` | [wiki/decisions/0026-cross-instance-file-clipboard.md](../decisions/0026-cross-instance-file-clipboard.md) | moved |
-| `docs/decisions/0026-pause-ready-adopted-continuations.md` | [wiki/decisions/0026-pause-ready-adopted-continuations.md](../decisions/0026-pause-ready-adopted-continuations.md) | moved |
+| `docs/decisions/0026-pause-ready-adopted-continuations.md` | [wiki/decisions/0075-pause-ready-adopted-continuations.md](../decisions/0075-pause-ready-adopted-continuations.md) | moved |
 | `docs/decisions/0027-sidebar-reason-actions.md` | [wiki/decisions/0027-sidebar-reason-actions.md](../decisions/0027-sidebar-reason-actions.md) | moved |
 | `docs/decisions/0028-native-explorer-context-menu.md` | [wiki/decisions/0028-native-explorer-context-menu.md](../decisions/0028-native-explorer-context-menu.md) | moved |
-| `docs/decisions/0028-scoped-file-operation-reservations.md` | [wiki/decisions/0028-scoped-file-operation-reservations.md](../decisions/0028-scoped-file-operation-reservations.md) | moved |
+| `docs/decisions/0028-scoped-file-operation-reservations.md` | [wiki/decisions/0076-scoped-file-operation-reservations.md](../decisions/0076-scoped-file-operation-reservations.md) | moved |
 | `docs/decisions/0029-window-tiling.md` | [wiki/decisions/0029-window-tiling.md](../decisions/0029-window-tiling.md) | moved |
 | `docs/decisions/0030-suite-codemode.md` | [wiki/decisions/0030-suite-codemode.md](../decisions/0030-suite-codemode.md) | moved |
 | `docs/decisions/0031-subagent-completion-delivery.md` | [wiki/decisions/0031-subagent-completion-delivery.md](../decisions/0031-subagent-completion-delivery.md) | moved |

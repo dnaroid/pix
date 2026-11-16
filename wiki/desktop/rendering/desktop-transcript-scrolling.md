@@ -65,7 +65,7 @@ Keep long Pix Desktop conversations scrollable from the latest content all the w
 Unchanged project/local Markdown image nodes are restored before lazy hydration
 during streaming, not merely dimension-reserved. Pending work follows retained
 node ownership; removed nodes and destroyed renderers ignore late completion.
-See [image retention decision](../../decisions/0016-streaming-image-dom-retention.md).
+See [image retention decision](../../decisions/0074-streaming-image-dom-retention.md).
 
 ## Verification
 

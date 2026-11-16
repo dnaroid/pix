@@ -1,4 +1,4 @@
-# 0028 — Scoped file-operation reservations
+# 0076 — Scoped file-operation reservations
 
 - Status: accepted
 - Recorded: 2026-10-04

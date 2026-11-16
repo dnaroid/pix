@@ -61,9 +61,11 @@ requirement; changing the runtime and its tests remains implementation work.
 - [Status hover ADR 0037](../decisions/0037-status-bar-hover-details.md) is superseded
   for opening/retention/dismissal, not for all content and chrome choices; see
   [0048](../decisions/0048-status-bar-click-popups.md).
-- Other replacements are recorded in each ADR. Numeric collisions already exist
-  (for example two distinct 0016, 0026 and 0028 records). They are preserved:
-  filenames, not just numeric prefixes, identify a record.
+- Other replacements are recorded in each ADR. Former numeric collisions (two
+  distinct 0016, 0026 and 0028 records from the `docs/decisions` migration)
+  were resolved by renumbering the later record of each pair to 0074, 0075 and
+  0076; the migration map keeps their original `docs/decisions` paths. New
+  records must use the next unused number.
 
 These are documented scope distinctions, not new conflicts to resolve by deleting
 the older rationale. The [archive index](../archive/index.md) points to superseded
