@@ -263,9 +263,9 @@ describe("economy mode", () => {
 		const config = configWith({ economy: true });
 		expect(() => oracle(config, "openai-codex/gpt-6-luna")).toThrow(/economy mode excluded anthropic\/claude-opus-5-5/);
 		const core = resolveAgentTaskConfig({ id: "i", task: "x", subagentType: "implement-core" }, config);
-		expect([core.task.model, ...core.fallbackModels]).toEqual(["openai-codex/gpt-6.1-sol"]);
+		expect([core.task.model, ...core.fallbackModels]).toEqual(["openai-codex/gpt-6.1-sol", "pi-claude-code-provider/sonnet"]);
 		const mechanical = resolveAgentTaskConfig({ id: "m", task: "x", subagentType: "mechanical" }, config);
-		expect([mechanical.task.model, ...mechanical.fallbackModels]).toEqual(["zai/glm-5.3"]);
+		expect([mechanical.task.model, ...mechanical.fallbackModels]).toEqual(["openai-codex/gpt-6-luna", "pi-claude-code-provider/haiku", "zai/glm-5.3"]);
 	});
 
 	test("reports economy as the reason when nothing remains, and hides the oracle", () => {

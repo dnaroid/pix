@@ -40,8 +40,8 @@ describe("role-owned model candidates", () => {
 	test("retains capability-driven core and substantial mechanical coding without a GLM fallback for semantic work", () => {
 		const config = loadSubagentConfig(temp(), {});
 		for (const [role, models] of [
-			["implement-core", ["openai-codex/gpt-6.1-sol"]],
-			["mechanical", ["zai/glm-5.3"]],
+			["implement-core", ["openai-codex/gpt-6.1-sol", "pi-claude-code-provider/sonnet"]],
+			["mechanical", ["openai-codex/gpt-6-luna", "pi-claude-code-provider/haiku", "zai/glm-5.3"]],
 		] as const) {
 			const resolved = resolveAgentTaskConfig(task(role), config, { parentModel: "openai-codex/gpt-6-luna" });
 			expect([resolved.task.model, ...resolved.fallbackModels]).toEqual([...models]);

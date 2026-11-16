@@ -458,9 +458,9 @@ Research only this project.
 			fallbackModels: ["openai-codex/gpt-6-luna"],
 		});
 		for (const [subagentType, model, fallbackModels] of [
-			["research", "openai-codex/gpt-6-luna", ["zai/glm-5.3-flash"]],
-			["implement-core", "openai-codex/gpt-6.1-sol", []],
-			["verify", "openai-codex/gpt-6-luna", ["zai/glm-5.3-flash"]],
+			["research", "openai-codex/gpt-6-luna", ["pi-claude-code-provider/haiku", "zai/glm-5.3-flash"]],
+			["implement-core", "openai-codex/gpt-6.1-sol", ["pi-claude-code-provider/sonnet"]],
+			["verify", "openai-codex/gpt-6-luna", ["pi-claude-code-provider/haiku", "zai/glm-5.3-flash"]],
 		] as const) {
 			const role = resolveAgentTaskConfig({ id: subagentType, task: subagentType, subagentType }, config);
 			expect(role.task.model).toBe(model);
@@ -475,7 +475,7 @@ Research only this project.
 		expect(resolved.task.model).toBe("openai-codex/gpt-6-luna");
 		expect(resolved.task.subagentType).toBe("ui-qa");
 		expect(resolved.task.thinking).toBe("medium");
-		expect(resolved.fallbackModels).toEqual(["zai/glm-5.3-flash", "pi-claude-code-provider/haiku"]);
+		expect(resolved.fallbackModels).toEqual(["pi-claude-code-provider/haiku", "zai/glm-5.3-flash"]);
 		expect(resolved.task.tools).toEqual(["read", "grep", "bash"]);
 		expect(resolved.timeoutMs).toBe(600_000);
 		expect(fs.existsSync(runner)).toBe(true);

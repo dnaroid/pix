@@ -67,7 +67,7 @@
     {#if sleepPosition !== null}
       <span class="absolute -top-1 z-[5] h-[calc(100%+8px)] w-0 text-tool-agent" style={`left: clamp(5px, ${sleepPosition}%, calc(100% - 5px))`} data-weekly-sleep-marker>
         <span class="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-tool-agent ring-1 ring-popover"></span>
-        <span class="absolute -top-2 left-1/2 -translate-x-1/2 whitespace-nowrap bg-popover px-0.5 text-[9px] leading-none tabular-nums">+{sleepDurationHours}h</span>
+        <span class="absolute -top-2 left-1/2 -translate-x-1/2 whitespace-nowrap bg-popover px-0.5 text-xs leading-none tabular-nums">+{sleepDurationHours}h</span>
       </span>
     {/if}
     {#if timeline}

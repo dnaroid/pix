@@ -118,7 +118,10 @@ fn relocation_moves_sessions_rewrites_headers_and_preserves_times() {
     assert!(report.conflicts.is_empty());
     let mut skipped = report.skipped.clone();
     skipped.sort();
-    assert_eq!(skipped, vec!["2026_a.jsonl.bak".to_owned(), "2026_b.jsonl".to_owned()]);
+    assert_eq!(
+        skipped,
+        vec!["2026_a.jsonl.bak".to_owned(), "2026_b.jsonl".to_owned()]
+    );
     assert!(report.tab_snapshot_moved);
     assert!(source_dir.join("2026_b.jsonl").exists());
     assert!(!tabs_path.exists());
@@ -174,7 +177,10 @@ fn relocation_never_overwrites_and_refuses_existing_source() {
         fs::read_to_string(target_dir.join("same.jsonl")).unwrap(),
         "existing"
     );
-    assert!(source_dir.join("same.jsonl").exists(), "conflict stays at source");
+    assert!(
+        source_dir.join("same.jsonl").exists(),
+        "conflict stays at source"
+    );
     assert_eq!(
         fs::read_to_string(target_dir.join("unique.jsonl")).unwrap(),
         header(to_text)
@@ -189,9 +195,16 @@ fn session_map_records_keep_ids_and_follow_moved_files() {
         {"sessionId":"keep","piSessionPath":"/s/old/a.jsonl","cwd":"/p/old","piSessionId":"x","updatedAt":"t"},
         {"sessionId":"other","piSessionPath":"/s/old/b.jsonl","cwd":"/p/elsewhere","piSessionId":"y","updatedAt":"t"}
     ]}).to_string()).unwrap();
-    let moved = vec![(PathBuf::from("/s/old/a.jsonl"), PathBuf::from("/s/new/a.jsonl"))];
-    assert_eq!(relocate_session_map(&map, "/p/old", "/p/new", &moved).unwrap(), 1);
-    let value: serde_json::Value = serde_json::from_str(&fs::read_to_string(&map).unwrap()).unwrap();
+    let moved = vec![(
+        PathBuf::from("/s/old/a.jsonl"),
+        PathBuf::from("/s/new/a.jsonl"),
+    )];
+    assert_eq!(
+        relocate_session_map(&map, "/p/old", "/p/new", &moved).unwrap(),
+        1
+    );
+    let value: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&map).unwrap()).unwrap();
     assert_eq!(value["sessions"][0]["sessionId"], "keep");
     assert_eq!(value["sessions"][0]["piSessionPath"], "/s/new/a.jsonl");
     assert_eq!(value["sessions"][0]["cwd"], "/p/new");

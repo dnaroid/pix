@@ -73,7 +73,12 @@ pub(crate) fn read_or_create_identity(root: &Path) -> Result<Option<String>, Str
         Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
         Ok(_) => return Ok(None),
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(format!("failed to inspect {}: {error}", directory.display())),
+        Err(error) => {
+            return Err(format!(
+                "failed to inspect {}: {error}",
+                directory.display()
+            ))
+        }
     }
     let path = directory.join(PROJECT_ID_FILE);
     if let Some(id) = read_identity(&path)? {
@@ -139,7 +144,10 @@ pub(crate) fn relocate_state(
             from.display()
         ));
     }
-    if !fs::metadata(&to).map(|metadata| metadata.is_dir()).unwrap_or(false) {
+    if !fs::metadata(&to)
+        .map(|metadata| metadata.is_dir())
+        .unwrap_or(false)
+    {
         return Err(format!("{} is not a folder", to.display()));
     }
     let from_text = utf8(&from)?;
@@ -150,7 +158,9 @@ pub(crate) fn relocate_state(
         return Err("both folders map to the same Pi session directory".into());
     }
 
-    let _guard = RELOCATION.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = RELOCATION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut report = RelocationReport::default();
     let mut moved_paths: Vec<(PathBuf, PathBuf)> = Vec::new();
     if is_real_directory(&source_dir) {
@@ -162,7 +172,11 @@ pub(crate) fn relocate_state(
             let entry = entry.map_err(|error| error.to_string())?;
             let name = entry.file_name();
             let display_name = name.to_string_lossy().into_owned();
-            if !entry.file_type().map(|kind| kind.is_file()).unwrap_or(false) {
+            if !entry
+                .file_type()
+                .map(|kind| kind.is_file())
+                .unwrap_or(false)
+            {
                 report.conflicts.push(display_name);
                 continue;
             }
@@ -243,12 +257,14 @@ pub(crate) fn relocate_session_map(
         }
     }
     if !acquired {
-        return Err("the ACP session map is busy; sessions moved but their tab IDs may change".into());
+        return Err(
+            "the ACP session map is busy; sessions moved but their tab IDs may change".into(),
+        );
     }
     let result = (|| -> Result<usize, String> {
         let content = fs::read_to_string(map_path).map_err(|error| error.to_string())?;
-        let mut value: serde_json::Value =
-            serde_json::from_str(&content).map_err(|error| format!("invalid ACP session map: {error}"))?;
+        let mut value: serde_json::Value = serde_json::from_str(&content)
+            .map_err(|error| format!("invalid ACP session map: {error}"))?;
         let rename: std::collections::HashMap<String, String> = moved
             .iter()
             .filter_map(|(a, b)| Some((a.to_str()?.to_owned(), b.to_str()?.to_owned())))
@@ -256,10 +272,16 @@ pub(crate) fn relocate_session_map(
         let mut updated = 0;
         if let Some(records) = value.get_mut("sessions").and_then(|s| s.as_array_mut()) {
             for record in records {
-                let Some(object) = record.as_object_mut() else { continue };
+                let Some(object) = record.as_object_mut() else {
+                    continue;
+                };
                 let mut changed = false;
                 for key in ["piSessionPath", "parentSessionPath"] {
-                    let next = object.get(key).and_then(|v| v.as_str()).and_then(|v| rename.get(v)).cloned();
+                    let next = object
+                        .get(key)
+                        .and_then(|v| v.as_str())
+                        .and_then(|v| rename.get(v))
+                        .cloned();
                     if let Some(next) = next {
                         object.insert(key.into(), serde_json::Value::String(next));
                         changed = key == "piSessionPath" || changed;
@@ -278,7 +300,8 @@ pub(crate) fn relocate_session_map(
         }
         let directory = map_path.parent().unwrap_or(Path::new("."));
         let temporary = directory.join(format!(".relocate-{}.tmp", uuid::Uuid::new_v4().simple()));
-        let mut serialized = serde_json::to_string_pretty(&value).map_err(|error| error.to_string())?;
+        let mut serialized =
+            serde_json::to_string_pretty(&value).map_err(|error| error.to_string())?;
         serialized.push('\n');
         fs::write(&temporary, serialized)
             .and_then(|()| fs::rename(&temporary, map_path))
@@ -327,8 +350,14 @@ fn session_dir_name(cwd: &str) -> String {
 /// Mirrors `tuiTabSnapshotPath` in the ACP queue store.
 fn tab_snapshot_path(agent_dir: &Path, cwd: &str) -> PathBuf {
     let digest = Sha256::digest(cwd.as_bytes());
-    let key: String = digest[..12].iter().map(|byte| format!("{byte:02x}")).collect();
-    agent_dir.join("pix").join("tabs").join(format!("{key}.json"))
+    let key: String = digest[..12]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    agent_dir
+        .join("pix")
+        .join("tabs")
+        .join(format!("{key}.json"))
 }
 
 fn is_real_directory(path: &Path) -> bool {
@@ -346,12 +375,19 @@ enum SessionMove {
 /// Copies a session of `from` with its header `cwd` rewritten, preserving
 /// timestamps so ordering is unchanged, then publishes it without overwriting.
 /// Sessions whose header belongs to another cwd are left untouched.
-fn move_session(source: &Path, destination: &Path, from: &str, to: &str) -> io::Result<SessionMove> {
+fn move_session(
+    source: &Path,
+    destination: &Path,
+    from: &str,
+    to: &str,
+) -> io::Result<SessionMove> {
     let file = File::open(source)?;
     let metadata = file.metadata()?;
     let mut reader = BufReader::new(file);
     let mut header = Vec::new();
-    (&mut reader).take(MAX_HEADER_BYTES).read_until(b'\n', &mut header)?;
+    (&mut reader)
+        .take(MAX_HEADER_BYTES)
+        .read_until(b'\n', &mut header)?;
     let Some(rewritten) = rewrite_header(&header, from, to) else {
         return Ok(SessionMove::Foreign);
     };
@@ -359,10 +395,7 @@ fn move_session(source: &Path, destination: &Path, from: &str, to: &str) -> io::
         return Ok(SessionMove::Conflict);
     }
     let directory = destination.parent().unwrap_or(Path::new("."));
-    let temporary = directory.join(format!(
-        ".relocate-{}.tmp",
-        uuid::Uuid::new_v4().simple()
-    ));
+    let temporary = directory.join(format!(".relocate-{}.tmp", uuid::Uuid::new_v4().simple()));
     let written = (|| {
         let mut output = OpenOptions::new()
             .write(true)

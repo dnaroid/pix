@@ -148,6 +148,16 @@ async function installWorkspaceConfig(root, content) {
     }
   } finally { await unlink(temp).catch(() => {}); }
 }
+/**
+ * True when a watchFile event reflects a real change. Node and Bun emit one
+ * event with identical zeroed stats for a missing file; treating it as a
+ * change makes a watcher that restarts its owner re-arm itself forever.
+ */
+export function fileStatChanged(current, previous) {
+  return current.mtimeMs !== previous.mtimeMs || current.ctimeMs !== previous.ctimeMs
+    || current.ino !== previous.ino || current.size !== previous.size || current.nlink !== previous.nlink;
+}
+
 export function watchSourcePolicy(root, changed) {
   const files = [sourcePolicyPath(root), settingsPolicyPath()];
   let disposed = false, pending = false, reading = false;
@@ -167,10 +177,7 @@ export function watchSourcePolicy(root, changed) {
       }
     } finally { reading = false; }
   };
-  const listener = (current, previous) => {
-    if (current.mtimeMs !== previous.mtimeMs || current.ctimeMs !== previous.ctimeMs
-      || current.ino !== previous.ino || current.size !== previous.size || current.nlink !== previous.nlink) void refresh();
-  };
+  const listener = (current, previous) => { if (fileStatChanged(current, previous)) void refresh(); };
   for (const file of files) watchFile(file, { persistent: false, interval: 250 }, listener);
   return () => { disposed = true; for (const file of files) unwatchFile(file, listener); };
 }

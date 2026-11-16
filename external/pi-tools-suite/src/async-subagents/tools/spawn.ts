@@ -67,9 +67,15 @@ interface LaunchQueuedAgentOptions {
  * directories. When launchd definitively cannot (TCC on external volumes, no
  * GUI domain), Claude-provider attempts fall back to the ordinary process-group
  * launch; an undecided probe keeps owned launch (fail closed).
+ *
+ * Owned launch is macOS-only. Elsewhere no binaries are prepared (there is no
+ * xcrun toolchain): a non-Claude attempt whose fallback list merely contains
+ * the Claude provider launches normally, while actually selecting the Claude
+ * provider still fails closed in spawnAgent's macOS owned-launch check.
  */
-export async function resolveOwnedLaunchOptions(dirs: string[]): Promise<{ ownedBinaries: OwnedLaunchBinaries } | { ownedLaunchUnavailable: true }> {
-	if (process.platform === "darwin" && await launchdAccess(dirs) === "denied") {
+export async function resolveOwnedLaunchOptions(dirs: string[]): Promise<{ ownedBinaries: OwnedLaunchBinaries } | { ownedLaunchUnavailable: true } | Record<string, never>> {
+	if (process.platform !== "darwin") return {};
+	if (await launchdAccess(dirs) === "denied") {
 		suiteDiagnostics.report("warn", "subagents", "owned-launch-unavailable", dirs[0]);
 		return { ownedLaunchUnavailable: true };
 	}

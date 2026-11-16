@@ -1,6 +1,6 @@
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolve } from "node:path";
-import { watchFile, unwatchFile } from "node:fs";
+import { watchFile, unwatchFile, type Stats } from "node:fs";
 import { semanticConfigurationPath } from "./native-embedding-provider.mjs";
 import { SessionChunkSync } from "./session-chunk-sync.mjs";
 import { indexSessionChunks } from "./session-chunks.mjs";
@@ -110,9 +110,12 @@ export function registerSessionChunkSync(pi: ExtensionAPI,options: SemanticSearc
     }),owner.signal,error=>{logBackgroundIndexFailure(root,error,phase);});
     const changed = () => { void start(ctx).catch(()=>{}); };
     const config = semanticConfigurationPath();
-    watchFile(config,{persistent:false,interval:1000},changed);
+    // A missing config emits one zeroed-stat event per watcher; reacting to it
+    // would restart this owner (and its fresh watcher) indefinitely.
+    const configChanged = (current: Stats, previous: Stats) => { if (fileStatChanged(current,previous)) changed(); };
+    watchFile(config,{persistent:false,interval:1000},configChanged);
     const unwatchPolicy = watchSourcePolicy(root,changed);
-    active = {owner,sync,policy,unwatch:()=>{catalog.dispose();unwatchFile(config,changed);unwatchPolicy();}};
+    active = {owner,sync,policy,unwatch:()=>{catalog.dispose();unwatchFile(config,configChanged);unwatchPolicy();}};
     // Publish the new observer before awaiting persistence or old-owner teardown.
     // Activity arriving during either wait must synchronously fence this policy.
     try {
@@ -139,4 +142,4 @@ export function registerSessionChunkSync(pi: ExtensionAPI,options: SemanticSearc
   pi.on("session_tree",async (_event,ctx)=>{await activity(ctx);});
   pi.on("session_shutdown",async ()=>{generation++;await stop();});
 }
-import { sourceEnabled, requireSourceEnabled, watchSourcePolicy, withSourcePolicy } from "./source-policy.mjs";
+import { fileStatChanged, sourceEnabled, requireSourceEnabled, watchSourcePolicy, withSourcePolicy } from "./source-policy.mjs";

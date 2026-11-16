@@ -9,7 +9,7 @@ const canonicalFiles = new Set([
   "AGENTS.md", "agent-model-overrides.json", "pi-tools-suite.jsonc",
   "pix-desktop.jsonc", "pix.jsonc", "project-icon.gif", "project-icon.jpg",
   "project-icon.png", "project-icon.svg", "project-icon.webp", "qa_auth.jsonc",
-  "registry.json", "registry.jsonc", "registry-project-key", "tasks.sqlite",
+  "registry.json", "registry.jsonc", "registry-project-key", "project-id", "tasks.sqlite",
   "tasks.sqlite-wal", "tasks.sqlite-shm", "tasks.sqlite-journal", "todo-plan.json",
   "workspace.jsonc",
 ]);

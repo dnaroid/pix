@@ -781,12 +781,12 @@ describe.serial("subagents tool", () => {
 		const pi = new FakePi();
 		registerSubagentsTool(pi as any, new Map(), () => {});
 		const properties = pi.tools.get("subagents").parameters.properties;
-		const description = properties.runDir.schema.options.description;
+		const description = properties.runDir.description;
 		expect(description).toContain("batch key");
 		expect(description).toContain("not a directory");
 		expect(description).toContain("parent session entries");
 		expect(description).not.toContain("registry.json");
-		expect(properties.slug.schema.options.description).toContain("batch key");
+		expect(properties.slug.description).toContain("batch key");
 	});
 
 		test.serial("dispatches actions through one public tool", async () => {

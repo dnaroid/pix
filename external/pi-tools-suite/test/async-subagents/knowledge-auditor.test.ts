@@ -30,7 +30,7 @@ afterEach(() => {
 describe("built-in knowledge-auditor role", () => {
 	test("ships as an economical docs-only role without an IDX prerequisite", () => {
 		const role = loadSubagentConfig(tempDir(), {}).types["knowledge-auditor"];
-		expect(role.models).toEqual(["openai-codex/gpt-6-luna", "zai/glm-5.3-flash"]);
+		expect(role.models).toEqual(["openai-codex/gpt-6-luna", "pi-claude-code-provider/haiku", "zai/glm-5.3-flash"]);
 		expect(role.thinking).toBe("low");
 		expect(role.tools).toEqual(["read", "grep", "bash", "edit", "write"]);
 		expect(role.timeoutMs).toBe(1_200_000);
