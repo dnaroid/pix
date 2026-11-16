@@ -62,6 +62,56 @@ describe("prompt composer textarea controller", () => {
       vi.unstubAllGlobals();
     }
   });
+  it("locks the composer height while measuring so the transcript scroll is not clamped", () => {
+    vi.stubGlobal("window", { innerHeight: 1000 });
+    const formStyle = { minHeight: "" };
+    const textareaStyle = { height: "300px", overflowY: "auto" } as Record<string, string>;
+    const minHeightDuringMeasure: string[] = [];
+    const textarea = {
+      value: "long draft",
+      selectionStart: 10,
+      selectionEnd: 10,
+      style: textareaStyle,
+      scrollTop: 180,
+      offsetHeight: 300,
+      get scrollHeight() {
+        minHeightDuringMeasure.push(formStyle.minHeight);
+        // Collapsing to height:auto resets the textarea's own scroll.
+        this.scrollTop = 0;
+        return 900;
+      },
+    };
+    const form = {
+      style: formStyle,
+      offsetHeight: 360,
+      getBoundingClientRect: () => ({ height: 360.5 }),
+    };
+    const controller = createPromptComposerTextareaController({
+      textarea: () => textarea as unknown as HTMLTextAreaElement,
+      ghostLayer: () => undefined,
+      composerForm: () => form as unknown as HTMLFormElement,
+      promptText: () => textarea.value,
+      setPromptText: () => {},
+      activeSessionId: () => null,
+      attachmentsCount: () => 0,
+      editorMode: () => true,
+      questionMode: () => false,
+      autocompleteEnabled: () => false,
+      ready: () => true,
+      requestAutocomplete: async () => "",
+    });
+    try {
+      controller.resize();
+      expect(minHeightDuringMeasure).toEqual(["360.5px"]);
+      expect(formStyle.minHeight).toBe("");
+      expect(textareaStyle.height).toBe("440px");
+      expect(textareaStyle.overflowY).toBe("auto");
+      expect(textarea.scrollTop).toBe(180);
+    } finally {
+      controller.dispose();
+      vi.unstubAllGlobals();
+    }
+  });
   it("does not force a synchronous layout on input; the draft effect resizes once per frame", () => {
     const { counts, textarea } = layoutCountingTextarea();
     const controller = createPromptComposerTextareaController({

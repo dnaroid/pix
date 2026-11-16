@@ -100,14 +100,25 @@ export function createPromptComposerTextareaController(options: PromptComposerTe
     const textarea = options.textarea();
     if (!textarea) return;
 
-    textarea.style.height = "auto";
     const composerForm = options.composerForm();
     const composerChromeHeight = composerForm ? composerForm.offsetHeight - textarea.offsetHeight : 0;
+    const textareaScrollTop = textarea.scrollTop;
+    // Measuring needs height:auto, and reading scrollHeight forces layout with
+    // the textarea collapsed. Without a lock the composer shrinks for that
+    // layout, the transcript grows and its scrollTop is clamped; restoring the
+    // height then leaves the chat above its live edge and disables following.
+    const previousFormMinHeight = composerForm?.style.minHeight ?? "";
+    if (composerForm) composerForm.style.minHeight = `${composerForm.getBoundingClientRect().height}px`;
+    textarea.style.height = "auto";
     const maxTextareaHeight = Math.max(24, window.innerHeight / 2 - composerChromeHeight);
-    const height = Math.min(textarea.scrollHeight, maxTextareaHeight);
+    const contentHeight = textarea.scrollHeight;
+    const height = Math.min(contentHeight, maxTextareaHeight);
 
     textarea.style.height = `${height}px`;
-    textarea.style.overflowY = textarea.scrollHeight > maxTextareaHeight ? "auto" : "hidden";
+    textarea.style.overflowY = contentHeight > maxTextareaHeight ? "auto" : "hidden";
+    if (composerForm) composerForm.style.minHeight = previousFormMinHeight;
+    // The collapse resets the textarea's own scroll; keep the caret area in view.
+    textarea.scrollTop = textareaScrollTop;
     syncGhostLayer();
   }
 
