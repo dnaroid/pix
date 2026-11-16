@@ -66,6 +66,16 @@ describe("desktop lifecycle teardown", () => {
     expect(options.disposeConnection).toHaveBeenCalledTimes(2);
   });
 
+  it("still disposes the connection when an earlier disposer throws", () => {
+    const { lifecycle, options } = setup();
+    options.disposeSessionUpdates.mockImplementation(() => { throw new Error("updates failed"); });
+    const stop = lifecycle.start();
+    expect(() => stop()).not.toThrow();
+    expect(options.disposeGitCi).toHaveBeenCalledTimes(1);
+    expect(options.disposeConnection).toHaveBeenCalledTimes(1);
+    expect(options.reportError).toHaveBeenCalledWith(expect.objectContaining({ message: "updates failed" }));
+  });
+
   it("reports a failing reset instead of breaking teardown", () => {
     const { lifecycle, options } = setup();
     options.resetAfterDisconnect.mockImplementation(() => { throw new Error("reset failed"); });

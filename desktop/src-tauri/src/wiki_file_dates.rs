@@ -3,10 +3,18 @@
 //! Git does not know. Never mutates the repository; runs off the UI thread.
 use super::{canonical_workspace, git_command, run_blocking, validate_workspace_relative_path};
 use serde::Serialize;
-use std::{collections::HashMap, fs, path::Path, process::Stdio, time::UNIX_EPOCH};
+use std::{
+    collections::HashMap,
+    fs,
+    path::Path,
+    time::{Duration, UNIX_EPOCH},
+};
 
 /// Blame is bounded so a huge quotation cannot make the comparison slow.
 const MAX_BLAME_LINES: u32 = 2000;
+const WIKI_DATES_GIT_TIMEOUT: Duration = Duration::from_secs(15);
+const MAX_WIKI_DATES_GIT_STDOUT_BYTES: usize = 8 * 1024 * 1024;
+const MAX_WIKI_DATES_GIT_STDERR_BYTES: usize = 8 * 1024;
 
 /// All times are Unix epoch milliseconds; `None` means unknown.
 #[derive(Debug, Default, Serialize, PartialEq, Eq)]
@@ -43,17 +51,22 @@ pub(crate) async fn wiki_file_dates(
 }
 
 /// Successful stdout of a read-only Git command with literal pathspecs; `None` otherwise.
+/// Supervised: a stalled Git (lock, promisor fetch, helper) is killed with its
+/// whole process group at the deadline instead of pinning a blocking thread.
 fn git(root: &Path, args: &[&str]) -> Option<String> {
-    let output = git_command(root, args)
-        .env("GIT_LITERAL_PATHSPECS", "1")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+    let mut command = git_command(root, args);
+    command.env("GIT_LITERAL_PATHSPECS", "1");
+    let output = crate::git_process::bounded_output(
+        &mut command,
+        WIKI_DATES_GIT_TIMEOUT,
+        MAX_WIKI_DATES_GIT_STDOUT_BYTES,
+        MAX_WIKI_DATES_GIT_STDERR_BYTES,
+        None,
+    )
+    .ok()?;
+    // Truncated output could misreport dates; treat it as unknown.
+    (output.output.status.success() && !output.truncated)
+        .then(|| String::from_utf8_lossy(&output.output.stdout).into_owned())
 }
 
 fn seconds_to_millis(value: &str) -> Option<i64> {

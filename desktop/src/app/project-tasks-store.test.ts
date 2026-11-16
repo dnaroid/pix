@@ -267,6 +267,25 @@ describe("project task live reload and compare-and-save", () => {
     expect(tauri.invoke).toHaveBeenCalledTimes(calls);
   });
 
+  it("skips parsing and applying polls whose snapshot revision is unchanged", async () => {
+    const { store, reportError } = fixture();
+    let snapshot: unknown = { ...panel(DOCUMENT), revision: "r1" };
+    tauri.invoke.mockImplementation(async () => snapshot);
+    await store.load("/project");
+    const stop = store.observe();
+    await vi.advanceTimersByTimeAsync(0);
+    // Same revision: even a malformed payload is neither parsed nor applied.
+    snapshot = { ...panel({ version: 99 }), revision: "r1" };
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(store.document).toEqual(DOCUMENT);
+    expect(reportError).not.toHaveBeenCalled();
+    const changed = { ...DOCUMENT, tasks: [{ ...DOCUMENT.tasks[0]!, title: "External" }] };
+    snapshot = { ...panel(changed), revision: "r2" };
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(store.document).toEqual(changed);
+    stop();
+  });
+
   it("reads tasks and badge-only changes through one IPC per tick and stops both on teardown", async () => {
     const { store } = fixture();
     let counts = { "task-1": 1 };

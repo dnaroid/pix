@@ -550,3 +550,35 @@ fn a_busy_workspace_does_not_block_file_history_in_another_workspace() {
             .unwrap();
     });
 }
+
+#[cfg(unix)]
+#[test]
+fn storage_lock_waits_for_a_briefly_held_description_and_reports_a_lasting_one() {
+    use std::os::unix::io::AsRawFd;
+    let w = Workspace::new();
+    let storage = ensure_storage(&w.0).unwrap();
+    // A second open file description stands in for a forked child that still
+    // shares the lock until it execs.
+    let holder = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(storage.join(".lock"))
+        .unwrap();
+    assert_eq!(unsafe { libc::flock(holder.as_raw_fd(), libc::LOCK_EX) }, 0);
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        drop(holder);
+    });
+    let started = std::time::Instant::now();
+    let lock = lock_storage(&storage).expect("a briefly held lock is awaited");
+    assert!(started.elapsed() >= std::time::Duration::from_millis(50));
+    release.join().unwrap();
+
+    let started = std::time::Instant::now();
+    let error = lock_storage(&storage).expect_err("a lasting holder is reported");
+    assert!(error.contains("Another Pix process"), "{error}");
+    assert!(started.elapsed() >= STORAGE_LOCK_WAIT);
+    drop(lock);
+}

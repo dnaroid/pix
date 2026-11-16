@@ -2,10 +2,14 @@
 //!
 //! Every ACP slot and package terminal is stopped concurrently under one
 //! overall deadline, so quitting with N windows costs one stop timeout rather
-//! than N sequential ones. Stragglers past the deadline keep running on their
-//! detached threads; the process exit that follows ends them.
+//! than N sequential ones. Stop tasks still running at the deadline stay on
+//! their detached threads, but every process group Pix still owns is then
+//! SIGKILLed: isolated groups do not die with the app on their own.
 
-use super::{logging, stop_package_terminal, stop_process, AcpProcessState, PackageTerminalState};
+use super::{
+    logging, native_process, stop_package_terminal, stop_process, AcpProcessState,
+    PackageTerminalState,
+};
 use std::{
     sync::mpsc,
     thread,
@@ -85,6 +89,18 @@ pub(crate) fn stop_all_native_processes(app: &AppHandle) {
             module_path!(),
             "desktop:exit-teardown-timeout",
             serde_json::json!({ "unfinished": unfinished }),
+            None,
+        );
+    }
+    // Includes groups whose stop timed out, groups from a window-close stop
+    // thread interrupted by exit, and in-flight git/search children.
+    let killed = native_process::kill_registered_groups();
+    if killed > 0 {
+        logging::record(
+            "warn",
+            module_path!(),
+            "desktop:exit-killed-process-groups",
+            serde_json::json!({ "groups": killed }),
             None,
         );
     }

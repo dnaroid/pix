@@ -109,3 +109,34 @@ fn natural_leader_exit_cleanup_closes_descendant_inherited_pipe() {
     child.wait().unwrap();
     assert!(rx.recv_timeout(Duration::from_secs(2)).unwrap().is_ok());
 }
+
+#[cfg(unix)]
+#[test]
+fn isolated_group_stays_registered_until_leader_is_reaped() {
+    let mut cmd = Command::new("/bin/sh");
+    cmd.arg("-c").arg("sleep 30");
+    native_process::isolate(&mut cmd);
+    let mut child = native_process::spawn(&mut cmd).unwrap();
+    let pid = child.id() as i32;
+    assert!(native_process::is_group_registered(pid));
+    native_process::force_stop(&mut child).unwrap();
+    // Exited but unreaped: the group ID is still pinned, so it stays registered.
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !native_process::exited_before_reap(&child).unwrap() {
+        assert!(Instant::now() < deadline, "leader did not exit");
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(native_process::is_group_registered(pid));
+    child.wait().unwrap();
+    assert!(!native_process::is_group_registered(pid));
+}
+
+#[cfg(unix)]
+#[test]
+fn non_isolated_child_is_not_registered() {
+    let mut cmd = Command::new("/bin/sh");
+    cmd.arg("-c").arg("exit 0");
+    let mut child = native_process::spawn(&mut cmd).unwrap();
+    assert!(!native_process::is_group_registered(child.id() as i32));
+    child.wait().unwrap();
+}

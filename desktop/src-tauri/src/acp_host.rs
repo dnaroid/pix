@@ -38,6 +38,9 @@ pub(super) struct AcpProcessState {
     pub(super) slots: Mutex<HashMap<String, Arc<ProcessSlot>>>,
     next_generation: AtomicU64,
     pub(super) exiting: AtomicBool,
+    /// Set by the exit worker right before it calls `AppHandle::exit`. Until
+    /// then every further ExitRequested is prevented so teardown can finish.
+    pub(super) teardown_done: AtomicBool,
 }
 
 pub(super) struct ProcessSlot {

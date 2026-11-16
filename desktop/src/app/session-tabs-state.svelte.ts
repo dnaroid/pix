@@ -158,7 +158,8 @@ export function createSessionTabsState() {
   }
 
   function markClosed(sessionId: string): void {
-    closedIds = [...closedIds, sessionId];
+    // Repeated close/reopen cycles must not accumulate duplicate ids.
+    if (!closedIds.includes(sessionId)) closedIds = [...closedIds, sessionId];
     locallyOpenedIds = locallyOpenedIds.filter((openId) => openId !== sessionId);
     persistCurrentTabs();
   }

@@ -58,6 +58,17 @@ export function createDiagnosticLogMonitor(
   };
 }
 
+/** Lowercased search text per record, so each keystroke does not re-serialize every entry. */
+const searchText = new WeakMap<DiagnosticLogRecord, string>();
+function recordSearchText(record: DiagnosticLogRecord): string {
+  let text = searchText.get(record);
+  if (text === undefined) {
+    text = JSON.stringify(record).toLocaleLowerCase();
+    searchText.set(record, text);
+  }
+  return text;
+}
+
 export function filterDiagnosticLogs(entries: readonly DiagnosticLogEntry[], filters: {
   level: string; source: string; query: string; project: string | null;
 }): DiagnosticLogEntry[] {
@@ -66,5 +77,5 @@ export function filterDiagnosticLogs(entries: readonly DiagnosticLogEntry[], fil
     (!filters.level || record.level === filters.level)
     && (!filters.source || record.source === filters.source)
     && (filters.project === null || record.project?.path === filters.project)
-    && (!query || JSON.stringify(record).toLocaleLowerCase().includes(query)));
+    && (!query || recordSearchText(record).includes(query)));
 }

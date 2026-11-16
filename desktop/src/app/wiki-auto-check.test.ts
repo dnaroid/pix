@@ -338,6 +338,19 @@ describe("project-owned automatic Wiki checks", () => {
     item.scheduler.dispose();
   });
 
+  it("does not let a tick hung past reset block auto-check for the next workspace", async () => {
+    const item = fixture();
+    // An injected read that ignores abort and never settles.
+    item.readConfig.mockReturnValueOnce(new Promise(() => {}));
+    item.scheduler.start(); await advance();
+    expect(item.readConfig).toHaveBeenCalledTimes(1);
+    item.scheduler.reset(); item.setWorkspace("/other"); item.put("wiki/page.md", "Page"); item.scheduler.start();
+    await advance(WIKI_AUTO_CHECK_SETTLE_MS);
+    expect(item.readConfig).toHaveBeenCalledTimes(2);
+    expect(item.enqueue.mock.calls.map(([input]) => input.path)).toEqual(["wiki/page.md"]);
+    item.scheduler.dispose();
+  });
+
   it("releases late native cursors and consumes empty pages without losing later entries", async () => {
     const item = fixture(), page = deferred<WikiCheckInventoryPage>(), released = deferred<void>();
     item.listDirectory.mockReturnValueOnce(page.promise);

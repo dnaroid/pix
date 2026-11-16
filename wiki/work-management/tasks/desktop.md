@@ -126,7 +126,10 @@ session-local todos.
   presentation while dragging.
 - An expanded visible panel reloads from native SQLite initially and every
   two seconds through one `read_project_tasks_panel` IPC snapshot containing
-  task rows and attachment counts from the same SQLite read transaction.
+  task rows and attachment counts from the same SQLite read transaction. The
+snapshot carries a native `revision` hash of those rows and counts; when it
+equals the last applied revision, the frontend skips parsing and diffing. Load
+and save clear the known revision.
   Attachment badges have no separate timer and do not read attachment blobs;
   badge-query errors leave tasks readable and preserve their prior counts for
   that workspace. Hidden/collapsed/unmounted panels stop polling. Late reads,
@@ -276,4 +279,4 @@ The API restriction does **not** sandbox all OS file tools: independently
 privileged code could still open `.pi/tasks.sqlite` directly. The sanctioned
 agent interface never grants arbitrary SQL or all-task replacement.
 
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"9d66e389095dbd0352ecb42ed253f5ecb0734646cc5144c350d4057d53a3e8fe","checkedAt":"2026-10-31T01:55:53.780Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":54,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"f19821185c09610011de9ac470cc00da606abbd04953c50a89459f220f29062d","checkedAt":"2026-11-16T15:45:10.946Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":54,"reportLanguage":"ru"} -->

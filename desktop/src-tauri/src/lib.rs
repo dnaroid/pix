@@ -5302,68 +5302,24 @@ fn sidebar_git_status_output(root: &Path) -> Result<std::process::Output, String
         ])
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GCM_INTERACTIVE", "Never")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("failed to start Git indicator status: {error}"))?;
-    let process_id = child.id();
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "Git indicator stdout pipe is unavailable".to_owned())?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| "Git indicator stderr pipe is unavailable".to_owned())?;
-    let stdout_thread =
-        thread::spawn(move || read_bounded_process_stream(stdout, MAX_SIDEBAR_GIT_OUTPUT_BYTES));
-    let stderr_thread = thread::spawn(move || read_bounded_process_stream(stderr, 256 * 1024));
-    let deadline = Instant::now() + SIDEBAR_GIT_TIMEOUT;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => thread::sleep(POLL_INTERVAL),
-            Ok(None) => {
-                force_kill_process_group(process_id, &mut child);
-                let _ = child.wait();
-                let _ = stdout_thread.join();
-                let _ = stderr_thread.join();
-                return Err("Git indicator status timed out".to_owned());
-            }
-            Err(error) => {
-                force_kill_process_group(process_id, &mut child);
-                let _ = child.wait();
-                let _ = stdout_thread.join();
-                let _ = stderr_thread.join();
-                return Err(format!(
-                    "failed while waiting for Git indicator status: {error}"
-                ));
-            }
-        }
-    };
-    let (stdout, stdout_truncated) = stdout_thread
-        .join()
-        .map_err(|_| "Git indicator stdout reader panicked".to_owned())?;
-    let (stderr, stderr_truncated) = stderr_thread
-        .join()
-        .map_err(|_| "Git indicator stderr reader panicked".to_owned())?;
-    if stdout_truncated || stderr_truncated {
+        .env("GCM_INTERACTIVE", "Never");
+    // The supervisor kills the isolated group before reaping and joining its
+    // readers, so a descendant holding stdout/stderr cannot hang the poll.
+    let output = git_process::bounded_output(
+        &mut command,
+        SIDEBAR_GIT_TIMEOUT,
+        MAX_SIDEBAR_GIT_OUTPUT_BYTES,
+        256 * 1024,
+        None,
+    )
+    .map_err(|error| match error {
+        git_process::SupervisedError::TimedOut => "Git indicator status timed out".to_owned(),
+        error => format!("failed to run Git indicator status: {error}"),
+    })?;
+    if output.truncated {
         return Err("Git indicator status output exceeded its safety limit".to_owned());
     }
-    Ok(std::process::Output {
-        status,
-        stdout,
-        stderr,
-    })
+    Ok(output.output)
 }
 
 fn parse_sidebar_git_status(bytes: &[u8]) -> SidebarGitIndicatorState {
@@ -6387,6 +6343,17 @@ fn supervise_package_terminal(
     exited: ExitSignal,
     drained: package_terminal_output::DrainSignal,
 ) {
+    // The PTY child is a session (and group) leader. Register it so app exit
+    // can kill a straggler group, and unregister it right before reaping.
+    #[cfg(unix)]
+    let result = match child.process_id() {
+        Some(pid) if pid > 0 => {
+            native_process::register_group(pid as i32);
+            native_process::reap_registered(pid as i32, || child.wait())
+        }
+        _ => child.wait(),
+    };
+    #[cfg(not(unix))]
     let result = child.wait();
     // Deliver the PTY's final output (e.g. a crash trace) before exit, so it is
     // neither emitted after exit nor lost to an immediate forget. A background
@@ -6770,11 +6737,20 @@ fn stop_package_terminals_for_workspace(
 }
 
 fn stop_captured_package_terminals(app: &AppHandle, window_label: &str, ids: &[String]) {
+    let mut stopped = Vec::with_capacity(ids.len());
     for id in ids {
-        let _ = stop_package_terminal(app, window_label, &id, true);
+        match stop_package_terminal(app, window_label, id, true) {
+            Ok(()) => stopped.push(id.clone()),
+            // Keep the record (and its killer) so exit teardown still sees and
+            // retries a terminal whose stop failed for the closed window.
+            Err(error) => logging::error(
+                module_path!(),
+                format!("failed to stop package terminal {id} for closed window {window_label}: {error}"),
+            ),
+        }
     }
     if let Ok(mut sessions) = app.state::<PackageTerminalState>().sessions.lock() {
-        remove_captured_ids(&mut sessions, ids);
+        remove_captured_ids(&mut sessions, &stopped);
     }
 }
 
@@ -6874,6 +6850,8 @@ async fn read_project_tasks(workspace: String) -> Result<ProjectTaskDocument, St
 struct ProjectTasksPanelSnapshot {
     document: ProjectTaskDocument,
     attachment_counts: Option<HashMap<String, i64>>,
+    /// Content hash of task rows and badge counts; empty when there is no store.
+    revision: String,
 }
 
 impl Default for ProjectTasksPanelSnapshot {
@@ -6881,6 +6859,7 @@ impl Default for ProjectTasksPanelSnapshot {
         Self {
             document: empty_task_document(),
             attachment_counts: Some(HashMap::new()),
+            revision: String::new(),
         }
     }
 }
@@ -8901,8 +8880,15 @@ pub fn run() {
                 api.prevent_exit();
                 return;
             }
+            // The exit worker's own `handle.exit` re-enters here once teardown
+            // is done; only that request may pass.
+            if state.teardown_done.load(Ordering::Acquire) {
+                return;
+            }
+            // A repeated Quit during teardown must not exit before window
+            // state is saved and native process groups are stopped.
+            api.prevent_exit();
             if !state.exiting.swap(true, Ordering::AcqRel) {
-                api.prevent_exit();
                 let windows = window_restore::freeze(handle);
                 handle.state::<git_ci::GitCiProcessState>().cancel_all();
                 handle
@@ -8910,21 +8896,33 @@ pub fn run() {
                     .cancel_all();
                 let handle = handle.clone();
                 thread::spawn(move || {
-                    if let Err(error) = window_restore::save(&handle, windows) {
-                        logging::error(
-                            module_path!(),
-                            format!("failed to save open windows: {error}"),
+                    let teardown = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        if let Err(error) = window_restore::save(&handle, windows) {
+                            logging::error(
+                                module_path!(),
+                                format!("failed to save open windows: {error}"),
+                            );
+                        }
+                        exit_teardown::stop_all_native_processes(&handle);
+                        logging::record(
+                            "info",
+                            "lifecycle",
+                            "desktop:stopping",
+                            serde_json::json!({}),
+                            None,
                         );
+                    }));
+                    if teardown.is_err() {
+                        // Still kill owned groups and exit: a panic must not
+                        // leave the app stuck with every exit prevented.
+                        native_process::kill_registered_groups();
+                        logging::error(module_path!(), "desktop exit teardown panicked".to_owned());
                     }
-                    exit_teardown::stop_all_native_processes(&handle);
-                    logging::record(
-                        "info",
-                        "lifecycle",
-                        "desktop:stopping",
-                        serde_json::json!({}),
-                        None,
-                    );
                     logging::shutdown();
+                    handle
+                        .state::<AcpProcessState>()
+                        .teardown_done
+                        .store(true, Ordering::Release);
                     handle.exit(code.unwrap_or(0));
                 });
             }

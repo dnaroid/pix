@@ -130,6 +130,18 @@ describe("session tabs state persistence", () => {
       .toEqual(["desktop-only"]);
   });
 
+  it("does not accumulate duplicate closed ids across close/reopen cycles", () => {
+    const tabs = createSessionTabsState();
+    tabs.setSessionTabIds(new Map([["/project", ["open"]]]));
+    tabs.mergeRestored("/project", ["open"], ["open"]);
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      tabs.markClosed("open");
+      tabs.show("open");
+    }
+    tabs.markClosed("open");
+    expect(tabs.closedIds.filter(id => id === "open")).toHaveLength(1);
+  });
+
   it("persists an explicit empty list so stale TUI tabs stay closed after restart", () => {
     const tabs = createSessionTabsState();
     tabs.setSessionTabIds(new Map([["/project", []]]));

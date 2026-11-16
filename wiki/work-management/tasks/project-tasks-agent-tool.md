@@ -179,12 +179,13 @@ CREATE TABLE task_attachments (
   bytes. Pull imports rows in a guarded SQL transaction; the live database
   inode/WAL are never naively replaced. Registry actions are explicit bulk
   synchronization, **not** part of the restricted agent tool.
-- This format is a deliberate clean break. Legacy task files are left alone
-  (not parsed, migrated or deleted), and pre-SQLite remote Registry artifacts
-  are not treated as current project tasks.
+- This format is a deliberate clean break. The task store and agent tool never
+  parse, migrate or delete legacy task files; Desktop `.pi` cleanup reclaims
+  them separately as non-canonical storage. Pre-SQLite remote Registry
+  artifacts are not treated as current project tasks.
 
 ## Related behavior
 
 - [Desktop panel and launch](desktop.md)
 
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"b6b132441030dec597c79ae9839b566868ea26235fb4adde1c6625061ee46594","checkedAt":"2026-10-31T00:15:58.516Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":55,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"75980e8373549545c30893259ac577250b37d458a2cdc9ec141587b555af8495","checkedAt":"2026-11-16T15:43:08.948Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":58,"reportLanguage":"ru"} -->

@@ -5,10 +5,14 @@ use super::{
     git_command, git_has_head, git_output, git_output_raw, git_repository_root, git_status_from,
     run_blocking, truncate_git_diff, validate_git_relative_path, MAX_GIT_DIFF_BYTES,
 };
-use crate::git_process::git_network_output;
+use crate::git_process::{bounded_output, git_network_output, SupervisedError};
 use serde::Serialize;
 use serde_json::json;
-use std::{io::Read, path::Path, process::Stdio};
+use std::{path::Path, time::Duration};
+
+/// Local `git show` should finish quickly; the bound covers stalled helpers.
+const GIT_COMMIT_DIFF_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_GIT_COMMIT_DIFF_STDERR_BYTES: usize = 8 * 1024;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -110,8 +114,10 @@ fn commit_diff_from(workspace: &Path, hash: &str) -> Result<GitCommitDiff, Strin
 
     // Show the selected commit against its first parent (including initial
     // commits and merges). A streaming byte cap prevents large/binary history
-    // from filling the UI or process memory before response truncation.
-    let mut child = git_command(
+    // from filling the UI or process memory before response truncation. The
+    // supervised run adds a deadline and kills the whole isolated group, so a
+    // stalled promisor fetch or credential helper cannot pin a blocking thread.
+    let mut command = git_command(
         &root,
         &[
             "show",
@@ -125,27 +131,28 @@ fn commit_diff_from(workspace: &Path, hash: &str) -> Result<GitCommitDiff, Strin
             hash,
             "--",
         ],
-    )
-    .stdout(Stdio::piped())
-    .stderr(Stdio::null())
-    .spawn()
-    .map_err(|_| "Could not read the selected commit diff".to_owned())?;
-    let mut bytes = Vec::new();
-    let read = child
-        .stdout
-        .take()
-        .ok_or_else(|| "Could not capture the selected commit diff".to_owned())?
-        .take((MAX_GIT_DIFF_BYTES + 1) as u64)
-        .read_to_end(&mut bytes);
-    let exceeded = bytes.len() > MAX_GIT_DIFF_BYTES;
-    if exceeded || read.is_err() {
-        let _ = child.kill();
-    }
-    let status = child.wait();
-    if read.is_err() || status.is_err() || (!exceeded && !status.unwrap().success()) {
+    );
+    let output = match bounded_output(
+        &mut command,
+        GIT_COMMIT_DIFF_TIMEOUT,
+        // One byte past the cap lets `truncate_git_diff` detect and mark overflow.
+        MAX_GIT_DIFF_BYTES + 1,
+        MAX_GIT_COMMIT_DIFF_STDERR_BYTES,
+        None,
+    ) {
+        Ok(output) => output,
+        Err(SupervisedError::TimedOut) => {
+            return Err("Reading the selected commit diff timed out".to_owned())
+        }
+        Err(_) => return Err("Could not read the selected commit diff".to_owned()),
+    };
+    // stderr is captured only to keep its pipe drained; the cap applies to stdout.
+    let exceeded = output.output.stdout.len() > MAX_GIT_DIFF_BYTES;
+    if !exceeded && !output.output.status.success() {
         return Err("Could not read the selected commit diff".to_owned());
     }
-    let (content, truncated) = truncate_git_diff(String::from_utf8_lossy(&bytes).into_owned());
+    let (content, truncated) =
+        truncate_git_diff(String::from_utf8_lossy(&output.output.stdout).into_owned());
     Ok(GitCommitDiff {
         commit,
         content,

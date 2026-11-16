@@ -20,6 +20,9 @@ static MUTATIONS: LazyLock<Mutex<std::collections::HashMap<String, Arc<Entry>>>>
     LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 static WORKSPACES: LazyLock<lock::WorkspaceLocks> = LazyLock::new(Default::default);
 const STORAGE: &str = ".pi/file-history";
+/// Bounded wait for the cross-process storage lock before reporting it busy.
+#[cfg(unix)]
+const STORAGE_LOCK_WAIT: std::time::Duration = std::time::Duration::from_millis(750);
 
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -260,8 +263,23 @@ fn lock_storage(storage: &Path) -> Result<fs::File, String> {
     if !file.metadata().map_err(|e| e.to_string())?.is_file() {
         return Err("Invalid file-history lock.".into());
     }
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-        return Err("Another Pix process is changing files; retry when it finishes.".into());
+    // A forked child that has not reached `exec` yet still shares a recently
+    // closed lock description (flock belongs to the description, not the fd),
+    // so a brief busy lock is normal; only a lasting one is reported.
+    let deadline = std::time::Instant::now() + STORAGE_LOCK_WAIT;
+    while unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        let error = std::io::Error::last_os_error();
+        let busy = matches!(
+            error.raw_os_error(),
+            Some(libc::EWOULDBLOCK) | Some(libc::EINTR)
+        );
+        if !busy {
+            return Err(format!("Failed to lock file history: {error}"));
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err("Another Pix process is changing files; retry when it finishes.".into());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
     Ok(file)
 }

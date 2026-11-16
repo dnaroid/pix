@@ -37,7 +37,9 @@ export function createWikiConflictsRecheck(options: Options) {
     controllers.add(controller);
     try {
       const document = await options.read(workspace, wikiPath, path, controller.signal);
-      if (disposed || controller.signal.aborted || options.workspace() !== workspace) return false;
+      // A Wiki path change within the same workspace also makes this read stale.
+      if (disposed || controller.signal.aborted || options.workspace() !== workspace
+        || options.wikiPath() !== wikiPath) return false;
       // Re-check after the read: another entry point may have queued the page meanwhile.
       if (options.jobs().some(job => activeJob(job) && job.workspace === workspace && job.path === path)) return false;
       return options.enqueue({

@@ -246,18 +246,40 @@ pub(super) fn read_panel(
     }
     let mut connection = open(directory, false)?;
     let transaction = connection.transaction().map_err(sql_error)?;
-    let document = read_from(&transaction, max_bytes)?;
+    // The revision lets the 2 s panel poll skip parsing/diffing unchanged
+    // snapshots in the webview; hashing runs here on the blocking pool.
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let document = read_from_with(&transaction, max_bytes, |id, payload| {
+        std::hash::Hash::hash(&(id, payload), &mut hasher);
+    })?;
     // Badge failures must not turn readable tasks into a storage error; the
     // task editor owns reporting attachment problems when opened.
     let attachment_counts = attachment_counts_from(&transaction).ok();
     transaction.commit().map_err(sql_error)?;
+    match &attachment_counts {
+        Some(counts) => {
+            let mut sorted = counts.iter().collect::<Vec<_>>();
+            sorted.sort();
+            std::hash::Hash::hash(&(1u8, sorted), &mut hasher);
+        }
+        None => std::hash::Hash::hash(&0u8, &mut hasher),
+    }
     Ok(super::ProjectTasksPanelSnapshot {
         document,
         attachment_counts,
+        revision: format!("{:016x}", std::hash::Hasher::finish(&hasher)),
     })
 }
 
 fn read_from(connection: &Connection, max_bytes: u64) -> Result<ProjectTaskDocument, String> {
+    read_from_with(connection, max_bytes, |_, _| {})
+}
+
+fn read_from_with(
+    connection: &Connection,
+    max_bytes: u64,
+    mut on_row: impl FnMut(&str, &str),
+) -> Result<ProjectTaskDocument, String> {
     let mut statement = connection
         .prepare("SELECT id,payload FROM tasks ORDER BY position ASC,id ASC")
         .map_err(sql_error)?;
@@ -268,6 +290,7 @@ fn read_from(connection: &Connection, max_bytes: u64) -> Result<ProjectTaskDocum
         let id: String = row.get(0).map_err(sql_error)?;
         let payload: String = row.get(1).map_err(sql_error)?;
         bytes = bytes.saturating_add(payload.len() as u64);
+        on_row(&id, &payload);
         if bytes > max_bytes || document.tasks.len() >= 10_000 {
             return Err("project task database snapshot exceeds storage limits".into());
         }

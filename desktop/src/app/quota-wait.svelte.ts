@@ -29,7 +29,9 @@ export function createQuotaWaitStore(options: QuotaWaitStoreOptions) {
   let hiddenBySession = $state<Set<string>>(new Set());
   let scheduleOpenBySession = $state<Set<string>>(new Set());
   let nowMs = $state(Date.now());
-  const pendingCommands = new Set<string>();
+  // Token per in-flight command: a stale `finally` after `reset()` must not
+  // remove the guard of a newer command for the same session.
+  const pendingCommands = new Map<string, symbol>();
   let ticker: ReturnType<typeof setInterval> | undefined;
 
   function ensureTicker(): void {
@@ -148,13 +150,14 @@ export function createQuotaWaitStore(options: QuotaWaitStoreOptions) {
     if (pendingCommands.has(sessionId)) return;
     const requestClient = options.client();
     if (!requestClient || !options.runtimeReady(sessionId)) return;
-    pendingCommands.add(sessionId);
+    const token = Symbol(sessionId);
+    pendingCommands.set(sessionId, token);
     try {
       await requestClient.prompt(sessionId, [{ type: "text", text: command }]);
     } catch (error) {
       if (options.client() === requestClient) options.reportError(error);
     } finally {
-      pendingCommands.delete(sessionId);
+      if (pendingCommands.get(sessionId) === token) pendingCommands.delete(sessionId);
     }
   }
 

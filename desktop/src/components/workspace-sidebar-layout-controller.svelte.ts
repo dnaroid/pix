@@ -48,7 +48,9 @@ export function createWorkspaceSidebarLayoutController(options: WorkspaceSidebar
       const savedWidth = localStorage.getItem(WIDTH_KEY);
       if (savedWidth !== null) {
         const parsedWidth = Number(savedWidth);
-        if (Number.isFinite(parsedWidth)) sidebarWidth = clampWidth(parsedWidth, activeMinWidth, activeMaxWidth);
+        // Keep the saved preference; `expandedWidth` clamps it to the current
+        // viewport, so a narrow launch window does not shrink it for good.
+        if (Number.isFinite(parsedWidth)) sidebarWidth = clampWidth(parsedWidth);
       }
     } catch {
       // Keep defaults when webview storage is unavailable.
@@ -100,7 +102,8 @@ export function createWorkspaceSidebarLayoutController(options: WorkspaceSidebar
     } else if (event.key === "ArrowLeft" && sidebarWidth < activeMinWidth) {
       return;
     } else {
-      const baseWidth = Math.max(sidebarWidth, activeMinWidth);
+      // Step from the visible width, not a larger saved preference.
+      const baseWidth = clampWidth(sidebarWidth, activeMinWidth, activeMaxWidth);
       sidebarWidth = clampWidth(
         baseWidth + (event.key === "ArrowLeft" ? -12 : 12),
         activeMinWidth,

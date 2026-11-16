@@ -64,8 +64,10 @@ export function createWikiConflictsInbox(options: { snapshot: () => WikiFindings
 
   function toggleBasket(finding: WikiFinding | null): void {
     if (!finding) return;
-    if (basketIds.includes(finding.id)) basketIds = basketIds.filter(id => id !== finding.id);
-    else if (!finding.stale && basket.length < MAX_KNOWLEDGE_BATCH_FINDINGS) basketIds = [...basketIds, finding.id];
+    if (basketIds.includes(finding.id)) { basketIds = basketIds.filter(id => id !== finding.id); return; }
+    if (finding.stale || basket.length >= MAX_KNOWLEDGE_BATCH_FINDINGS) return;
+    // Drop ids that disappeared or went stale so the raw list stays within the cap.
+    basketIds = [...basket.map(item => item.id), finding.id];
   }
 
   /** Drops the given ids (for example, after they were handed off); all when omitted. */

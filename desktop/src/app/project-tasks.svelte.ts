@@ -37,11 +37,16 @@ type ProjectTasksStoreOptions = {
 type ProjectTasksPanelSnapshot = {
   document: unknown;
   attachmentCounts: Record<string, number> | null;
+  /** Content hash from Rust; absent/empty means "always apply". */
+  revision?: string;
 };
 
-async function readPanel(workspace: string) {
+/** Returns `null` when the snapshot revision equals `knownRevision` (nothing to parse or diff). */
+async function readPanel(workspace: string, knownRevision?: string) {
   const snapshot = await invoke<ProjectTasksPanelSnapshot>("read_project_tasks_panel", { workspace });
-  return { document: parseTaskDocument(snapshot.document), attachmentCounts: snapshot.attachmentCounts };
+  const revision = snapshot.revision || undefined;
+  if (revision !== undefined && revision === knownRevision) return null;
+  return { document: parseTaskDocument(snapshot.document), attachmentCounts: snapshot.attachmentCounts, revision };
 }
 
 export function createProjectTasksStore(options: ProjectTasksStoreOptions) {
@@ -57,7 +62,12 @@ export function createProjectTasksStore(options: ProjectTasksStoreOptions) {
   let pollGeneration = 0;
   let refreshing = false;
 
-  function applyPanel(next: Awaited<ReturnType<typeof readPanel>>, workspace: string): void {
+  // Revision of the snapshot last applied for `loadedWorkspace`. Polls skip
+  // parsing and JSON diffing while it is unchanged; loads/saves clear it.
+  let appliedRevision: string | undefined;
+
+  function applyPanel(next: NonNullable<Awaited<ReturnType<typeof readPanel>>>, workspace: string): void {
+    appliedRevision = next.revision;
     if (JSON.stringify(next.document) !== JSON.stringify(document)) document = next.document;
     const counts = next.attachmentCounts ?? (loadedWorkspace === workspace ? attachmentCounts : {});
     if (JSON.stringify(counts) !== JSON.stringify(attachmentCounts)) attachmentCounts = counts;
@@ -70,10 +80,11 @@ export function createProjectTasksStore(options: ProjectTasksStoreOptions) {
     const mutation = mutationGeneration;
     refreshing = true;
     try {
-      const next = await readPanel(projectPath);
+      const known = loadedWorkspace === projectPath ? appliedRevision : undefined;
+      const next = await readPanel(projectPath, known);
       if (poll !== pollGeneration || generation !== loadGeneration || mutation !== mutationGeneration
         || options.workspace() !== projectPath || saving) return;
-      applyPanel(next, projectPath);
+      if (next) applyPanel(next, projectPath);
       loadFailed = false;
     } catch (error) {
       if (poll === pollGeneration && generation === loadGeneration && mutation === mutationGeneration
@@ -102,13 +113,14 @@ export function createProjectTasksStore(options: ProjectTasksStoreOptions) {
   async function load(projectPath: string): Promise<void> {
     if (saving) return;
     const generation = ++loadGeneration;
+    appliedRevision = undefined;
     loading = true;
     loadFailed = false;
     saveError = null;
     try {
       const next = await readPanel(projectPath);
       if (generation !== loadGeneration || options.workspace() !== projectPath) return;
-      applyPanel(next, projectPath);
+      if (next) applyPanel(next, projectPath);
     } catch (error) {
       if (generation === loadGeneration && options.workspace() === projectPath) {
         loadFailed = true;
@@ -124,6 +136,7 @@ export function createProjectTasksStore(options: ProjectTasksStoreOptions) {
     if (!workspace || saving || loading || loadFailed) return false;
     const generation = ++loadGeneration;
     mutationGeneration++;
+    appliedRevision = undefined;
     const previous = document;
     let validated: ProjectTaskDocument;
     try {

@@ -122,7 +122,8 @@ export function createWikiAutoCheckScheduler(options: SchedulerOptions) {
   let generation = 0;
   let started = false;
   let disposed = false;
-  let busy = false;
+  /** Generation whose tick is in flight; a stale tick cannot block a newer one. */
+  let busyGeneration: number | undefined;
   let request: AbortController | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let timerAt = 0;
@@ -441,11 +442,13 @@ export function createWikiAutoCheckScheduler(options: SchedulerOptions) {
   }
 
   async function tick(): Promise<void> {
-    if (!started || disposed || busy) return;
+    // The busy gate is per generation: a tick whose invoke ignores abort and
+    // never settles must not block auto-check for the next workspace.
+    if (!started || disposed || busyGeneration === generation) return;
     const workspace = options.workspace();
     if (!workspace || workspace !== boundWorkspace) { reset(); return; }
-    busy = true;
     const ownedGeneration = generation;
+    busyGeneration = ownedGeneration;
     const controller = new AbortController();
     request = controller;
     const valid = () => started && !disposed && generation === ownedGeneration
@@ -478,7 +481,7 @@ export function createWikiAutoCheckScheduler(options: SchedulerOptions) {
       if (valid()) report(error);
     } finally {
       if (request === controller) request = undefined;
-      busy = false;
+      if (busyGeneration === ownedGeneration) busyGeneration = undefined;
       if (started && !disposed) schedule(valid() ? nextDelay() : 0);
     }
   }

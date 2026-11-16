@@ -222,6 +222,24 @@ describe("createQuotaWaitStore actions", () => {
     expect(vi.mocked(client.prompt)).toHaveBeenCalledTimes(1);
   });
 
+  it("a stale send finishing after reset does not release a newer send's guard", async () => {
+    const releases: Array<() => void> = [];
+    const client = {
+      prompt: vi.fn(() => new Promise<void>((resolve) => { releases.push(resolve); })),
+    } as unknown as AcpClient;
+    const { store } = createStore({ client });
+    const stale = store.sendAction("session-1", "retry");
+    store.reset();
+    const current = store.sendAction("session-1", "retry");
+    releases[0]!();
+    await stale;
+    // The newer command is still in flight, so a duplicate stays suppressed.
+    const duplicate = store.sendAction("session-1", "retry");
+    expect(vi.mocked(client.prompt)).toHaveBeenCalledTimes(2);
+    releases[1]!();
+    await Promise.all([current, duplicate]);
+  });
+
   it("does not send without a client or ready runtime", async () => {
     const { store: noClient } = createStore({ client: null });
     await noClient.sendAction("session-1", "retry");

@@ -83,6 +83,9 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
     const audioPlayers = new Map<HTMLElement, () => void>();
     let mediaObserver: IntersectionObserver | undefined;
     let diagramObserver: IntersectionObserver | undefined;
+    /** Latest render token per diagram, so only its newest render may retry. */
+    const diagramRenders = new WeakMap<HTMLElement, number>();
+    let diagramRenderToken = 0;
     let fileLinkObserver: IntersectionObserver | undefined;
     const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
 
@@ -383,6 +386,8 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
       const canvas = diagram.querySelector<HTMLElement>(".mermaid-canvas");
       if (source === undefined || !canvas) return;
 
+      const token = ++diagramRenderToken;
+      diagramRenders.set(diagram, token);
       diagram.dataset.mermaidState = "loading";
       canvas.setAttribute("aria-busy", "true");
       try {
@@ -397,6 +402,13 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
       } finally {
         if (scheduledGeneration === generation && node.contains(canvas)) {
           canvas.setAttribute("aria-busy", "false");
+        } else if (!destroyed && diagramRenders.get(diagram) === token && node.contains(diagram)
+          && diagram.dataset.mermaidState === "loading") {
+          // Superseded while this element survived the re-render: newer passes
+          // skipped it as "loading", so render it again for the current pass.
+          delete diagram.dataset.mermaidState;
+          canvas.setAttribute("aria-busy", "false");
+          void renderDiagram(diagram, generation);
         }
       }
     }

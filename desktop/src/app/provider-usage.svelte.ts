@@ -61,8 +61,20 @@ function cachedQuota(): QuotaCacheEntry | undefined {
   }
 }
 
+/** Snapshot updated in memory but not yet written to localStorage. */
+let unpersistedQuota: QuotaCacheEntry | undefined;
+
+/** Update the app-wide snapshot in memory; `persistQuota` writes it once per refresh. */
 function rememberQuota(next: QuotaCacheEntry): void {
   quotaCache = next;
+  unpersistedQuota = next;
+}
+
+/** Serialize the latest snapshot once instead of once per model result. */
+function persistQuota(): void {
+  const next = unpersistedQuota;
+  if (!next) return;
+  unpersistedQuota = undefined;
   try {
     storage()?.setItem(QUOTA_STORAGE_KEY, JSON.stringify(next));
   } catch (error) {
@@ -73,6 +85,7 @@ function rememberQuota(next: QuotaCacheEntry): void {
 /** Test hook: forget the in-memory app-wide quota snapshot. */
 export function resetProviderUsageCacheForTests(): void {
   quotaCache = undefined;
+  unpersistedQuota = undefined;
 }
 
 /** Sessionless quota polling while Provider limits is expanded, not tied to the active model. */
@@ -204,6 +217,8 @@ export function createProviderUsageStore(options: {
         setEntries(entries.map(failedEntry));
         options.reportError(cause);
       } finally {
+        // Persist even for a superseded run: its rows are already the app-wide snapshot.
+        persistQuota();
         if (current()) {
           busy = false;
           pending = undefined;
@@ -226,6 +241,7 @@ export function createProviderUsageStore(options: {
       return refresh();
     },
     pause(): void {
+      persistQuota();
       active = false;
       generation++;
       clearTimer();
@@ -233,6 +249,7 @@ export function createProviderUsageStore(options: {
       pending = undefined;
     },
     dispose(): void {
+      persistQuota();
       disposed = true;
       generation++;
       clearTimer();

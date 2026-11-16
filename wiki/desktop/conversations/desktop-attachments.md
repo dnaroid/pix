@@ -46,13 +46,14 @@ Show image and video attachments in the desktop composer and transcript, while k
   submission, so the agent receives a usable local path.
 - A prompt may contain text, attachments, or both.
 - Creating a project task persists attachments into the project's
-  `.pi/task-attachments` storage before writing task description markers. This
+  `.pi/task-attachments` storage before committing the task and its attachment
+  associations. This
   includes path-backed composer files, so a task never depends on Pix's expiring
   general attachment cache or on the original selected file remaining in place.
   Pathless images are materialized into the same storage from their image bytes.
-- Successful task-document writes prune project-owned task attachments that no
-  longer have any task-description marker. Files referenced by another task are
-  retained until that final reference is removed.
+- Task saves never prune attachment blobs. Associations are relational rows in
+  the SQLite task store; stored blobs are immutable and stay until an explicit,
+  reference-aware cleanup (see [Desktop tasks](../../work-management/tasks/desktop.md)).
 - Loaded sessions replay persisted images as previews. Persisted resource-link markers are restored as file/video attachments when their local paths remain available.
 - Attachment failures leave the composer contents intact and surface the existing error banner.
 
@@ -120,4 +121,4 @@ Show image and video attachments in the desktop composer and transcript, while k
 - Confirmed by docs: ACP resource links are baseline prompt content; Tauri's asset protocol serves local media and the opener plugin opens paths with the default application.
 - Confirmed by user: files should be added by picker, drag-and-drop, and paste; non-image files should be passed to the agent by local path.
 
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"ec6042a523dc2c16d14d10a28ec1f82f3b3b9528734912c37f059fdd61adfaed","checkedAt":"2026-10-31T02:08:57.463Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":64,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"966a436b008ec5fa9c2610e97b0e52422dd0d140ca2823d0ffc9d939d9fe36db","checkedAt":"2026-11-16T15:42:45.435Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":69,"reportLanguage":"ru"} -->

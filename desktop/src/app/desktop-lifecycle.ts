@@ -34,13 +34,6 @@ type DesktopLifecycleOptions = {
 export function createDesktopLifecycle(options: DesktopLifecycleOptions) {
   function start(): () => void {
     let disposed = false;
-    const runtimeStatusTimer = window.setInterval(() => {
-      const sessionId = options.activeSessionId();
-      if (sessionId && options.activeSessionRuntimeReady()) {
-        void options.refreshRuntimeStatus(sessionId, true);
-      }
-    }, RUNTIME_STATUS_REFRESH_MS);
-
     options.restoreProjects();
     options.refreshProjectColors();
     const workspace = options.workspace();
@@ -59,6 +52,15 @@ export function createDesktopLifecycle(options: DesktopLifecycleOptions) {
       insertPromptPaths: options.insertPromptPaths,
       reportError: options.reportError,
     });
+
+    // Created after the synchronous setup above, so a throw there cannot
+    // leave the interval running without a disposer to clear it.
+    const runtimeStatusTimer = window.setInterval(() => {
+      const sessionId = options.activeSessionId();
+      if (sessionId && options.activeSessionRuntimeReady()) {
+        void Promise.resolve(options.refreshRuntimeStatus(sessionId, true)).catch(options.reportError);
+      }
+    }, RUNTIME_STATUS_REFRESH_MS);
 
     function disposeConnectionAndReset(): void {
       // Reset now, and again once in-flight connection work has settled so a
@@ -82,18 +84,24 @@ export function createDesktopLifecycle(options: DesktopLifecycleOptions) {
 
     void options.connect().then(() => {
       if (disposed) disposeConnectionAndReset();
-    });
+    }, options.reportError);
 
     return () => {
       disposed = true;
       window.clearInterval(runtimeStatusTimer);
-      disposeFileDrop();
-      options.disposeSessionUpdates();
-      options.disposeTranscriptScroll();
-      options.cancelAllPendingElicitations();
-      options.disposeGitCi();
-      options.disposeProjectDocuments?.();
-      disposeConnectionAndReset();
+      // Each disposer runs independently: one throwing must not leave the
+      // connection or the CI/document watchers alive.
+      for (const dispose of [
+        disposeFileDrop,
+        options.disposeSessionUpdates,
+        options.disposeTranscriptScroll,
+        options.cancelAllPendingElicitations,
+        options.disposeGitCi,
+        () => options.disposeProjectDocuments?.(),
+        disposeConnectionAndReset,
+      ]) {
+        try { dispose(); } catch (error) { options.reportError(error); }
+      }
     };
   }
 
