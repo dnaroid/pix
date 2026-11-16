@@ -59,6 +59,71 @@ fn can_ignore_from(workspace: &Path, path: &str) -> Result<bool, String> {
     eligible(&root, path)
 }
 
+/// Rules added to the repository root `.gitignore` when Desktop creates a new
+/// repository. `.pi/` holds project-local Pix state (synced through the
+/// Registry, not Git); `.DS_Store` is macOS Finder metadata.
+const DEFAULT_IGNORE_RULES: [(&str, &[&str]); 2] = [
+    ("/.pi/", &[".pi", ".pi/", "/.pi", "/.pi/"]),
+    (".DS_Store", &[".DS_Store", "/.DS_Store", "**/.DS_Store"]),
+];
+
+/// Append missing default rules to `<root>/.gitignore`, creating it when absent.
+/// Existing equivalent rules are kept as-is; a symlinked or non-regular
+/// `.gitignore` is never followed or rewritten.
+pub(crate) fn ensure_default_ignores(root: &Path) -> Result<(), String> {
+    let _guard = IGNORE_WRITE.lock().map_err(|error| error.to_string())?;
+    let ignore = root.join(".gitignore");
+    let existing = match fs::symlink_metadata(&ignore) {
+        Ok(metadata) => {
+            if !metadata.is_file() || metadata.file_type().is_symlink() {
+                return Err(".gitignore must be a regular file, not a symbolic link".into());
+            }
+            fs::read(&ignore).map_err(|error| error.to_string())?
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => return Err(error.to_string()),
+    };
+    let text = String::from_utf8_lossy(&existing);
+    let present = |equivalents: &[&str]| {
+        text.lines()
+            .map(str::trim)
+            .any(|line| equivalents.contains(&line))
+    };
+    let missing = DEFAULT_IGNORE_RULES
+        .iter()
+        .filter(|(_, equivalents)| !present(equivalents))
+        .map(|(rule, _)| *rule)
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let newline = if existing.windows(2).any(|bytes| bytes == b"\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let separator = if existing.is_empty() || existing.ends_with(b"\n") {
+        ""
+    } else {
+        newline
+    };
+    let mut content = String::from(separator);
+    for rule in missing {
+        content.push_str(rule);
+        content.push_str(newline);
+    }
+    let mut options = fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options.open(&ignore).map_err(|error| error.to_string())?;
+    file.write_all(content.as_bytes())
+        .map_err(|error| error.to_string())
+}
+
 fn literal_rule(path: &Path, directory: bool) -> Result<String, String> {
     let text = path.to_str().ok_or("Git ignore path is not UTF-8")?;
     let mut rule = String::from("/");
@@ -158,6 +223,40 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn default_ignores_append_missing_rules_once() {
+        let repo = Repository::new();
+        ensure_default_ignores(&repo.0).unwrap();
+        assert_eq!(
+            fs::read_to_string(repo.0.join(".gitignore")).unwrap(),
+            "/.pi/\n.DS_Store\n"
+        );
+        ensure_default_ignores(&repo.0).unwrap();
+        assert_eq!(
+            fs::read_to_string(repo.0.join(".gitignore")).unwrap(),
+            "/.pi/\n.DS_Store\n"
+        );
+
+        let repo = Repository::new();
+        fs::write(repo.0.join(".gitignore"), "# own\r\n/.pi\r\nnode_modules").unwrap();
+        ensure_default_ignores(&repo.0).unwrap();
+        assert_eq!(
+            fs::read_to_string(repo.0.join(".gitignore")).unwrap(),
+            "# own\r\n/.pi\r\nnode_modules\r\n.DS_Store\r\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn default_ignores_reject_symlinked_ignore_file() {
+        use std::os::unix::fs::symlink;
+        let repo = Repository::new();
+        fs::write(repo.0.join("target"), "data").unwrap();
+        symlink("target", repo.0.join(".gitignore")).unwrap();
+        assert!(ensure_default_ignores(&repo.0).is_err());
+        assert_eq!(fs::read_to_string(repo.0.join("target")).unwrap(), "data");
     }
 
     #[test]

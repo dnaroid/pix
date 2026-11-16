@@ -13,6 +13,10 @@ export type JsonlParser<S, R> = {
 	line(state: S, value: unknown, emit: (record: R) => void): void;
 };
 
+/**
+ * `records` is a view into the cache's per-file buffer, which later reads
+ * extend in place. Consume it before the next `read()` on the same cache.
+ */
 export type JsonlFileResult<R> = { readonly path: string; readonly records: readonly R[] };
 export type JsonlSkippedFile = { readonly path: string; readonly error: string };
 export type JsonlReadResult<R> = {
@@ -30,9 +34,14 @@ type CacheEntry<S, R> = {
 	/** Hash of the bytes right before `offset`; detects in-place rewrites. */
 	readonly anchor: string;
 	readonly state: S;
-	readonly committed: readonly R[];
-	/** `committed` plus the speculative unterminated tail, if any. */
-	readonly view: readonly R[];
+	/**
+	 * Append-only buffer shared across refreshes of the same file: committed
+	 * records first, then the speculative unterminated tail, if any. Refreshes
+	 * truncate the tail and append in place instead of copying the history.
+	 */
+	readonly records: R[];
+	/** Number of leading `records` committed by complete lines. */
+	readonly committedLength: number;
 	readonly malformedLines: number;
 };
 
@@ -75,7 +84,7 @@ export class JsonlTailCache<S, R> {
 			try {
 				const entry = await this.refresh(path, signal);
 				if (entry) {
-					files.push({ path, records: entry.view });
+					files.push({ path, records: entry.records });
 					malformedLines += entry.malformedLines;
 				}
 			} catch (error) {
@@ -133,18 +142,27 @@ export class JsonlTailCache<S, R> {
 			signal?.throwIfAborted();
 
 			const offset = position - pending.length;
-			const committed = base ? base.committed.concat(added) : added;
 			const tentative: R[] = [];
 			if (pending.length > 0) this.parseLine(pending, this.parser.clone(state), (record) => { tentative.push(record); });
+			// Last await: the shared buffer is mutated only after it, so an aborted
+			// or failed refresh leaves the previous entry's records untouched.
+			const anchor = await anchorAt(handle, offset);
+			const records = base ? base.records : added;
+			if (base) {
+				records.length = base.committedLength;
+				appendAll(records, added);
+			}
+			const committedLength = records.length;
+			appendAll(records, tentative);
 			const entry: CacheEntry<S, R> = {
 				ino: Number(info.ino),
 				size,
 				mtimeMs: info.mtimeMs,
 				offset,
-				anchor: await anchorAt(handle, offset),
+				anchor,
 				state,
-				committed,
-				view: tentative.length > 0 ? committed.concat(tentative) : committed,
+				records,
+				committedLength,
 				malformedLines,
 			};
 			this.entries.set(path, entry);
@@ -190,6 +208,11 @@ async function anchorAt(handle: FileHandle, offset: number): Promise<string> {
 	const bytes = Buffer.alloc(length);
 	const { bytesRead } = await handle.read(bytes, 0, length, offset - length);
 	return createHash("sha1").update(bytes.subarray(0, bytesRead)).digest("hex");
+}
+
+/** Loop instead of `push(...items)`, which overflows the stack for huge batches. */
+function appendAll<T>(target: T[], items: readonly T[]): void {
+	for (const item of items) target.push(item);
 }
 
 function isMissing(error: unknown): boolean {

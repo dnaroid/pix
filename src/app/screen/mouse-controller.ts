@@ -1147,6 +1147,12 @@ export class AppMouseController {
 		this.autoScrollAccumulator = 0;
 		this.autoScrollLastTick = Date.now();
 		this.autoScrollTimer = setInterval(() => this.tickAutoScroll(), 16);
+		this.autoScrollTimer.unref?.();
+	}
+
+	/** Release timers owned by mouse interaction during app shutdown. */
+	dispose(): void {
+		this.stopAutoScroll();
 	}
 
 	private stopAutoScroll(): void {

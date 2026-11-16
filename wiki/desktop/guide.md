@@ -132,7 +132,13 @@ panels:
 
 - Source Control shows **Initialize Git** when the selected workspace has no Git
   repository. Pix refuses to create a nested repository when the workspace is
-  already inside another Git root.
+  already inside another Git root. After `git init -b main` in a new repository,
+  Pix appends missing `/.pi/` and `.DS_Store` rules to the root `.gitignore`
+  (creating it if absent). Equivalent existing rules such as `/.pi` or
+  `**/.DS_Store` are kept, and CRLF newlines are preserved. A symlinked or
+  non-regular `.gitignore` is not modified; the result reports
+  `Git repository initialized, but .gitignore could not be updated: ...`.
+  Re-initializing an existing repository does not touch `.gitignore`.
 - Registry offers **Initialize project Registry** as an optional full scaffold
   setup (SQLite tasks, plans and attachments); saving a task, plan, attachment
   or project setting creates only the required `.pi` storage on demand. Merely

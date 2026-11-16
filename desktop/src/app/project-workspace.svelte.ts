@@ -108,6 +108,18 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
     pruneProjectColors();
   }
 
+  /** Replaces a renamed project's recent entry in place. */
+  function relocate(from: string, to: string): void {
+    if (!recentProjects.includes(from)) return;
+    recentProjects = buildRecentProjects(recentProjects.map((path) => (path === from ? to : path)));
+    try {
+      localStorage.setItem(RECENT_PROJECTS_STORAGE_KEY, JSON.stringify(recentProjects));
+    } catch (error) {
+      options.reportError(error);
+    }
+    pruneProjectColors();
+  }
+
   async function openInFinder(path: string): Promise<void> {
     try {
       await invoke("reveal_project_entry", { workspace: path, path: null });
@@ -318,6 +330,7 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
     get gitCiFixModelRef() { return gitCiFixModelRef; },
     remember,
     forget,
+    relocate,
     openInFinder,
     restore,
     refreshColors,

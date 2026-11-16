@@ -1,6 +1,11 @@
 import type { ActiveSessionState } from "./active-session-state.svelte";
 import type { DesktopProjectServices } from "./desktop-project-services";
 import type { DesktopSessionServices } from "./desktop-session-services";
+import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
+import { confirmDesktopAction } from "../lib/confirm-action";
+import { createDiagnosticLogger } from "../lib/diagnostic-logging";
+import { createProjectRelocation } from "./project-relocation";
 import { createWorkspaceController } from "./workspace-controller";
 
 type SessionTabController = {
@@ -33,7 +38,29 @@ type DesktopWorkspaceServicesOptions = {
 };
 
 export function createDesktopWorkspaceServices(options: DesktopWorkspaceServicesOptions) {
+  const diagnostics = createDiagnosticLogger(() => ({ workspace: options.workspace() }));
+  const relocation = createProjectRelocation({
+    invoke: (command, args) => invoke(command, args),
+    confirm: (message, confirmOptions) => confirmDesktopAction(message, { kind: "warning", ...confirmOptions }),
+    pickFolder: async (defaultPath) => {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "Locate the renamed or moved project folder",
+        defaultPath,
+      });
+      return typeof selected === "string" ? selected : null;
+    },
+    storage: () => localStorage,
+    recentProjects: () => options.project.workspace.recentProjects,
+    relocateInMemory: (from, to) => {
+      options.sessions.tabs.relocateWorkspace(from, to);
+      options.project.workspace.relocate(from, to);
+    },
+    reportWarning: (message) => diagnostics.report(new Error(message), "frontend:warning", "project-relocation"),
+  });
   const controller = createWorkspaceController({
+    relocation,
     workspace: options.workspace,
     blocked: options.blocked,
     previewDirty: () => options.project.preview.dirty,

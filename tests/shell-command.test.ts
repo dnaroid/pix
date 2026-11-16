@@ -10,6 +10,7 @@ import {
 	runInteractiveShellCommand,
 	setShellCommandTestDeps,
 	shellCommandFromBangInput,
+	waitForReturnKey,
 } from "../src/app/commands/shell-command.js";
 
 type FakeChildProcess = EventEmitter & {
@@ -96,6 +97,31 @@ describe("shell command helpers", () => {
 			process.stdout.write = originalWrite;
 			restore();
 		}
+	});
+
+	it("returns to pix on input, end, close or error and removes every listener", async () => {
+		for (const trigger of ["data", "end", "close", "error"] as const) {
+			const input = new PassThrough();
+			input.on("error", () => {});
+			const baseline = ["data", "end", "close", "error"].map((event) => input.listenerCount(event));
+			let settled = false;
+			const waiting = waitForReturnKey(input).then(() => { settled = true; });
+			await new Promise((resolve) => setImmediate(resolve));
+			assert.equal(settled, false, `${trigger}: still waiting before input`);
+			if (trigger === "data") input.write("\n");
+			else if (trigger === "end") { input.end(); input.resume(); }
+			else if (trigger === "close") input.destroy();
+			else input.emit("error", new Error("tty gone"));
+			await waiting;
+			assert.equal(settled, true, trigger);
+			assert.deepEqual(["data", "end", "close", "error"].map((event) => input.listenerCount(event)), baseline, `${trigger}: listeners released`);
+		}
+	});
+
+	it("does not wait on an already closed input", async () => {
+		const input = new PassThrough();
+		input.destroy();
+		await waitForReturnKey(input);
 	});
 
 	it("formats shell command entry outcomes", () => {

@@ -852,6 +852,7 @@
     disposeTranscriptScroll: transcriptScroll.dispose,
     resetAfterDisconnect: () => sessionCoordinator.resetAfterDisconnect(),
     cancelAllPendingElicitations,
+    reconcileWorkspace: () => workspaceServices.controller.reconcile(),
     reportError,
   });
   const workbenchTabs = $derived(presentationState.workbenchTabs);

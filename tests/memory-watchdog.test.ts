@@ -287,6 +287,28 @@ describe("memory watchdog", () => {
 		assert.equal(harness.snapshots.length, 1);
 	});
 
+	it("never arms a heap snapshot when stop() runs while the report is being written", async () => {
+		let releaseWrite!: () => void;
+		let writeStarted!: () => void;
+		const started = new Promise<void>((resolve) => { writeStarted = resolve; });
+		const harness = createHarness({}, {
+			writeReport: () => new Promise<void>((resolve) => {
+				writeStarted();
+				releaseWrite = resolve;
+			}),
+		});
+		harness.setRss(1100 * MB);
+		const pending = harness.watchdog.tick();
+		assert.ok(pending);
+		await started;
+		harness.watchdog.stop();
+		releaseWrite();
+		const result = await pending;
+		assert.equal(result?.heapSnapshotPath, undefined);
+		harness.runTimeouts();
+		assert.equal(harness.snapshots.length, 0, "no synchronous snapshot after the watchdog stopped");
+	});
+
 	it("applies reloaded config: disable stops sampling, a new threshold re-arms", async () => {
 		const harness = createHarness({ heapSnapshot: false });
 		harness.watchdog.start();

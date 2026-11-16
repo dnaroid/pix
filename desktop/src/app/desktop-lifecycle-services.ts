@@ -34,6 +34,8 @@ type DesktopLifecycleServicesOptions = {
   disposeTranscriptScroll: () => void;
   resetAfterDisconnect: () => void;
   cancelAllPendingElicitations: () => void;
+  /** Startup check of the restored workspace (renamed/moved project detection). */
+  reconcileWorkspace?: () => Promise<void>;
   reportError: (error: unknown) => void;
 };
 
@@ -75,6 +77,7 @@ export function createDesktopLifecycleServices(options: DesktopLifecycleServices
     ),
     insertPromptPaths: (paths) => options.promptComposer()?.insertPaths(paths),
     connect: options.connection.connect,
+    afterConnect: options.reconcileWorkspace,
     disposeConnection: options.connection.dispose,
     resetAfterDisconnect: options.resetAfterDisconnect,
     disposeSessionUpdates: options.promptServices.updates.dispose,

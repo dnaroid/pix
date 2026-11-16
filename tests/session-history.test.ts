@@ -443,6 +443,68 @@ describe("loadSessionHistoryEntriesAsync", () => {
 		assert.equal(completed, false);
 		assert.deepEqual(entries.map(entryText), ["new"]);
 	});
+
+	it("keeps an external older batch that resolves after ownership is lost and applies it once ownership returns", async () => {
+		const entries: Entry[] = [];
+		let cancelled = false;
+		let olderLoader: SessionHistoryOlderLoader | undefined;
+		let releaseRead!: (messages: readonly unknown[]) => void;
+		let readStarted!: () => void;
+		const started = new Promise<void>((resolve) => { readStarted = resolve; });
+		let readerHasOlder = true;
+		let readCount = 0;
+		const olderMessagesReader = {
+			hasOlder: () => readerHasOlder,
+			readOlder: (_limit: number) => {
+				readCount += 1;
+				readStarted();
+				return new Promise<readonly unknown[]>((resolve) => {
+					releaseRead = (messages) => {
+						readerHasOlder = false;
+						resolve(messages);
+					};
+				});
+			},
+		};
+
+		await loadSessionHistoryEntriesAsync({
+			messages: [{ role: "user", content: "tail" }],
+			olderMessagesReader,
+			addEntry: (entry) => entries.push(entry),
+			prependEntries: (newEntries) => entries.unshift(...newEntries),
+			setToolEntryId: () => {},
+			toolDefaultExpanded: () => false,
+			observeSubagentsToolResult: () => {},
+			observeTodoToolResult: () => {},
+			isCancelled: () => cancelled,
+			render: () => {},
+			chunkSize: 2,
+			tailMessageCount: 1,
+			lazyOlderHistory: true,
+			onOlderLoaderReady: (loader) => {
+				olderLoader = loader;
+			},
+		});
+		const loader = olderLoader;
+		assert.ok(loader);
+
+		const loading = loader.loadOlder();
+		await started;
+		// The user switches to another tab while the disk read is pending.
+		cancelled = true;
+		releaseRead([{ role: "user", content: "older" }]);
+		assert.equal(await loading, false);
+		assert.deepEqual(entries.map(entryText), ["tail"], "a stale batch must not reach another tab's history");
+		assert.equal(loader.hasOlder(), true, "the consumed batch is kept rather than dropped");
+		assert.equal(olderLoader, loader, "a stashed batch keeps the loader alive");
+
+		// The user returns to the original tab.
+		cancelled = false;
+		assert.equal(await loader.loadOlder(), true);
+		assert.deepEqual(entries.map(entryText), ["older", "tail"]);
+		assert.equal(readCount, 1, "the stashed batch is applied without re-reading");
+		assert.equal(olderLoader, undefined);
+	});
 });
 
 function writeLinearUserSession(messageCount: number): { sessionDir: string; sessionPath: string } {

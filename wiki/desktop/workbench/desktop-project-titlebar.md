@@ -75,6 +75,8 @@ without blocking desktop interactions.
 - Recent projects persist locally under `pix.desktop.recentProjects`; malformed,
   relative, and duplicate entries are ignored. `pix.desktop.workspace` remains
   the persisted active project and is folded into the recent list on startup.
+- A recent project whose folder moved or was renamed is handled by the
+  project-relocation flow: see [Desktop project relocation](desktop-project-relocation.md).
 - A valid `workspace` URL query is the startup workspace source of truth and
   takes precedence over persisted local storage. If local storage is unavailable,
   that URL workspace remains selected.

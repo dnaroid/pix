@@ -220,6 +220,16 @@ export class AppSessionEventController {
 		const lazyOlderHistory = options.lazyOlderHistory === true;
 		const historyEntries: Entry[] = [];
 		let historyAttached = false;
+		let ownedLoader: SessionHistoryOlderLoader | undefined;
+		// Before attach, the caller's load generation decides cancellation. After
+		// attach, the lazy loader outlives that load: it stays live while it is the
+		// controller's current loader for this runtime, including after its tab's
+		// cached view is restored, and is cancelled while another tab owns the view.
+		const isCancelled = (): boolean => historyAttached
+			? ownedLoader === undefined
+				|| this.olderHistoryLoader !== ownedLoader
+				|| this.host.runtime() !== runtime
+			: options.isCancelled();
 		const messages = lazyOlderHistory
 			? sessionHistoryDisplayMessages(runtime.session)
 			: sessionHistoryDisplayMessagesFromEntries(await sessionHistoryFullBranchEntries(runtime.session));
@@ -236,14 +246,21 @@ export class AppSessionEventController {
 			toolDefaultExpanded: (toolName) => this.host.toolDefaultExpanded(toolName),
 			observeSubagentsToolResult: (toolName, details, options) => this.host.observeSubagentsToolResult(toolName, details, options),
 			observeTodoToolResult: (toolName, details, isError) => this.host.observeTodoToolResult(toolName, details, isError),
-			isCancelled: options.isCancelled,
+			isCancelled,
 			render: () => {
-				if (historyAttached) options.render();
+				if (historyAttached && !isCancelled()) this.host.render();
 			},
 			lazyOlderHistory,
 			olderMessagesReader: lazyOlderHistory ? sessionHistoryOlderMessagesReader(runtime.session) : undefined,
 			onOlderLoaderReady: (loader) => {
-				if (!options.isCancelled()) this.olderHistoryLoader = loader;
+				if (loader) {
+					if (options.isCancelled()) return;
+					ownedLoader = loader;
+					this.olderHistoryLoader = loader;
+					return;
+				}
+				// Exhaustion clears only this load's loader, never a newer one.
+				if (ownedLoader !== undefined && this.olderHistoryLoader === ownedLoader) this.olderHistoryLoader = undefined;
 			},
 		});
 		if (!loaded) return false;
@@ -533,9 +550,12 @@ export class AppSessionEventController {
 	addEntry(entry: Entry): void {
 		if (this.historyEntries.length > 0) {
 			const wasAtBottom = !this.hasNewerSessionHistory();
+			const previousStart = this.historyWindowStart;
 			this.historyEntries.push(entry);
 			this.registerEntry(entry);
-			if (wasAtBottom) this.setHistoryWindowStart(this.maxHistoryWindowStart());
+			if (wasAtBottom && !this.appendToFollowedHistoryWindow(entry, previousStart)) {
+				this.setHistoryWindowStart(this.maxHistoryWindowStart());
+			}
 			return;
 		}
 
@@ -567,6 +587,31 @@ export class AppSessionEventController {
 		if (nextStart < previousStart) options.onPrependedEntries?.(this.historyEntries.slice(nextStart, previousStart));
 		this.setHistoryWindowStart(nextStart);
 		if (options.render !== false) this.host.render();
+		return true;
+	}
+
+	/**
+	 * Follow-mode fast path for a streamed entry: slide the visible window by at
+	 * most one entry instead of rebuilding it, because a rebuild re-registers
+	 * every visible entry and drops all of their cached layouts. Returns false
+	 * (caller rebuilds) unless the visible window is exactly the expected slice.
+	 */
+	private appendToFollowedHistoryWindow(entry: Entry, previousStart: number): boolean {
+		const visible = this.host.entries;
+		const previousSize = Math.min(HISTORY_WINDOW_TARGET_ENTRIES, this.historyEntries.length - 1);
+		if (visible.length !== previousSize) return false;
+		if (visible[0] !== this.historyEntries[previousStart]) return false;
+		if (visible[previousSize - 1] !== this.historyEntries[previousStart + previousSize - 1]) return false;
+
+		const nextStart = this.maxHistoryWindowStart();
+		const shift = nextStart - previousStart;
+		if (shift !== 0 && shift !== 1) return false;
+		if (shift === 1) {
+			const dropped = visible.shift();
+			if (dropped) this.host.conversationViewport().deleteEntry(dropped.id);
+		}
+		visible.push(entry);
+		this.historyWindowStart = nextStart;
 		return true;
 	}
 

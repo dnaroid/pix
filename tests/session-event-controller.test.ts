@@ -21,11 +21,15 @@ describe("AppSessionEventController", () => {
 		assert.equal(log.mock.calls.find(call => call.arguments[1] === "tool:failed")?.arguments[0], "warn");
 		assert.doesNotMatch(JSON.stringify(log.mock.calls), /PRIVATE TOOL RESULT/);
 	});
-	function createController(entries: Entry[] = [], runtime: AgentSessionRuntime = ({ session: { isStreaming: false } }) as AgentSessionRuntime): AppSessionEventController {
+	function createController(
+		entries: Entry[] = [],
+		runtime: AgentSessionRuntime = ({ session: { isStreaming: false } }) as AgentSessionRuntime,
+		viewport: { deleteEntry(id: string): void } = { deleteEntry: () => {} },
+	): AppSessionEventController {
 		return new AppSessionEventController({
 			entries,
 			runtime: () => runtime,
-			conversationViewport: () => ({ deleteEntry: () => {} }) as never,
+			conversationViewport: () => viewport as never,
 			isRunning: () => false,
 			render: () => {},
 			scheduleRender: () => {},
@@ -147,6 +151,112 @@ describe("AppSessionEventController", () => {
 		assert.equal(olderReadCount, 1);
 		assert.deepEqual(entries.map(historyEntryText), ["message 0", "message 1", "message 2", "message 3"]);
 		assert.equal(controller.hasOlderSessionHistory(), false);
+	});
+
+	it("keeps a restored tab's lazy loader live and never prepends a pending read into another tab", async () => {
+		const entries: Entry[] = [];
+		const messageEntry = (index: number) => ({
+			type: "message",
+			id: `entry-${index}`,
+			parentId: index === 0 ? null : `entry-${index - 1}`,
+			timestamp: `2026-01-01T00:00:0${index}.000Z`,
+			message: { role: "user", content: `message ${index}` },
+		});
+		let hasOlder = true;
+		let readCount = 0;
+		let releaseRead!: () => void;
+		let readStarted!: () => void;
+		const started = new Promise<void>((resolve) => { readStarted = resolve; });
+		const sessionManager = {
+			getBranch: () => [messageEntry(2), messageEntry(3)],
+			createHistoryReader: () => ({
+				hasOlder: () => hasOlder,
+				readOlder: () => {
+					readCount += 1;
+					readStarted();
+					return new Promise<unknown[]>((resolve) => {
+						releaseRead = () => {
+							hasOlder = false;
+							resolve([messageEntry(0), messageEntry(1)]);
+						};
+					});
+				},
+			}),
+		};
+		const controller = createController(entries, {
+			session: { isStreaming: false, messages: [], sessionManager },
+		} as unknown as AgentSessionRuntime);
+
+		// Mirrors the tabs controller: the initial load is cancelled by a
+		// generation that is bumped whenever the user leaves the tab.
+		let historyLoadGeneration = 0;
+		const loadGeneration = historyLoadGeneration;
+		assert.equal(await controller.loadSessionHistoryAsync({
+			isCancelled: () => loadGeneration !== historyLoadGeneration,
+			render: () => {},
+			lazyOlderHistory: true,
+		}), true);
+		assert.deepEqual(entries.map(historyEntryText), ["message 2", "message 3"]);
+
+		const switchAway = () => {
+			const view = { entries: [...entries], state: controller.snapshotState() };
+			historyLoadGeneration += 1;
+			controller.reset();
+			entries.splice(0, entries.length, { id: "tab-b", kind: "user", text: "tab b" } as Entry);
+			return view;
+		};
+		const switchBack = (view: ReturnType<typeof switchAway>) => {
+			entries.splice(0, entries.length, ...view.entries);
+			controller.restoreState(view.state);
+		};
+
+		const loading = controller.loadOlderSessionHistory({ render: false });
+		await started;
+		const viewA = switchAway();
+		releaseRead();
+		assert.equal(await loading, false);
+		assert.deepEqual(entries.map(historyEntryText), ["tab b"], "a pending read must not land in another tab");
+
+		switchBack(viewA);
+		assert.equal(controller.hasOlderSessionHistory(), true);
+		assert.equal(await controller.loadOlderSessionHistory({ render: false }), true, "the restored loader is not permanently cancelled");
+		assert.deepEqual(entries.map(historyEntryText), ["message 0", "message 1", "message 2", "message 3"]);
+		assert.equal(readCount, 1, "the batch read during the switch is reused, not lost or re-read");
+		assert.equal(controller.hasOlderSessionHistory(), false);
+	});
+
+	it("slides a followed history window by one entry without invalidating other cached layouts", async () => {
+		const entries: Entry[] = [];
+		const deleted: string[] = [];
+		const branch = Array.from({ length: 300 }, (_value, index) => ({
+			type: "message",
+			id: `entry-${index}`,
+			parentId: index === 0 ? null : `entry-${index - 1}`,
+			timestamp: `2026-01-01T00:00:${String(index % 60).padStart(2, "0")}.000Z`,
+			message: { role: "user", content: `message ${index}` },
+		}));
+		const controller = createController(entries, {
+			session: { isStreaming: false, messages: [], sessionManager: { getBranch: () => branch } },
+		} as unknown as AgentSessionRuntime, { deleteEntry: (id) => { deleted.push(id); } });
+		assert.equal(await controller.loadSessionHistoryAsync({ isCancelled: () => false, render: () => {}, lazyOlderHistory: false }), true);
+		assert.equal(entries.length, 300);
+		const droppedId = entries[0]?.id;
+
+		deleted.length = 0;
+		controller.addEntry({ id: "live-1", kind: "user", text: "live 1" } as Entry);
+		assert.deepEqual(deleted.sort(), ["live-1", droppedId].sort(), "only the new and the dropped entry lose cached layout");
+		assert.equal(entries.length, 300);
+		assert.equal(historyEntryText(entries[0]), "message 1");
+		assert.equal(lastEntryText(entries), "live 1");
+		assert.equal(controller.hasNewerSessionHistory(), false);
+
+		// A visible window that no longer matches the history slice is rebuilt.
+		entries.splice(10, 1);
+		controller.addEntry({ id: "live-2", kind: "user", text: "live 2" } as Entry);
+		assert.equal(entries.length, 300);
+		assert.equal(historyEntryText(entries[0]), "message 2");
+		assert.equal(lastEntryText(entries), "live 2");
+		assert.equal(historyEntryText(entries[10]), "message 12");
 	});
 
 	it("retains newer pages after lazy history reaches the true beginning", async () => {

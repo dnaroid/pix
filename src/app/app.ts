@@ -980,7 +980,7 @@ export class PiUiExtendApp {
 			handleInputChunk: (chunk) => this.inputController.handleChunk(chunk),
 			closeSdkMenuForStop: () => this.popupMenus.closeSdkMenu(undefined, { render: false, restoreStatus: false }),
 			clearToastTimers: () => this.clearToastTimers(),
-			stopBlinking: () => this.stopBlinking(),
+			stopBlinking: () => { this.stopBlinking(); this.mouseController.dispose(); },
 			stopModelUsagePolling: () => this.modelUsageController.stopPolling(),
 			stopMemoryWatchdog: () => this.memoryWatchdog.stop(),
 			stopVoiceInput: () => this.voiceController.dispose(),

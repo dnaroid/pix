@@ -183,6 +183,77 @@ describe("AppTerminalController", () => {
 	});
 });
 
+describe("AppTerminalController termination signals", () => {
+	function fakeSignalDeps(platform: NodeJS.Platform) {
+		const handlers = new Map<NodeJS.Signals, (signal: NodeJS.Signals) => void>();
+		const exits: number[] = [];
+		const logged: NodeJS.Signals[] = [];
+		let exited!: () => void;
+		const exitedPromise = new Promise<void>((resolve) => { exited = resolve; });
+		return {
+			handlers,
+			exits,
+			logged,
+			exited: exitedPromise,
+			deps: {
+				platform,
+				onSignal: (signal: NodeJS.Signals, handler: (signal: NodeJS.Signals) => void) => { handlers.set(signal, handler); },
+				offSignal: (signal: NodeJS.Signals, handler: (signal: NodeJS.Signals) => void) => {
+					if (handlers.get(signal) === handler) handlers.delete(signal);
+				},
+				exit: (code: number) => { exits.push(code); exited(); },
+				logSignal: (signal: NodeJS.Signals) => { logged.push(signal); },
+			},
+		};
+	}
+
+	it("restores the terminal and runs bounded shutdown on SIGHUP, then exits with 128 + signal", async () => {
+		const writes: string[] = [];
+		const events: string[] = [];
+		const host = fakeHost([], events);
+		let savedDrafts = false;
+		host.saveInputStateForQuit = async () => { savedDrafts = true; };
+		const signals = fakeSignalDeps("darwin");
+		const controller = new AppTerminalController(host, signals.deps);
+		const restore = stubTerminalIo(writes);
+		const previousExitCode = process.exitCode;
+		try {
+			controller.enableTerminal();
+			assert.deepEqual([...signals.handlers.keys()].sort(), ["SIGHUP", "SIGTERM"]);
+
+			signals.handlers.get("SIGHUP")?.("SIGHUP");
+			// Terminal restoration is synchronous, before any cleanup is awaited.
+			assert.equal(host.isRunning(), false);
+			assert.ok(writes.some((chunk) => chunk.includes("\x1b[?1049l")), "alternate screen is left");
+			assert.equal(signals.handlers.size, 0, "handlers are removed once shutdown starts");
+
+			await signals.exited;
+			assert.deepEqual(signals.exits, [129]);
+			assert.deepEqual(signals.logged, ["SIGHUP"]);
+			assert.equal(savedDrafts, true);
+			assert.ok(events.includes("stopMemoryWatchdog"));
+		} finally {
+			process.exitCode = previousExitCode;
+			restore();
+		}
+	});
+
+	it("registers only SIGTERM on Windows and unregisters on a normal stop", async () => {
+		const signals = fakeSignalDeps("win32");
+		const controller = new AppTerminalController(fakeHost(), signals.deps);
+		const restore = stubTerminalIo([]);
+		try {
+			controller.enableTerminal();
+			assert.deepEqual([...signals.handlers.keys()], ["SIGTERM"]);
+			await controller.stop();
+			assert.equal(signals.handlers.size, 0);
+			assert.deepEqual(signals.exits, []);
+		} finally {
+			restore();
+		}
+	});
+});
+
 function fakeHost(inputChunks: string[] = [], events: string[] = []) {
 	let running = true;
 	return {

@@ -77,6 +77,7 @@ mod project_entry_drag_source;
 mod project_file_history;
 mod project_file_search;
 mod project_icon;
+mod project_relocation;
 mod project_storage;
 mod project_tasks_sqlite;
 mod wiki_check_inventory;
@@ -171,6 +172,8 @@ const PROJECT_PI_CANONICAL_FILES: &[&str] = &[
     "registry.json",
     "registry.jsonc",
     "registry-project-key",
+    // Stable project identity (see project_relocation).
+    "project-id",
     "tasks.sqlite",
     "tasks.sqlite-wal",
     "tasks.sqlite-shm",
@@ -2927,7 +2930,9 @@ fn git_initialize_from(workspace: &Path) -> Result<(), String> {
     if !output.status.success() {
         return Err(git_command_error("Git init", &output));
     }
-    Ok(())
+    git_ignore::ensure_default_ignores(&root).map_err(|error| {
+        format!("Git repository initialized, but .gitignore could not be updated: {error}")
+    })
 }
 
 fn git_command(root: &Path, args: &[&str]) -> Command {
@@ -8777,6 +8782,8 @@ pub fn run() {
             package_terminal_assign_launch,
             local_file_exists,
             local_path_kind,
+            project_relocation::project_identity,
+            project_relocation::relocate_project_state,
             read_local_file,
             resolve_project_media,
             resolve_home_media,
@@ -9790,10 +9797,19 @@ mod tests {
                     .into_owned()
             )
         );
+        assert_eq!(
+            fs::read_to_string(workspace.join(".gitignore")).expect("default .gitignore"),
+            "/.pi/\n.DS_Store\n"
+        );
         let snapshot = git_status_from(&workspace).expect("read initialized repository");
         assert_eq!(snapshot.branch, "main");
         assert!(snapshot.head.is_none());
+        fs::write(workspace.join(".gitignore"), "custom\n").expect("replace .gitignore");
         git_initialize_from(&workspace).expect("reinitialization is idempotent");
+        assert_eq!(
+            fs::read_to_string(workspace.join(".gitignore")).expect("kept .gitignore"),
+            "custom\n"
+        );
 
         let nested = workspace.join("nested");
         fs::create_dir(&nested).expect("create nested project");

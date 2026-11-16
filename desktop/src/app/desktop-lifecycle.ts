@@ -19,6 +19,8 @@ type DesktopLifecycleOptions = {
   canInsertPromptAttachments: () => boolean;
   insertPromptPaths: (paths: readonly string[]) => void | Promise<void>;
   connect: () => Promise<void>;
+  /** Runs once after the initial connection, unless already disposed. */
+  afterConnect?: () => void | Promise<void>;
   disposeConnection: () => void | Promise<void>;
   /**
    * connection.dispose() does not fire onDisconnect, so teardown must release
@@ -83,7 +85,11 @@ export function createDesktopLifecycle(options: DesktopLifecycleOptions) {
     }
 
     void options.connect().then(() => {
-      if (disposed) disposeConnectionAndReset();
+      if (disposed) {
+        disposeConnectionAndReset();
+        return;
+      }
+      void Promise.resolve().then(() => options.afterConnect?.()).catch(options.reportError);
     }, options.reportError);
 
     return () => {

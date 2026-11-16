@@ -116,24 +116,36 @@ function createOlderHistoryLoader(
 	let nextEnd = initialEnd;
 	let loading = false;
 	let externallyLoadedMessageCount = 0;
+	// An external read consumes messages from the reader. If ownership is lost
+	// while that read is pending, keep the batch for the next owner-driven load
+	// instead of applying it to another tab or dropping it from the history.
+	let pendingExternalBatch: OlderMessagesBatch | undefined;
+	const hasOlder = (): boolean => pendingExternalBatch !== undefined || nextEnd > 0 || olderMessagesReader?.hasOlder() === true;
 
 	return {
-		hasOlder: () => nextEnd > 0 || olderMessagesReader?.hasOlder() === true,
+		hasOlder,
 		isLoading: () => loading,
 		loadedMessageCount: () => Math.max(0, messages.length - nextEnd) + externallyLoadedMessageCount,
-		totalMessageCount: () => messages.length + externallyLoadedMessageCount,
+		totalMessageCount: () => messages.length + externallyLoadedMessageCount + (pendingExternalBatch?.batchMessages.length ?? 0),
 		async loadOlder(loadOptions: LoadOlderSessionHistoryOptions = {}): Promise<boolean> {
 			if (loading) return !options.isCancelled();
-			if (nextEnd <= 0 && olderMessagesReader?.hasOlder() !== true) return !options.isCancelled();
+			if (!hasOlder()) return !options.isCancelled();
 
 			loading = true;
 			let didPrependEntries = false;
 			try {
-				while (!options.isCancelled() && (nextEnd > 0 || olderMessagesReader?.hasOlder() === true)) {
-					const batch = nextEnd > 0
-						? inMemoryOlderMessagesBatch(messages, chunkSize, nextEnd)
-						: await externalOlderMessagesBatch(olderMessagesReader, chunkSize);
+				while (!options.isCancelled() && hasOlder()) {
+					const stashed = pendingExternalBatch;
+					pendingExternalBatch = undefined;
+					const batch = stashed
+						?? (nextEnd > 0
+							? inMemoryOlderMessagesBatch(messages, chunkSize, nextEnd)
+							: await externalOlderMessagesBatch(olderMessagesReader, chunkSize));
 					if (!batch) break;
+					if (options.isCancelled()) {
+						if (batch.external) pendingExternalBatch = batch;
+						break;
+					}
 
 					const { batchMessages } = batch;
 					if (batch.external) externallyLoadedMessageCount += batchMessages.length;
@@ -155,11 +167,13 @@ function createOlderHistoryLoader(
 				return true;
 			} finally {
 				loading = false;
-				if (nextEnd <= 0 && olderMessagesReader?.hasOlder() !== true) options.onOlderLoaderReady?.(undefined);
+				if (!hasOlder()) options.onOlderLoaderReady?.(undefined);
 			}
 		},
 	};
 }
+
+type OlderMessagesBatch = { batchMessages: readonly unknown[]; nextEnd: number; external: boolean };
 
 function inMemoryOlderMessagesBatch(messages: readonly unknown[], chunkSize: number, nextEnd: number): { batchMessages: readonly unknown[]; nextEnd: number; external: false } {
 	const end = nextEnd;

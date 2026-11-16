@@ -2509,7 +2509,9 @@ async function readSessionTitleChunk(
 
 	for (let index = lines.length - 1; index >= 0; index -= 1) {
 		const line = lines[index]?.trim();
-		if (!line) continue;
+		// Cheap substring filter: parsing every multi-KB message line of a 2 MB
+		// tail on the event loop is the dominant cost of a title scan.
+		if (!line || !line.includes("session_info")) continue;
 
 		let parsed: unknown;
 		try {

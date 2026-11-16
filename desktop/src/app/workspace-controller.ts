@@ -8,6 +8,7 @@ import {
   workspaceFromLocation,
   WORKSPACE_STORAGE_KEY,
 } from "../lib/recent-projects";
+import type { ProjectRelocation, ProjectSelectionPlan } from "./project-relocation";
 
 type WorkspaceControllerOptions = {
   workspace: () => string;
@@ -22,6 +23,8 @@ type WorkspaceControllerOptions = {
   setOperationRunning: (running: boolean) => void;
   setErrorMessage: (message: string | null) => void;
   reportError: (error: unknown) => void;
+  /** Renamed/moved project detection and path-keyed state relocation. */
+  relocation?: Pick<ProjectRelocation, "plan" | "relocate" | "record">;
 };
 
 export function createWorkspaceController(options: WorkspaceControllerOptions) {
@@ -72,6 +75,21 @@ export function createWorkspaceController(options: WorkspaceControllerOptions) {
     void invoke("desktop_open_project_window", { label, workspace: selected }).catch(options.reportError);
   }
 
+  function recordIdentity(path: string): void {
+    void options.relocation?.record(path).catch(options.reportError);
+  }
+
+  async function planSelection(selected: string): Promise<ProjectSelectionPlan> {
+    if (!options.relocation) return { target: selected };
+    try {
+      return await options.relocation.plan(selected);
+    } catch (error) {
+      // Detection is advisory; an unexpected failure must not block opening.
+      options.reportError(error);
+      return { target: selected };
+    }
+  }
+
   async function select(selected: string): Promise<void> {
     if (options.blocked()) return;
     options.closeSessionSelector();
@@ -80,9 +98,33 @@ export function createWorkspaceController(options: WorkspaceControllerOptions) {
       return;
     }
     const workspace = options.workspace();
-    if (selected === workspace) {
+    // Without relocation support keep the switch synchronous up to the first native call.
+    const plan = options.relocation ? await planSelection(selected) : { target: selected };
+    if (!plan || options.blocked() || options.workspace() !== workspace) return;
+    await apply(workspace, plan.target, plan.relocateFrom);
+  }
+
+  /**
+   * Startup check for the restored workspace: offers relocation when the
+   * folder was renamed/moved, otherwise only records its stable identity.
+   */
+  async function reconcile(): Promise<void> {
+    const workspace = options.workspace();
+    if (!workspace || !options.relocation || options.blocked()) return;
+    const plan = await planSelection(workspace);
+    if (!plan || options.blocked() || options.workspace() !== workspace) return;
+    if (plan.target === workspace && !plan.relocateFrom) {
+      recordIdentity(workspace);
+      return;
+    }
+    await apply(workspace, plan.target, plan.relocateFrom);
+  }
+
+  async function apply(workspace: string, selected: string, relocateFrom?: string): Promise<void> {
+    if (selected === workspace && !relocateFrom) {
       options.rememberProject(selected);
       void options.loadDesktopPreferences(selected);
+      recordIdentity(selected);
       return;
     }
     if (options.previewDirty() && !await confirmDesktopAction("Discard unsaved Preview changes and switch projects?")) return;
@@ -102,10 +144,21 @@ export function createWorkspaceController(options: WorkspaceControllerOptions) {
         });
       }
       await options.closeWorkspaceSessions();
+      let relocated = true;
+      if (relocateFrom && options.relocation) {
+        try {
+          await options.relocation.relocate(relocateFrom, selected);
+        } catch (error) {
+          // Still open the folder; the identity stays unrecorded so the move is offered again.
+          relocated = false;
+          options.reportError(error);
+        }
+      }
       await persist(selected);
       options.resetForWorkspace(selected);
       options.rememberProject(selected);
       await options.loadWorkspace(selected);
+      if (relocated) recordIdentity(selected);
     } catch (error) {
       options.reportError(error);
     } finally {
@@ -117,6 +170,7 @@ export function createWorkspaceController(options: WorkspaceControllerOptions) {
     choose,
     chooseInNewWindow,
     openInNewWindow,
+    reconcile,
     select,
   };
 }

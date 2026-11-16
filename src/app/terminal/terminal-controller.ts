@@ -39,8 +39,26 @@ export type AppTerminalControllerHost = {
 	resetRenderOutputBuffer(): void;
 };
 
+export type AppTerminalControllerDeps = {
+	readonly platform: NodeJS.Platform;
+	onSignal(signal: NodeJS.Signals, handler: (signal: NodeJS.Signals) => void): void;
+	offSignal(signal: NodeJS.Signals, handler: (signal: NodeJS.Signals) => void): void;
+	exit(code: number): void;
+	logSignal(signal: NodeJS.Signals): void;
+};
+
+const defaultTerminalControllerDeps: AppTerminalControllerDeps = {
+	platform: process.platform,
+	onSignal: (signal, handler) => { process.on(signal, handler); },
+	offSignal: (signal, handler) => { process.off(signal, handler); },
+	exit: (code) => process.exit(code),
+	logSignal: (signal) => { void pixLogger.log("warn", "process:signal_shutdown", { signal }, { module: "process" }); },
+};
+
 export class AppTerminalController {
 	private terminalEnabled = false;
+	private terminationSignals: readonly NodeJS.Signals[] = [];
+	private signalExitCode: number | undefined;
 	private interactiveSuspended = false;
 	private stopPromise: Promise<void> | undefined;
 	private keyboardProtocolNegotiationBuffer = "";
@@ -53,7 +71,10 @@ export class AppTerminalController {
 	private readonly enterInteractiveSequence = `${ANSI_RESET}${RESET_TERMINAL_VIEWPORT_STATE}${CLEAR_TERMINAL}\x1b[?1049h${RESET_TERMINAL_VIEWPORT_STATE}${CLEAR_TERMINAL}${ENABLE_TERMINAL_KEY_REPORTING}${ENABLE_BRACKETED_PASTE}${DISABLE_TERMINAL_WRAP}\x1b[?1002h\x1b[?1006h${HIDE_CURSOR}`;
 	private readonly exitInteractiveSequence = `${ANSI_RESET}${RESET_TERMINAL_VIEWPORT_STATE}${DISABLE_TERMINAL_KEY_REPORTING}${DISABLE_BRACKETED_PASTE}${ENABLE_TERMINAL_WRAP}\x1b[?1006l\x1b[?1002l\x1b[?1049l${SHOW_CURSOR}`;
 
-	constructor(private readonly host: AppTerminalControllerHost) {}
+	constructor(
+		private readonly host: AppTerminalControllerHost,
+		private readonly deps: AppTerminalControllerDeps = defaultTerminalControllerDeps,
+	) {}
 
 	isSuspended(): boolean {
 		return this.interactiveSuspended;
@@ -70,7 +91,41 @@ export class AppTerminalController {
 		process.stdout.on("resize", this.onResize);
 		process.stdout.write(this.enterInteractiveSequence);
 		process.on("exit", this.restoreTerminal);
+		this.registerTerminationSignals();
 	}
+
+	/**
+	 * Node does not emit `exit` when a signal terminates the process, so a
+	 * closed terminal (SIGHUP) or `kill` (SIGTERM) would otherwise leave raw
+	 * mode, the alternate screen and mouse reporting enabled, and skip draft
+	 * persistence and runtime disposal. Route them through the normal bounded
+	 * shutdown and exit with the conventional 128 + signal number status.
+	 */
+	private registerTerminationSignals(): void {
+		if (this.terminationSignals.length > 0) return;
+		const signals: NodeJS.Signals[] = this.deps.platform === "win32" ? ["SIGTERM"] : ["SIGTERM", "SIGHUP"];
+		for (const signal of signals) this.deps.onSignal(signal, this.onTerminationSignal);
+		this.terminationSignals = signals;
+	}
+
+	private unregisterTerminationSignals(): void {
+		for (const signal of this.terminationSignals) this.deps.offSignal(signal, this.onTerminationSignal);
+		this.terminationSignals = [];
+	}
+
+	private readonly onTerminationSignal = (signal: NodeJS.Signals): void => {
+		if (this.signalExitCode !== undefined) return;
+		const exitCode = 128 + (SIGNAL_NUMBERS[signal] ?? 15);
+		this.signalExitCode = exitCode;
+		process.exitCode = exitCode;
+		this.deps.logSignal(signal);
+		// stop() restores the terminal synchronously and arms the bounded
+		// forced-exit deadline before awaiting cleanup.
+		void this.stop().catch(() => undefined).finally(() => {
+			this.restoreTerminal();
+			this.deps.exit(exitCode);
+		});
+	};
 
 	async stop(): Promise<void> {
 		if (this.stopPromise) {
@@ -153,6 +208,9 @@ export class AppTerminalController {
 	}
 
 	private async stopInternal(): Promise<void> {
+		// Once shutdown starts, a repeated signal falls back to Node's default
+		// immediate termination; the terminal is restored synchronously below.
+		this.unregisterTerminationSignals();
 		if (!this.host.isRunning()) return;
 		this.host.setRunning(false);
 		this.host.cancelPendingTabLifecycle();
@@ -286,6 +344,8 @@ export class AppTerminalController {
 		this.keyboardProtocolNegotiationBuffer = "";
 	}
 }
+
+const SIGNAL_NUMBERS: Partial<Record<NodeJS.Signals, number>> = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 };
 
 type KeyboardProtocolNegotiationResponse =
 	| { readonly type: "kitty-flags"; readonly flags: number }

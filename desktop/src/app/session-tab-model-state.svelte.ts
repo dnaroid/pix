@@ -39,8 +39,18 @@ export function createSessionTabModelState() {
     persist();
   }
 
+  /** Moves one project's entries to a renamed path; the old path's state wins. */
+  function relocate(from: string, to: string): void {
+    const existing = projects.get(from);
+    if (!existing) return;
+    projects.set(to, existing);
+    projects.delete(from);
+    persist();
+  }
+
   return {
     restore(value: SessionTabModels) { projects = new SvelteMap(value); },
+    relocate,
     get: (workspace: string, sessionId: string) => projects.get(workspace)?.get(sessionId),
     remember,
     retain,

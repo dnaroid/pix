@@ -493,7 +493,7 @@ export class AcpPixExtensions {
   }
 
   async registryAction(cwd: string, action: RegistryActionRequest): Promise<RegistrySnapshot> {
-    const response = await this.request<unknown>("pix/registry/action", { cwd, ...action }, null);
+    const response = await this.request<unknown>("pix/registry/action", { cwd, ...action }, registryActionTimeoutMs(action));
     if (!isRecord(response)) throw new Error("pix/registry/action returned an invalid response");
     const snapshot = parseRegistrySnapshot(response.snapshot);
     if (!snapshot) throw new Error("pix/registry/action returned an invalid registry snapshot");
@@ -685,5 +685,27 @@ export class AcpPixExtensions {
         ? response.configOptions as SessionConfigOption[]
         : [],
     };
+  }
+}
+
+/** Read-only catalog refresh: lock wait plus a fetch must not spin indefinitely. */
+export const REGISTRY_REFRESH_TIMEOUT_MS = 90_000;
+/** Mutations may wait for the shared registry lock and a Git push (180s). */
+export const REGISTRY_MUTATION_TIMEOUT_MS = 15 * 60_000;
+
+/**
+ * Registry RPCs must always settle so the panel spinner/action mutex is
+ * released. Only actions that wait on user dialogs stay unbounded.
+ */
+export function registryActionTimeoutMs(action: RegistryActionRequest): number | null {
+  switch (action.action) {
+    case "configure":
+    case "project-key":
+    case "tags":
+      return null;
+    case "refresh":
+      return REGISTRY_REFRESH_TIMEOUT_MS;
+    default:
+      return REGISTRY_MUTATION_TIMEOUT_MS;
   }
 }

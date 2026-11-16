@@ -125,6 +125,8 @@ export class MemoryWatchdog {
 	private reportCount = 0;
 	private reportInFlight: Promise<MemoryWatchdogReportResult | undefined> | undefined;
 	private snapshotTaken = false;
+	/** Bumped by stop(); an in-flight report never arms a snapshot across it. */
+	private generation = 0;
 	private readonly startedAt: number;
 	private readonly trace: Pick<TuiMemoryTrace, "enabled" | "start" | "stop">;
 
@@ -156,6 +158,7 @@ export class MemoryWatchdog {
 	}
 
 	stop(): void {
+		this.generation += 1;
 		this.trace.stop();
 		if (this.timer) this.deps.clearInterval(this.timer);
 		this.timer = undefined;
@@ -230,6 +233,7 @@ export class MemoryWatchdog {
 
 	private async report(sample: MemoryWatchdogSample, threshold: number): Promise<MemoryWatchdogReportResult | undefined> {
 		this.reportCount += 1;
+		const generation = this.generation;
 		const dir = this.deps.reportDir();
 		const baseName = `${REPORT_FILE_PREFIX}${fileTimestamp(sample.at)}-${process.pid}`;
 		const reportPath = join(dir, `${baseName}.json`);
@@ -272,7 +276,10 @@ export class MemoryWatchdog {
 		this.deps.log("warn", "memory.threshold_exceeded", { reportPath, thresholdMb: toMb(threshold), ...sampleInMb(sample) });
 		await this.pruneOldReports(dir);
 
-		if (!heapSnapshotPath) {
+		// stop() may have run while the report was being written or pruned. A
+		// synchronous multi-GB heap snapshot must never start after the watchdog
+		// was disabled or the app began shutting down.
+		if (!heapSnapshotPath || generation !== this.generation) {
 			this.host.showToast(`High memory: ${formatMb(sample.rss)}. Leak report: ${reportPath}`, "warning");
 			return { reportPath, thresholdBytes: threshold, sample };
 		}

@@ -214,6 +214,18 @@ impl Registry {
 #[derive(Default)]
 pub(crate) struct WindowRestoreState(Mutex<Registry>);
 
+impl WindowRestoreState {
+    /// True when a window other than `label` currently shows `workspace`.
+    pub(crate) fn workspace_open_elsewhere(&self, label: &str, workspace: &str) -> bool {
+        let trimmed = workspace.trim_end_matches('/');
+        self.0.lock().map_or(true, |registry| {
+            registry.windows.values().any(|window| {
+                window.label != label && window.workspace.trim_end_matches('/') == trimmed
+            })
+        })
+    }
+}
+
 fn valid_label(label: &str) -> bool {
     label == "main"
         || (label.starts_with("project-")

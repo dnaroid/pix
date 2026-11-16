@@ -210,13 +210,26 @@ function formatInteractiveShellResult(result: InteractiveShellCommandResult): st
 async function waitForReturnToPixImpl(): Promise<void> {
 	if (!process.stdin.isTTY || !process.stdin.readable) return;
 	process.stdout.write("[pix] Press Enter to return to pix…");
-	await new Promise<void>((resolve) => {
-		const cleanup = (): void => {
-			process.stdin.off("data", onData);
+	await waitForReturnKey(process.stdin);
+}
+
+/**
+ * Resolve on the next input chunk, or when the stream ends, closes or fails:
+ * a closed terminal must not leave the shell command (and pix) waiting forever.
+ * All listeners are removed on settlement.
+ */
+export function waitForReturnKey(input: NodeJS.ReadableStream & { readable?: boolean }): Promise<void> {
+	return new Promise<void>((resolve) => {
+		const events = ["data", "end", "close", "error"] as const;
+		const settle = (): void => {
+			for (const event of events) input.off(event, settle);
 			resolve();
 		};
-		const onData = (): void => cleanup();
-		process.stdin.once("data", onData);
-		process.stdin.resume();
+		if (input.readable === false) {
+			resolve();
+			return;
+		}
+		for (const event of events) input.on(event, settle);
+		input.resume();
 	});
 }

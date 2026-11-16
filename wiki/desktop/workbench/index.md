@@ -13,6 +13,7 @@ Project surfaces, Wiki, menus, windows, lifecycle warnings and navigation. Requi
 - [Desktop menu keyboard navigation](desktop-menu-navigation.md) — active
 - [Desktop modal dialog lifecycle](desktop-modal-dialogs.md) — active
 - [Desktop project switcher and identity color](desktop-project-titlebar.md)
+- [Desktop project relocation](desktop-project-relocation.md) — active
 - [Desktop project Wiki](desktop-project-wiki.md) — active
 - [Desktop sidebar indicators](desktop-sidebar-indicators.md) — active
 - [Desktop startup theme](desktop-startup-theme.md) — active

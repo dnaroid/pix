@@ -57,6 +57,23 @@ export function createSessionTabsState() {
     persistActiveSessionIds();
   }
 
+  /** Moves path-keyed tab state to a renamed project path; the old path's state wins. */
+  function relocateWorkspace(from: string, to: string): void {
+    const active = activeSessionIds.get(from);
+    if (active !== undefined) {
+      activeSessionIds.set(to, active);
+      activeSessionIds.delete(from);
+      persistActiveSessionIds();
+    }
+    const tabs = persistedSessionTabIds.get(from);
+    if (tabs !== undefined) {
+      persistedSessionTabIds.set(to, tabs);
+      persistedSessionTabIds.delete(from);
+      persistSessionTabIds();
+    }
+    models.relocate(from, to);
+  }
+
   function sessionTabsForProject(projectPath: string): string[] | null {
     const value = persistedSessionTabIds.get(projectPath);
     return value === undefined ? null : [...value];
@@ -210,6 +227,7 @@ export function createSessionTabsState() {
     sessionTabsForProject,
     rememberActive,
     forgetActive,
+    relocateWorkspace,
     mergeRestored,
     replace,
     show,

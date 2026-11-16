@@ -169,7 +169,9 @@ JSONC/task overlay import or fallback.
     do not constitute full Registry initialization. The optional **Initialize
     project Registry** action creates the complete scaffold: schema-v1
     `.pi/tasks.sqlite` with WAL, `.pi/plans/` and `.pi/task-attachments/`, then
-    reloads project tasks and documents. Remote Registry setup is separate.
+    reloads project tasks and documents. After a successful Initialize or Clean,
+    the Registry catalog is refreshed immediately so the project row reflects
+    the new state. Remote Registry setup is separate.
 15. When a new `.pi` directory is created, Desktop appends `/.pi/` to the
     workspace root `.gitignore` before creating it, unless an existing literal
     `.pi`, `.pi/`, `/.pi` or `/.pi/` rule already covers it. Existing ignore
@@ -249,7 +251,13 @@ JSONC/task overlay import or fallback.
 19. Foreground Registry actions (refresh/install/update/push/pull/uninstall/
     remove) use Registry-local busy state and do not take Pix Desktop's global
     operation-running lock. The rest of the workbench remains interactive while
-    Registry Git/filesystem work runs asynchronously in ACP.
+    Registry Git/filesystem work runs asynchronously in ACP. Each foreground
+    action has a client-side RPC timeout so its busy state always settles:
+    refresh 90 seconds; mutations (sync, push, install and similar) 15 minutes.
+    Dialog-driven actions (configure, project key, tags) are unbounded. On
+    timeout the remote request is cancelled. The failure is reported to the UI
+    and logged as diagnostic `registry:action-failed:<action>`; this diagnostic
+    applies to any failed foreground action, not only timeouts.
     Workspace/client generation guards discard stale completions after
     a workspace switch or lifecycle reset. Registry-local controls may still be
     disabled while their own action is active. Local project initialization and

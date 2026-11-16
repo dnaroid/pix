@@ -61,6 +61,60 @@ describe("native project window persistence", () => {
     expect(state.resetForWorkspace).toHaveBeenCalledWith("/new");
   });
 
+  it("relocates a moved project after closing sessions and before loading it", async () => {
+    const order: string[] = [];
+    const state = {
+      ...options(),
+      workspace: () => "/old",
+      closeWorkspaceSessions: vi.fn(async () => { order.push("close"); }),
+      loadWorkspace: vi.fn(async () => { order.push("load"); }),
+    };
+    const relocation = {
+      plan: vi.fn().mockResolvedValue({ target: "/new", relocateFrom: "/old" }),
+      relocate: vi.fn(async () => { order.push("relocate"); return { movedSessions: 1, conflicts: [], skipped: [], tabSnapshotMoved: false }; }),
+      record: vi.fn().mockResolvedValue(undefined),
+    };
+    await createWorkspaceController({ ...state, relocation }).select("/old");
+    expect(order).toEqual(["close", "relocate", "load"]);
+    expect(relocation.relocate).toHaveBeenCalledWith("/old", "/new");
+    expect(state.resetForWorkspace).toHaveBeenCalledWith("/new");
+    expect(relocation.record).toHaveBeenCalledWith("/new");
+  });
+
+  it("cancels the switch when relocation planning is cancelled", async () => {
+    const state = options();
+    const relocation = { plan: vi.fn().mockResolvedValue(null), relocate: vi.fn(), record: vi.fn() };
+    await createWorkspaceController({ ...state, relocation }).select("/missing");
+    expect(state.closeWorkspaceSessions).not.toHaveBeenCalled();
+    expect(state.loadWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("still opens the folder but does not record identity when relocation fails", async () => {
+    const state = options();
+    const error = new Error("relocate failed");
+    const relocation = {
+      plan: vi.fn().mockResolvedValue({ target: "/new", relocateFrom: "/old" }),
+      relocate: vi.fn().mockRejectedValue(error),
+      record: vi.fn().mockResolvedValue(undefined),
+    };
+    await createWorkspaceController({ ...state, relocation }).select("/old");
+    expect(state.reportError).toHaveBeenCalledWith(error);
+    expect(state.loadWorkspace).toHaveBeenCalledWith("/new");
+    expect(relocation.record).not.toHaveBeenCalled();
+  });
+
+  it("reconcile only records identity for an unchanged restored workspace", async () => {
+    const state = { ...options(), workspace: () => "/p" };
+    const relocation = {
+      plan: vi.fn().mockResolvedValue({ target: "/p" }),
+      relocate: vi.fn(),
+      record: vi.fn().mockResolvedValue(undefined),
+    };
+    await createWorkspaceController({ ...state, relocation }).reconcile();
+    expect(relocation.record).toHaveBeenCalledWith("/p");
+    expect(state.closeWorkspaceSessions).not.toHaveBeenCalled();
+  });
+
   it("keeps native workspace persistence when localStorage fails", async () => {
     const state = options();
     vi.stubGlobal("localStorage", { setItem: () => { throw new Error("unavailable"); } });

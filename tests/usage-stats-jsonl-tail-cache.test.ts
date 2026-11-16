@@ -62,6 +62,28 @@ describe("JsonlTailCache", () => {
 		assert.deepEqual(values(result.files[0]?.records), [1, 2, 3]);
 	});
 
+	it("extends the cached records buffer in place instead of copying the history", async () => {
+		const file = join(dir, "a.jsonl");
+		await writeFile(file, line(1) + line(2) + '{"v":3}');
+		const { parser } = countingParser();
+		const cache = new JsonlTailCache(parser);
+		const first = (await cache.read([file])).files[0]?.records;
+		assert.deepEqual(values(first), [1, 2, 3]);
+
+		await appendFile(file, `\n${line(4)}`);
+		const second = (await cache.read([file])).files[0]?.records;
+		assert.equal(second, first, "an append reuses the same buffer");
+		assert.deepEqual(values(second), [1, 2, 3, 4], "the speculative tail is replaced, not duplicated");
+
+		await appendFile(file, '{"v":5}');
+		assert.deepEqual(values((await cache.read([file])).files[0]?.records), [1, 2, 3, 4, 5]);
+		await appendFile(file, `\n${line(6)}`);
+		const last = (await cache.read([file])).files[0]?.records;
+		assert.equal(last, first);
+		assert.deepEqual(values(last), [1, 2, 3, 4, 5, 6]);
+		assert.deepEqual(last?.map((row) => row.n), [0, 1, 2, 3, 4, 5]);
+	});
+
 	it("rescans truncated, replaced and rewritten files", async () => {
 		const file = join(dir, "a.jsonl");
 		await writeFile(file, line("aa") + line("bb"));

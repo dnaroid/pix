@@ -17,6 +17,7 @@ import {
   type RegistryResourceAutoPushState,
 } from "../lib/registry-background-sync";
 import { createRegistryProjectStorage } from "./registry-project-storage.svelte";
+import { createDiagnosticLogger } from "../lib/diagnostic-logging";
 
 type RegistryStoreOptions = {
   client: () => AcpClient | null;
@@ -33,6 +34,7 @@ type RegistryStoreOptions = {
 export function createRegistryStore(options: RegistryStoreOptions) {
   let snapshot = $state<RegistrySnapshot | undefined>(undefined);
   let actionId = $state<string | null>(null);
+  const diagnostics = createDiagnosticLogger(() => ({ workspace: options.workspace() }));
   let diff = $state<RegistryDiffState | undefined>(undefined);
   let diffGeneration = 0;
   let lifecycleGeneration = 0;
@@ -115,7 +117,8 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     loadProjectTasks: options.loadProjectTasks,
     loadProjectDocuments: options.loadProjectDocuments,
     reportError: options.reportError,
-    onChanged: () => { seedProjectSync(); backgroundSync.retry(); },
+    // Re-read the catalog so the project row reflects the new .pi state at once.
+    onChanged: () => { seedProjectSync(); void runAction({ action: "refresh" }, "refresh"); },
   });
 
   function handleSessionState(notification: SessionStateNotification): boolean {
@@ -204,6 +207,7 @@ export function createRegistryStore(options: RegistryStoreOptions) {
       }
       if (request.action === "pull-project") reloadLocalProjectState(request.scope, workspace);
     } catch (error) {
+      diagnostics.warn(`registry:action-failed:${request.action}`, error);
       if (current()) options.reportError(error);
     } finally {
       if (current()) {
