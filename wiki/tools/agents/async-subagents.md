@@ -88,8 +88,9 @@ in memory; it exposes tool + slash-command interfaces. `[confirmed by code]`
   concurrency queue, cancellation, retries or completion notifications.
 - The bundled pool contains seven roles: `implement-core`, `mechanical`,
   `research`, `verify`, `ui-qa`, `oracle`, and `knowledge-auditor`.
-  `implement-core` (Sol only) handles approved capability-driven or explicitly
-  requested implementation handoffs. `mechanical` (GLM-5.3 only) handles prescribed
+  `implement-core` (Sol, then Claude Sonnet) handles approved capability-driven or explicitly
+  requested implementation handoffs. `mechanical` (Luna, then Claude Haiku, then
+  GLM-5.3) handles prescribed
   behavior-preserving transformations large enough to amortize handoff overhead,
   not a few replacements. Broad migrations and semantic test changes must not
   go to `mechanical`. Workers verify interfaces/types and focused regressions
@@ -245,7 +246,8 @@ in memory; it exposes tool + slash-command interfaces. `[confirmed by code]`
    code-review portion of [decision 0001](../../decisions/0001-subagent-coding-roles.md);
    the parent-owned implementation and role-retirement policy is recorded in
    [decision 0069](../../decisions/0069-parent-owned-implementation.md).
-   The retained `implement-core` role uses Sol; `mechanical` uses GLM-5.3.
+   The retained `implement-core` role uses Sol with a Claude Sonnet fallback;
+   `mechanical` uses Luna, then Claude Haiku, then GLM-5.3.
    Other retained role candidate policies are unchanged. Project-local profiles
    with retired names remain valid; there are no aliases.
    GPT-6 Sol is not an alias for GPT-6.1 Sol. Existing user/project model
@@ -464,6 +466,13 @@ dependency unchanged, writes progress stage `owned_launch_unavailable`, and
 reports `suite:owned-launch-unavailable` (warn). An undecided probe (`unknown`,
 timeout/IO) keeps owned launch (fail closed). The fallback has the ordinary
 process-group containment guarantees only, not durable descendant ownership.
+
+**Non-macOS hosts.** Owned launch exists only on macOS. Elsewhere the preflight
+prepares no native binaries and never invokes `xcrun`, so an attempt whose
+primary model is not Claude launches normally even when its fallback list
+contains `pi-claude-code-provider`. An attempt that actually selects the Claude
+provider still fails closed in `spawnAgent` (`pi-claude-code-provider requires
+prepared macOS owned-launch binaries`); there is no unowned fallback.
 Parent loss is covered: the child Pi sees RPC stdin EOF and exits, and the
 Claude provider's `process.on("exit")` hook (`claude-process.ts`) synchronously
 SIGKILLs every Claude CLI process group not yet proven terminated, because Pi's

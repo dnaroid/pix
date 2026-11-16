@@ -724,8 +724,9 @@ Explicit task/CLI model overrides suppress automatic fallbacks. Setting
 `PI_SUBAGENTS_FORCE_CURRENT_MODEL=1`) deliberately selects the parent model and
 strips conflicting model arguments; this is not the economical default.
 
-The seven built-in modes are `implement-core` (Sol for approved implementation
-handoffs), `mechanical` (GLM for sufficiently large prescribed behavior-preserving
+The seven built-in modes are `implement-core` (Sol, then Claude Sonnet, for approved
+implementation handoffs), `mechanical` (Luna, then Claude Haiku, then GLM-5.3, for
+sufficiently large prescribed behavior-preserving
 edits with deterministic checks), `research` (read-only evidence, focused review,
 and readiness evidence), `verify` (run checks and diagnose logs without fixing
 files), `ui-qa` (real browser, terminal/TUI, and desktop-GUI verification),
@@ -883,8 +884,8 @@ AGENTS.md before approving anything; cite file paths first.
 
 ### Real UI QA (browser, TUI, and desktop GUI)
 
-The built-in `ui-qa` role runs on `zai/glm-5.3-flash`, with
-`openai-codex/gpt-6-luna` as its fallback. Its Markdown body
+The built-in `ui-qa` role runs on `openai-codex/gpt-6-luna`, with
+`pi-claude-code-provider/haiku` and then `zai/glm-5.3-flash` as fallbacks. Its Markdown body
 (`src/async-subagents/agents/ui-qa.md`) is a deliberately thin common contract:
 test the real user-facing target, classify only the top-level backend, route
 through on-demand guides, run through the unified runner, and keep deterministic

@@ -9,9 +9,10 @@ policy, not a price oracle.
 ## Execution modes
 
 - `research`: read-only evidence gathering, searches and focused review questions.
-- `implement-core`: Sol for approved implementation handoffs, including explicit
-  user delegation or a concrete capability gap; no automatic weaker-model fallback.
-- `mechanical`: GLM-5.3 for sufficiently large prescribed behavior-preserving edits
+- `implement-core`: Sol, then Claude Sonnet as quota fallback, for approved
+  implementation handoffs, including explicit user delegation or a concrete
+  capability gap; no automatic fallback to a weaker model tier.
+- `mechanical`: Luna, then Claude Haiku, then GLM-5.3, for sufficiently large prescribed behavior-preserving edits
   with an exact scope and deterministic acceptance check, never broad migrations,
   interface redesign or semantic changes to regression tests.
 - `verify`: run checks and interpret logs, without fixing source or tests.
@@ -210,7 +211,8 @@ disabled built-in.
 
 ### Coding quality and acceptance
 
-`implement-core` (Sol only) and `mechanical` (GLM-5.3 only) are the retained
+`implement-core` (Sol, then Claude Sonnet) and `mechanical` (Luna, then Claude
+Haiku, then GLM-5.3) are the retained
 implementation roles. Mechanical is for prescribed behavior-preserving work
 large enough to amortize handoff overhead. Research, verification, UI QA,
 documentation maintenance and the cross-vendor oracle retain their separate
