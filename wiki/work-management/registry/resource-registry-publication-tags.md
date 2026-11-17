@@ -132,7 +132,10 @@ status: active
   as well as a process-local queue. Remote/branch changes reuse or replace the
   same checkout under that lock. Configuration and tag editors do not hold it. Failure releases
   the lock and queue; crashed owners expire after two minutes. Lock acquisition
-  retries for up to ten minutes and never falls back to unlocked access.
+  retries for up to ten minutes and never falls back to unlocked access. Lock
+  waits abort when the ACP service shuts down, and shutdown awaits in-flight
+  Registry work so the lock is released before exit. Timing constants live in
+  `acp/src/registry/lock-timing.ts`.
 - Legacy `resource-registry-desktop-<PID>` clones are not reused or created by
   new processes. They may be deleted when their old ACP owners are stopped;
   deleting a checkout in use by an older running process is unsafe.

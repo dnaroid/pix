@@ -1,4 +1,5 @@
 import type { ContentBlock, SessionConfigOption, SessionUpdate } from "@agentclientprotocol/sdk";
+import { REGISTRY_GIT_NETWORK_TIMEOUT_MS, REGISTRY_LOCK_STALE_MS } from "../../../acp/src/registry/lock-timing";
 import { BTW_METHOD, parseBtwCommand, parseBtwState, type BtwCommand, type BtwState } from "../../../acp/src/btw/contract";
 import { isAgentControlState, isStopReason, type AgentControlAction } from "./agent-control";
 import {
@@ -688,8 +689,12 @@ export class AcpPixExtensions {
   }
 }
 
-/** Read-only catalog refresh: lock wait plus a fetch must not spin indefinitely. */
-export const REGISTRY_REFRESH_TIMEOUT_MS = 90_000;
+/**
+ * Read-only catalog refresh must not spin indefinitely, but it must outlast
+ * reclaiming a lock left by a killed ACP (stale window) plus one fetch;
+ * otherwise every open project reports a timeout after an unclean restart.
+ */
+export const REGISTRY_REFRESH_TIMEOUT_MS = REGISTRY_LOCK_STALE_MS + REGISTRY_GIT_NETWORK_TIMEOUT_MS + 30_000;
 /** Mutations may wait for the shared registry lock and a Git push (180s). */
 export const REGISTRY_MUTATION_TIMEOUT_MS = 15 * 60_000;
 

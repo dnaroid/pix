@@ -64,6 +64,8 @@ JSONC/task overlay import or fallback.
   new quiet three-second interval. Workspace/client changes, disconnection and
   teardown cancel pending timers; reconnect schedules a new load. In-flight
   responses retain the Registry store's workspace/lifecycle stale-response guards.
+  A failed background load logs `registry:action-failed:refresh` as a warning
+  and shows no error toast; user-initiated refresh still reports errors.
 
 1. `push tasks` validates the local SQLite v1 schema, task payloads, rows and
    attachment association integrity, then uses SQLite online backup to capture
@@ -253,11 +255,15 @@ JSONC/task overlay import or fallback.
     operation-running lock. The rest of the workbench remains interactive while
     Registry Git/filesystem work runs asynchronously in ACP. Each foreground
     action has a client-side RPC timeout so its busy state always settles:
-    refresh 90 seconds; mutations (sync, push, install and similar) 15 minutes.
+    refresh 330 seconds (the 120 s lock stale window, one 180 s Git network
+    timeout and a 30 s margin, so a lock left by a killed ACP can be reclaimed);
+    mutations (sync, push, install and similar) 15 minutes.
     Dialog-driven actions (configure, project key, tags) are unbounded. On
-    timeout the remote request is cancelled. The failure is reported to the UI
+    timeout the remote request is cancelled. User-initiated failures are reported to the UI
     and logged as diagnostic `registry:action-failed:<action>`; this diagnostic
-    applies to any failed foreground action, not only timeouts.
+    applies to any failed foreground action, not only timeouts. Background
+    startup catalog loads log the same diagnostic as a warning and show no
+    error toast.
     Workspace/client generation guards discard stale completions after
     a workspace switch or lifecycle reset. Registry-local controls may still be
     disabled while their own action is active. Local project initialization and

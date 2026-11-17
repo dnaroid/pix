@@ -11,7 +11,7 @@ export interface RegistryContext {
 }
 
 export interface RegistryExecutor {
-	exec(command: string, args: string[], options: { cwd: string; timeout: number }): Promise<{ stdout: string; stderr: string; code: number }>;
+	exec(command: string, args: string[], options: { cwd: string; timeout: number; signal?: AbortSignal }): Promise<{ stdout: string; stderr: string; code: number }>;
 }
 
 export function notify(ctx: RegistryContext, message: string, type: "info" | "warning" | "error" = "info"): void {

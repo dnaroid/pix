@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { promises as fs } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { lock } from "proper-lockfile";
+import { REGISTRY_GIT_NETWORK_TIMEOUT_MS } from "./lock-timing.js";
 
 const AUTO_PROJECT_KEY_FILE = "registry-project-key";
 const AUTO_PROJECT_KEY_PATTERN = /^local-[0-9a-f]{32}$/;
@@ -102,7 +103,7 @@ export async function ensureRegistryCache(executor: RegistryExecutor, runtime: R
 			"core.autocrlf=false",
 			runtime.remote,
 			runtime.cacheDir,
-		], { timeout: 180_000 });
+		], { timeout: REGISTRY_GIT_NETWORK_TIMEOUT_MS });
 	}
 	// Caches cloned by older versions lack the local override; re-assert it so
 	// reset/checkout/add below never smudge line endings on such platforms.
@@ -110,7 +111,7 @@ export async function ensureRegistryCache(executor: RegistryExecutor, runtime: R
 
 	await runGit(executor, runtime.cacheDir, ["reset", "--hard"], { allowFailure: true });
 	await runGit(executor, runtime.cacheDir, ["clean", "-fd"]);
-	await runGit(executor, runtime.cacheDir, ["fetch", "origin", "--prune"], { timeout: 180_000 });
+	await runGit(executor, runtime.cacheDir, ["fetch", "origin", "--prune"], { timeout: REGISTRY_GIT_NETWORK_TIMEOUT_MS });
 
 	const remoteRef = `refs/remotes/origin/${runtime.branch}`;
 	if (await gitRefExists(executor, runtime.cacheDir, remoteRef)) {

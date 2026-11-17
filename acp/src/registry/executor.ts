@@ -8,6 +8,8 @@ export const registryExecutor: RegistryExecutor = {
 			execFile(command, args, {
 				cwd: options.cwd,
 				timeout: options.timeout,
+				// Abort kills the child so shutdown can release the checkout lock.
+				...(options.signal ? { signal: options.signal } : {}),
 				maxBuffer: 16 * 1024 * 1024,
 				encoding: "utf8",
 				env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "Never" },

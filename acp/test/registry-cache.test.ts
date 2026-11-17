@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, test } from "node:test";
 import { lock } from "proper-lockfile";
 import { withRegistryCache } from "../src/registry/cache-lock.js";
+import { DesktopRegistryService } from "../src/registry/service.js";
 import { registryUiCacheRoot } from "../src/registry/config.js";
 
 const moduleUrl = new URL("../src/registry/cache-lock.ts", import.meta.url).href;
@@ -144,4 +145,58 @@ test("a stale crashed-owner lock is reclaimed without requiring a checkout", asy
 	await fs.utimes(`${key}.lock`, stale, stale);
 	assert.equal(await withRegistryCache(async () => "recovered"), "recovered");
 	assert.equal(await fs.stat(`${key}.lock`).catch(() => undefined), undefined);
+});
+
+test("an aborted signal stops waiting for a held lock", async () => {
+	const key = registryUiCacheRoot();
+	await fs.mkdir(dirname(key), { recursive: true });
+	const releaseHeld = await lock(key, { realpath: false });
+	const controller = new AbortController();
+	let ran = false;
+	const waiting = withRegistryCache(async () => { ran = true; }, controller.signal);
+	setTimeout(() => controller.abort(new Error("shutdown")), 50);
+	await assert.rejects(waiting, /shutdown/);
+	assert.equal(ran, false);
+	await releaseHeld();
+	assert.equal(await withRegistryCache(async () => "next"), "next");
+});
+
+test("service dispose kills in-flight registry Git and releases the checkout lock", { timeout: 15_000 }, async () => {
+	// Regression: an ACP killed mid-refresh left the lock held for the 120s stale
+	// window, so every project's refresh timed out after a restart.
+	const configHome = join(root, "home");
+	await fs.mkdir(join(configHome, ".config", "pi"), { recursive: true });
+	await fs.writeFile(join(configHome, ".config", "pi", "pi-tools-suite.jsonc"), JSON.stringify({ resourceRegistry: { remote: "file:///nonexistent-registry", branch: "main" } }));
+	const originalHome = process.env.HOME;
+	process.env.HOME = configHome;
+	let started!: () => void;
+	const gitStarted = new Promise<void>((resolve) => { started = resolve; });
+	let aborted = false;
+	const service = new DesktopRegistryService({
+		exec: (_command, _args, options) => new Promise((_resolve, reject) => {
+			started();
+			options.signal?.addEventListener("abort", () => { aborted = true; reject(options.signal?.reason); }, { once: true });
+		}),
+	});
+	try {
+		const cwd = join(root, "project");
+		await fs.mkdir(cwd, { recursive: true });
+		const action = service.action({ action: "refresh" }, {
+			cwd, hasUI: false,
+			ui: { confirm: async () => false, input: async () => undefined, editor: async () => undefined, notify: () => undefined },
+		});
+		await gitStarted;
+		await assert.rejects(lock(registryUiCacheRoot(), { realpath: false }), { code: "ELOCKED" });
+		await service.dispose();
+		assert.equal(aborted, true);
+		await action.catch(() => undefined);
+		assert.equal(await fs.stat(`${registryUiCacheRoot()}.lock`).catch(() => undefined), undefined);
+		await assert.rejects(service.action({ action: "refresh" }, {
+			cwd, hasUI: false,
+			ui: { confirm: async () => false, input: async () => undefined, editor: async () => undefined, notify: () => undefined },
+		}), /shutting down/);
+	} finally {
+		if (originalHome === undefined) delete process.env.HOME;
+		else process.env.HOME = originalHome;
+	}
 });

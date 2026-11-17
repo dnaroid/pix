@@ -562,7 +562,7 @@ export interface PixAcpAgentOptions {
 	readonly documentTranslator?: DocumentTranslator;
 	readonly fileAnnotator?: FileAnnotator;
 	/** Direct workspace Registry backend (overridable for transport tests). */
-	readonly registryService?: Pick<DesktopRegistryService, "action" | "diff">;
+	readonly registryService?: Pick<DesktopRegistryService, "action" | "diff"> & Partial<Pick<DesktopRegistryService, "dispose">>;
 	/** Shared model-usage query (overridable for deterministic concurrency tests). */
 	readonly queryModelUsage?: (state: PiSessionState, options?: { freshOnly?: boolean }) => Promise<ModelUsageRefreshResult>;
 	/**
@@ -671,7 +671,7 @@ export class PixAcpAgent {
 	private readonly loadDesktopQueues: (cwd: string, sessionPath: string | undefined) => Promise<PersistedDesktopQueues>;
 	private readonly saveDesktopQueues: (cwd: string, sessionPath: string | undefined, queues: PersistedDesktopQueues) => Promise<void>;
 	private readonly copyText: (text: string) => Promise<void>;
-	private readonly registryService: Pick<DesktopRegistryService, "action" | "diff">;
+	private readonly registryService: Pick<DesktopRegistryService, "action" | "diff"> & Partial<Pick<DesktopRegistryService, "dispose">>;
 	private disposed = false;
 	private readonly fileMentionIndex = new FileMentionIndex();
 	private readonly retiringForkQueues = new Set<Promise<void>>();
@@ -1056,6 +1056,9 @@ export class PixAcpAgent {
 		this.fileMentionIndex.dispose();
 		this.backgroundSearchSessions.dispose();
 		this.disposed = true;
+		// First: abort registry Git/lock waits so the shared checkout lock is
+		// released before the host's exit deadline can SIGKILL this process.
+		const registryDisposed = this.registryService.dispose?.();
 		await this.nativeSessionCatalog.dispose();
 		this.nativeSessionMetadata.clear();
 		await this.searchActivity.dispose();
@@ -1068,6 +1071,7 @@ export class PixAcpAgent {
 		await Promise.allSettled([...this.sessionLifecycle.values()]);
 		await Promise.all([...this.sessions.values()].map((session) => this.teardownSession(session)));
 		await Promise.all([...this.retiringForkQueues]);
+		await registryDisposed;
 	}
 
 	getSession(sessionId: string): AgentSessionState | undefined {

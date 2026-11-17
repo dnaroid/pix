@@ -901,7 +901,8 @@
         || projectServices.registry.backgroundSyncState.phase === "syncing"
         || projectServices.registry.resourceAutoPushState.phase === "syncing",
     }),
-    refreshRegistry: () => void projectServices.registry.refresh(),
+    // Startup load is background work: failures are logged, not toasted.
+    refreshRegistry: () => void projectServices.registry.refresh({ background: true }),
     activeSessionId: () => activeSessionId,
     activeSessionRuntimeReady: () => activeSessionRuntimeReady,
     configOptions: () => configOptions,

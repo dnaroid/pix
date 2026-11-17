@@ -166,7 +166,15 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     return item.actions.includes(request.action);
   }
 
-  async function runAction(request: RegistryActionRequest, nextActionId: string): Promise<void> {
+  /**
+   * `background` actions (startup catalog load) are not user-initiated: their
+   * failures go to the diagnostic log only, never to an error toast.
+   */
+  async function runAction(
+    request: RegistryActionRequest,
+    nextActionId: string,
+    runOptions: { background?: boolean } = {},
+  ): Promise<void> {
     const requestClient = options.client();
     const workspace = options.workspace();
     const requestGeneration = lifecycleGeneration;
@@ -208,7 +216,7 @@ export function createRegistryStore(options: RegistryStoreOptions) {
       if (request.action === "pull-project") reloadLocalProjectState(request.scope, workspace);
     } catch (error) {
       diagnostics.warn(`registry:action-failed:${request.action}`, error);
-      if (current()) options.reportError(error);
+      if (current() && !runOptions.background) options.reportError(error);
     } finally {
       if (current()) {
         waitingForSync = false;
@@ -261,9 +269,9 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     diff = undefined;
   }
 
-  function refresh(): void {
+  function refresh(refreshOptions: { background?: boolean } = {}): void {
     void storage.refresh();
-    void runAction({ action: "refresh" }, "refresh");
+    void runAction({ action: "refresh" }, "refresh", refreshOptions);
   }
 
   /**

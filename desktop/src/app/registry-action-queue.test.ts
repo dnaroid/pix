@@ -112,6 +112,22 @@ describe("Registry foreground action waiting", () => {
     f.store.reset();
   });
 
+  it("logs but never toasts a failed background (startup) refresh", async () => {
+    const f = await fixture();
+    f.finish();
+    await vi.advanceTimersByTimeAsync(0);
+    // Drop the fixture's queued pending implementation so rejections apply in order.
+    f.registryAction.mockReset();
+    f.registryAction.mockRejectedValueOnce(new Error("pix/registry/action timed out after 90000ms"));
+    await f.store.runAction({ action: "refresh" }, "refresh", { background: true });
+    expect(f.reportError).not.toHaveBeenCalled();
+    expect(f.store.actionId).toBeNull();
+    f.registryAction.mockRejectedValueOnce(new Error("user refresh failed"));
+    await f.store.runAction({ action: "refresh" }, "refresh");
+    expect(f.reportError).toHaveBeenCalledWith(expect.objectContaining({ message: "user refresh failed" }));
+    f.store.reset();
+  });
+
   it("does not release a waiting action when an unconfigured poll arrives during the RPC", async () => {
     const f = await fixture();
     const pending = f.store.runAction({ action: "refresh" }, "refresh");

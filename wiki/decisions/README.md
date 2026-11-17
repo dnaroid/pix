@@ -117,6 +117,7 @@ errors, not invent or approve decisions.
 - [0057 — Canonical LSP reuse and bounded idle retention](0057-lsp-reuse-idle-cleanup.md)
 - [0075 — Pause-ready adopted continuations](0075-pause-ready-adopted-continuations.md)
 - [0076 — Scoped file-operation reservations](0076-scoped-file-operation-reservations.md)
+- [0077 — Project supervisor session on autopilot](0077-project-supervisor-session.md)
 
 Workflow contract: [repository knowledge workflow](../search/repo-knowledge-agent-workflow.md).
 

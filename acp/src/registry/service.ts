@@ -38,7 +38,7 @@ async function projectKey(ctx: RegistryContext): Promise<void> {
 }
 
 /** No new publication: remember the published revision BEFORE opening the editor. */
-async function tags(request: Extract<DesktopRegistryActionRequest, { type: unknown }>, ctx: RegistryContext, executor: RegistryExecutor): Promise<void> {
+async function tags(request: Extract<DesktopRegistryActionRequest, { type: unknown }>, ctx: RegistryContext, executor: RegistryExecutor, signal: AbortSignal): Promise<void> {
 	validateName(request.name);
 	let publicationError: unknown;
 	const published = await withRegistryCache(async () => {
@@ -48,7 +48,7 @@ async function tags(request: Extract<DesktopRegistryActionRequest, { type: unkno
 		runtime = await selectPublicationRuntime(executor, ctx, runtime, request.type, request.name);
 		if (!await pathExists(registryResourcePath(runtime.cacheDir, request.type, request.name, runtime))) return undefined;
 		return { runtime, revision: await resourceRevision(executor, runtime, request.type, request.name) };
-	}).catch((cause: unknown) => { publicationError = cause; return undefined; });
+	}, signal).catch((cause: unknown) => { publicationError = cause; return undefined; });
 	const resource = projectResourcePath(ctx, request.type, request.name);
 	const file = request.type === "skill" ? join(resource, SKILL_FILE) : resource;
 	let savedTags: string[] = [];
@@ -72,19 +72,58 @@ async function tags(request: Extract<DesktopRegistryActionRequest, { type: unkno
 			throw new Error("Tags saved locally; publication changed while editing. Resolve the conflict before syncing.");
 		}
 		await publishResourceTags(executor, ctx, runtime, request.type, request.name, savedTags);
-	});
+	}, signal);
 }
 
 export class DesktopRegistryService {
-	constructor(private readonly executor: RegistryExecutor = registryExecutor) {}
+	/** Aborted on ACP shutdown: stops lock waits and kills registry Git children. */
+	private readonly shutdown = new AbortController();
+	private readonly inFlight = new Set<Promise<unknown>>();
+	private readonly executor: RegistryExecutor;
 
-	async action(request: DesktopRegistryActionRequest, ctx: RegistryContext): Promise<RegistryUiSnapshot> {
+	constructor(executor: RegistryExecutor = registryExecutor) {
+		const signal = this.shutdown.signal;
+		this.executor = {
+			exec(command, args, options) {
+				signal.throwIfAborted();
+				return executor.exec(command, args, { ...options, signal });
+			},
+		};
+	}
+
+	/**
+	 * Abort and settle every operation so the cross-process checkout lock is
+	 * released before the process exits. A process killed while holding it would
+	 * block every other ACP until the lock goes stale.
+	 */
+	async dispose(): Promise<void> {
+		this.shutdown.abort(new Error("Registry service is shutting down."));
+		await Promise.allSettled([...this.inFlight]);
+	}
+
+	private track<T>(operation: () => Promise<T>): Promise<T> {
+		if (this.shutdown.signal.aborted) return Promise.reject(this.shutdown.signal.reason);
+		const promise = operation();
+		this.inFlight.add(promise);
+		void promise.finally(() => this.inFlight.delete(promise)).catch(() => undefined);
+		return promise;
+	}
+
+	action(request: DesktopRegistryActionRequest, ctx: RegistryContext): Promise<RegistryUiSnapshot> {
+		return this.track(() => this.runAction(request, ctx));
+	}
+
+	diff(request: DesktopRegistryDiffRequest) {
+		return this.track(() => withRegistryCache(() => collectRegistryDiff(this.executor, request.cwd, request.type, request.name), this.shutdown.signal));
+	}
+
+	private async runAction(request: DesktopRegistryActionRequest, ctx: RegistryContext): Promise<RegistryUiSnapshot> {
 		let error: string | undefined;
 		// Editors/dialogs must not hold the checkout lock or block background refreshes.
 		try {
 			if (request.action === "configure") await configure(ctx);
 			else if (request.action === "project-key") await projectKey(ctx);
-			else if (request.action === "tags") await tags(request, ctx, this.executor);
+			else if (request.action === "tags") await tags(request, ctx, this.executor, this.shutdown.signal);
 		} catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
 		return withRegistryCache(async () => {
 			try {
@@ -118,10 +157,6 @@ export class DesktopRegistryService {
 					error: error ?? (cause instanceof Error ? cause.message : String(cause)),
 				};
 			}
-		});
-	}
-
-	async diff(request: DesktopRegistryDiffRequest) {
-		return withRegistryCache(() => collectRegistryDiff(this.executor, request.cwd, request.type, request.name));
+		}, this.shutdown.signal);
 	}
 }
