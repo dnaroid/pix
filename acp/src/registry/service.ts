@@ -79,17 +79,8 @@ export class DesktopRegistryService {
 	/** Aborted on ACP shutdown: stops lock waits and kills registry Git children. */
 	private readonly shutdown = new AbortController();
 	private readonly inFlight = new Set<Promise<unknown>>();
-	private readonly executor: RegistryExecutor;
 
-	constructor(executor: RegistryExecutor = registryExecutor) {
-		const signal = this.shutdown.signal;
-		this.executor = {
-			exec(command, args, options) {
-				signal.throwIfAborted();
-				return executor.exec(command, args, { ...options, signal });
-			},
-		};
-	}
+	constructor(private readonly baseExecutor: RegistryExecutor = registryExecutor) {}
 
 	/**
 	 * Abort and settle every operation so the cross-process checkout lock is
@@ -101,29 +92,47 @@ export class DesktopRegistryService {
 		await Promise.allSettled([...this.inFlight]);
 	}
 
-	private track<T>(operation: () => Promise<T>): Promise<T> {
-		if (this.shutdown.signal.aborted) return Promise.reject(this.shutdown.signal.reason);
-		const promise = operation();
+	/**
+	 * Runs one operation under a signal combining shutdown and the caller's
+	 * request cancellation: lock waits stop and Registry Git children are killed.
+	 */
+	private track<T>(request: AbortSignal | undefined, operation: (signal: AbortSignal, executor: RegistryExecutor) => Promise<T>): Promise<T> {
+		const signal = request ? AbortSignal.any([this.shutdown.signal, request]) : this.shutdown.signal;
+		if (signal.aborted) return Promise.reject(signal.reason);
+		const base = this.baseExecutor;
+		const executor: RegistryExecutor = {
+			exec(command, args, options) {
+				signal.throwIfAborted();
+				return base.exec(command, args, { ...options, signal });
+			},
+		};
+		const promise = operation(signal, executor);
 		this.inFlight.add(promise);
 		void promise.finally(() => this.inFlight.delete(promise)).catch(() => undefined);
 		return promise;
 	}
 
-	action(request: DesktopRegistryActionRequest, ctx: RegistryContext): Promise<RegistryUiSnapshot> {
-		return this.track(() => this.runAction(request, ctx));
+	action(request: DesktopRegistryActionRequest, ctx: RegistryContext, signal?: AbortSignal): Promise<RegistryUiSnapshot> {
+		return this.track(signal, (operationSignal, executor) => this.runAction(request, ctx, operationSignal, executor));
 	}
 
-	diff(request: DesktopRegistryDiffRequest) {
-		return this.track(() => withRegistryCache(() => collectRegistryDiff(this.executor, request.cwd, request.type, request.name), this.shutdown.signal));
+	diff(request: DesktopRegistryDiffRequest, signal?: AbortSignal) {
+		return this.track(signal, (operationSignal, executor) => withRegistryCache(
+			() => collectRegistryDiff(executor, request.cwd, request.type, request.name), operationSignal));
 	}
 
-	private async runAction(request: DesktopRegistryActionRequest, ctx: RegistryContext): Promise<RegistryUiSnapshot> {
+	private async runAction(
+		request: DesktopRegistryActionRequest,
+		ctx: RegistryContext,
+		signal: AbortSignal,
+		executor: RegistryExecutor,
+	): Promise<RegistryUiSnapshot> {
 		let error: string | undefined;
 		// Editors/dialogs must not hold the checkout lock or block background refreshes.
 		try {
 			if (request.action === "configure") await configure(ctx);
 			else if (request.action === "project-key") await projectKey(ctx);
-			else if (request.action === "tags") await tags(request, ctx, this.executor, this.shutdown.signal);
+			else if (request.action === "tags") await tags(request, ctx, executor, signal);
 		} catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
 		return withRegistryCache(async () => {
 			try {
@@ -131,25 +140,29 @@ export class DesktopRegistryService {
 					case "set-agent-model": await setAgentModelOverride(ctx.cwd, request.name, request.model); break;
 					case "reset-agent-model": await setAgentModelOverride(ctx.cwd, request.name); break;
 					case "keep-project-key": await keepProjectKey(ctx); break;
-					case "migrate-project-key": await migrateProjectKey(this.executor, ctx); break;
-					case "push-project-resources": await pushProjectResourceChanges(this.executor, ctx); break;
-					case "install": await installResource(this.executor, ctx, request.type, request.name); break;
-					case "update": await updateResource(this.executor, ctx, request.type, request.name); break;
-					case "push": await pushResource(this.executor, ctx, request.type, request.name); break;
+					case "migrate-project-key": await migrateProjectKey(executor, ctx); break;
+					case "push-project-resources": await pushProjectResourceChanges(executor, ctx); break;
+					case "install": await installResource(executor, ctx, request.type, request.name); break;
+					case "update": await updateResource(executor, ctx, request.type, request.name); break;
+					case "push": await pushResource(executor, ctx, request.type, request.name); break;
 					case "uninstall": await uninstallResource(ctx, request.type, request.name); break;
-					case "remove": await removeResource(this.executor, ctx, request.type, request.name); break;
-					case "make-local": await makeResourceLocal(this.executor, ctx, request.type, request.name); break;
-					case "toggle-scope": await togglePublicationScope(this.executor, ctx, request.type, request.name); break;
-					case "push-project": await pushProjectState(this.executor, ctx, request.scope); break;
-					case "pull-project": await pullProjectState(this.executor, ctx, request.scope); break;
+					case "remove": await removeResource(executor, ctx, request.type, request.name); break;
+					case "make-local": await makeResourceLocal(executor, ctx, request.type, request.name); break;
+					case "toggle-scope": await togglePublicationScope(executor, ctx, request.type, request.name); break;
+					case "push-project": await pushProjectState(executor, ctx, request.scope); break;
+					case "pull-project": await pullProjectState(executor, ctx, request.scope); break;
 					case "sync-project":
-						await syncProjectResources(this.executor, ctx);
-						await pushProjectState(this.executor, ctx, request.scope, true);
+						await syncProjectResources(executor, ctx);
+						await pushProjectState(executor, ctx, request.scope, true);
 						break;
 				}
 			} catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
-			try { return await collectRegistryUiSnapshot(this.executor, ctx.cwd, error); }
+			// A cancelled request gets no snapshot; rejecting releases the lock now.
+			signal.throwIfAborted();
+			try { return await collectRegistryUiSnapshot(executor, ctx.cwd, error); }
 			catch (cause) {
+				// Cancellation/shutdown rejects instead of returning a fallback snapshot.
+				signal.throwIfAborted();
 				const config = loadRegistryConfig(ctx.cwd);
 				return {
 					version: 1, configured: Boolean(config.remote), branch: config.branch,
@@ -157,6 +170,6 @@ export class DesktopRegistryService {
 					error: error ?? (cause instanceof Error ? cause.message : String(cause)),
 				};
 			}
-		}, this.shutdown.signal);
+		}, signal);
 	}
 }

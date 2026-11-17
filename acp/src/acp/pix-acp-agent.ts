@@ -1010,9 +1010,9 @@ export class PixAcpAgent {
 			)
 			.onRequest(PIX_QUEUE_ACTION_METHOD, parseDesktopQueueActionRequest, (ctx) => this.withRequestLogging(PIX_QUEUE_ACTION_METHOD, ctx.params, ctx.signal, () => this.desktopQueueAction(ctx.params)),
 			)
-			.onRequest(PIX_REGISTRY_ACTION_METHOD, parseDesktopRegistryActionRequest, (ctx) => this.withRequestLogging(PIX_REGISTRY_ACTION_METHOD, ctx.params, ctx.signal, () => this.desktopRegistryAction(ctx.params, ctx.client)),
+			.onRequest(PIX_REGISTRY_ACTION_METHOD, parseDesktopRegistryActionRequest, (ctx) => this.withRequestLogging(PIX_REGISTRY_ACTION_METHOD, ctx.params, ctx.signal, () => this.desktopRegistryAction(ctx.params, ctx.client, ctx.signal)),
 			)
-			.onRequest(PIX_REGISTRY_DIFF_METHOD, parseDesktopRegistryDiffRequest, (ctx) => this.withRequestLogging(PIX_REGISTRY_DIFF_METHOD, ctx.params, ctx.signal, () => this.desktopRegistryDiff(ctx.params)),
+			.onRequest(PIX_REGISTRY_DIFF_METHOD, parseDesktopRegistryDiffRequest, (ctx) => this.withRequestLogging(PIX_REGISTRY_DIFF_METHOD, ctx.params, ctx.signal, () => this.desktopRegistryDiff(ctx.params, ctx.signal)),
 			)
 			.onRequest(PIX_TAKE_AUTO_MESSAGE_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_TAKE_AUTO_MESSAGE_METHOD, ctx.params, ctx.signal, () => this.desktopTakeAutoMessage(ctx.params)),
 			)
@@ -1223,16 +1223,19 @@ export class PixAcpAgent {
 	private async desktopRegistryAction(
 		params: DesktopRegistryActionRequest,
 		client: ClientCaller,
+		signal: AbortSignal,
 	): Promise<DesktopRegistryActionResponse> {
-		const snapshot = await this.registryService.action(params, this.registryContext(params.cwd, client));
+		// $/cancel_request (e.g. a Desktop RPC timeout) aborts lock waits and Git.
+		const snapshot = await this.registryService.action(params, this.registryContext(params.cwd, client), signal);
 		return { snapshot };
 	}
 
 	/** Read-only diff between one resource's registry and project-local copies. */
 	private async desktopRegistryDiff(
 		params: DesktopRegistryDiffRequest,
+		signal: AbortSignal,
 	): Promise<DesktopRegistryDiffResponse> {
-		const payload = await this.registryService.diff(params);
+		const payload = await this.registryService.diff(params, signal);
 		return { files: desktopRegistryDiffFiles(payload) };
 	}
 

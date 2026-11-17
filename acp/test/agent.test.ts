@@ -4152,6 +4152,35 @@ test("Pix Desktop registry actions call the direct service without a Pi runtime 
 	}
 });
 
+test("Pix Desktop registry action and diff propagate ACP request cancellation to the service", async (t) => {
+	const observed: AbortSignal[] = [];
+	const pendingUntilAbort = (signal: AbortSignal | undefined) => new Promise<never>((_resolve, reject) => {
+		observed.push(signal!);
+		signal!.addEventListener("abort", () => reject(signal!.reason), { once: true });
+	});
+	const harness = createTestAdapter({
+		createPiClient: () => { throw new Error("Registry must not create a Pi runtime"); },
+		registryService: {
+			action: (_request, _ctx, signal) => pendingUntilAbort(signal),
+			diff: (_request, signal) => pendingUntilAbort(signal),
+		},
+	});
+	t.after(() => harness.adapter.dispose());
+	await connectAs(harness.adapter, "pix-desktop", async (cx) => {
+		await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, ...ELICITATION_CAPS });
+		const action = cx.request(PIX_REGISTRY_ACTION_METHOD, { cwd: "/tmp/registry-gui", action: "refresh" });
+		await waitFor(() => observed.length === 1);
+		await cx.notify(methods.protocol.cancelRequest, { requestId: 1 });
+		await assert.rejects(action);
+		assert.equal(observed[0]?.aborted, true);
+		const diff = cx.request(PIX_REGISTRY_DIFF_METHOD, { cwd: "/tmp/registry-gui", type: "skill", name: "pdf" });
+		await waitFor(() => observed.length === 2);
+		await cx.notify(methods.protocol.cancelRequest, { requestId: 2 });
+		await assert.rejects(diff);
+		assert.equal(observed[1]?.aborted, true);
+	});
+});
+
 test("Pix Desktop registry diff calls the direct service and validates file texts without Pi", async () => {
 	let calls = 0;
 	const files = [

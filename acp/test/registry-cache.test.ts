@@ -200,3 +200,49 @@ test("service dispose kills in-flight registry Git and releases the checkout loc
 		else process.env.HOME = originalHome;
 	}
 });
+
+test("request cancellation kills registry Git, releases the lock and keeps the service usable", { timeout: 15_000 }, async () => {
+	// Regression: a Desktop RPC timeout sent $/cancel_request, but Registry work
+	// kept holding the shared checkout lock and blocked other projects.
+	const configHome = join(root, "home");
+	await fs.mkdir(join(configHome, ".config", "pi"), { recursive: true });
+	await fs.writeFile(join(configHome, ".config", "pi", "pi-tools-suite.jsonc"), JSON.stringify({ resourceRegistry: { remote: "file:///nonexistent-registry", branch: "main" } }));
+	const originalHome = process.env.HOME;
+	process.env.HOME = configHome;
+	let started!: () => void;
+	let gitStarted = new Promise<void>((resolve) => { started = resolve; });
+	let gitCalls = 0;
+	const service = new DesktopRegistryService({
+		exec: (_command, _args, options) => new Promise((_resolve, reject) => {
+			gitCalls += 1;
+			started();
+			options.signal?.addEventListener("abort", () => reject(options.signal?.reason), { once: true });
+		}),
+	});
+	const ctx = (cwd: string) => ({
+		cwd, hasUI: false,
+		ui: { confirm: async () => false, input: async () => undefined, editor: async () => undefined, notify: () => undefined },
+	});
+	try {
+		const cwd = join(root, "project");
+		await fs.mkdir(cwd, { recursive: true });
+		const controller = new AbortController();
+		const action = service.action({ action: "refresh" }, ctx(cwd), controller.signal);
+		await gitStarted;
+		await assert.rejects(lock(registryUiCacheRoot(), { realpath: false }), { code: "ELOCKED" });
+		controller.abort(new Error("request cancelled"));
+		await assert.rejects(action, /request cancelled/);
+		assert.equal(gitCalls, 1, "a cancelled request starts no further Git or snapshot work");
+		assert.equal(await fs.stat(`${registryUiCacheRoot()}.lock`).catch(() => undefined), undefined);
+		// Cancelling one request must not poison the service for the next one.
+		gitStarted = new Promise<void>((resolve) => { started = resolve; });
+		const next = service.action({ action: "refresh" }, ctx(cwd));
+		await gitStarted;
+		assert.equal(gitCalls, 2);
+		await service.dispose();
+		await next.catch(() => undefined);
+	} finally {
+		if (originalHome === undefined) delete process.env.HOME;
+		else process.env.HOME = originalHome;
+	}
+});

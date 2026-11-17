@@ -259,11 +259,15 @@ JSONC/task overlay import or fallback.
     timeout and a 30 s margin, so a lock left by a killed ACP can be reclaimed);
     mutations (sync, push, install and similar) 15 minutes.
     Dialog-driven actions (configure, project key, tags) are unbounded. On
-    timeout the remote request is cancelled. User-initiated failures are reported to the UI
-    and logged as diagnostic `registry:action-failed:<action>`; this diagnostic
-    applies to any failed foreground action, not only timeouts. Background
-    startup catalog loads log the same diagnostic as a warning and show no
-    error toast.
+    timeout Desktop sends `$/cancel_request` and settles its busy state; ACP
+    propagates the request signal to the Registry service, which stops waiting
+    for the checkout lock, kills running Registry Git children, skips the
+    post-action snapshot and releases the lock. A cancelled request does not
+    roll back Git or filesystem steps already completed. Diff requests are
+    cancelled the same way. Every failed foreground action, not only a
+    timeout, logs the warning diagnostic `registry:action-failed:<action>`.
+    User-initiated failures are also reported in the UI; the background
+    startup catalog load only logs and shows no error toast.
     Workspace/client generation guards discard stale completions after
     a workspace switch or lifecycle reset. Registry-local controls may still be
     disabled while their own action is active. Local project initialization and

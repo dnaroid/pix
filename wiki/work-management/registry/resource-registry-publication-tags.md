@@ -132,10 +132,14 @@ status: active
   as well as a process-local queue. Remote/branch changes reuse or replace the
   same checkout under that lock. Configuration and tag editors do not hold it. Failure releases
   the lock and queue; crashed owners expire after two minutes. Lock acquisition
-  retries for up to ten minutes and never falls back to unlocked access. Lock
-  waits abort when the ACP service shuts down, and shutdown awaits in-flight
-  Registry work so the lock is released before exit. Timing constants live in
-  `acp/src/registry/lock-timing.ts`.
+  retries for up to ten minutes and never falls back to unlocked access.
+  Cancelling one `pix/registry/action` or diff request aborts only that
+  operation's lock wait and Git children. On a graceful ACP shutdown (connection closed) the Registry service aborts lock
+  waits, kills running Registry Git children and awaits the aborted operations,
+  so the lock is released before exit and new requests are rejected. An ACP
+  killed before that completes still leaves the lock until it goes stale.
+  Timing constants live in `acp/src/registry/lock-timing.ts`; Desktop derives
+  its refresh RPC timeout from them.
 - Legacy `resource-registry-desktop-<PID>` clones are not reused or created by
   new processes. They may be deleted when their old ACP owners are stopped;
   deleting a checkout in use by an older running process is unsafe.
