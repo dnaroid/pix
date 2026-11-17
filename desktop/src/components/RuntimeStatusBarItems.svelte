@@ -5,7 +5,6 @@
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import Users from "@lucide/svelte/icons/users";
   import SubagentUsageDialog from "./SubagentUsageDialog.svelte";
-  import ClaudeAccountSwitcher from "./ClaudeAccountSwitcher.svelte";
   import type { ProjectPathNavigation } from "../lib/project-path-navigation";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
@@ -53,7 +52,6 @@
     sessionUsageFailed = false,
     sessionUsageAvailable = false,
     claudeCodeRoute = false,
-    lastClaudeAccountAttempt,
     claudeLimitsRefreshing = false,
     claudeLimitsFailed = false,
     quotaWaitIndicator = null,
@@ -71,7 +69,6 @@
     sessionUsageAvailable?: boolean;
     /** Active session model routes through pi-claude-code-provider. */
     claudeCodeRoute?: boolean;
-    lastClaudeAccountAttempt?: string;
     claudeLimitsRefreshing?: boolean;
     claudeLimitsFailed?: boolean;
     quotaWaitIndicator?: { label: string; onReopen: () => void } | null;
@@ -114,11 +111,6 @@
   // quota left over from a previous model) must not stay hidden behind it.
   const modelUsage = $derived(displayModelUsage(status, now));
   const usageAccountLabel = $derived(shortModelUsageAccountLabel(modelUsage?.accountEmail));
-  // Usage can contain Claude calls after the user switches back to another
-  // provider. Leave subscription account selection available in that case.
-  const showClaudeAccountSwitcher = $derived(claudeCodeRoute || Boolean(
-    sessionUsage?.providers.some((provider) => provider.provider === "pi-claude-code-provider"),
-  ));
   const usageWindowItems = $derived(usageWindows());
   // Account quota rows show remaining balances; the weekly row integrates
   // the cycle's dates and time marker. Header-derived rate windows remain
@@ -532,9 +524,6 @@
                       </span>
                     {/if}
                   </div>
-                  {#if showClaudeAccountSwitcher}
-                    <ClaudeAccountSwitcher lastAttemptedAccount={lastClaudeAccountAttempt} />
-                  {/if}
                   {#if sessionUsage?.subagents?.agents.length}
                     <button type="button" class="flex h-6 items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" aria-label="Show subagent statistics" onclick={() => subagentUsageOpen = true}>
                       <Users class="h-3.5 w-3.5" aria-hidden="true" /> Subagents

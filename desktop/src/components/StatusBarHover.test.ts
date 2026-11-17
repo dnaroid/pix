@@ -172,29 +172,17 @@ describe("Status bar click surfaces", () => {
     expect(runtime).toContain("Could not refresh Claude Code limits. Retry or check your Claude Code login.");
   });
 
-  it("places the Claude account selector in the Usage header without changing Subagents or other provider routes", () => {
-    const runtime = source("RuntimeStatusBarItems");
-    const start = runtime.indexOf('>Session usage</div>');
-    const selector = runtime.indexOf('<ClaudeAccountSwitcher lastAttemptedAccount={lastClaudeAccountAttempt} />');
-    const subagents = runtime.indexOf('aria-label="Show subagent statistics"');
-    expect(start).toBeGreaterThan(0);
-    expect(selector).toBeGreaterThan(start);
-    expect(selector).toBeLessThan(subagents);
-    expect(runtime.slice(start, subagents)).toContain('{#if showClaudeAccountSwitcher}');
-    expect(runtime).toContain('provider.provider === "pi-claude-code-provider"');
-  });
-
   it("shows the active model provider logo beside Session usage without inferring it from billed models", () => {
     const runtime = source("RuntimeStatusBarItems");
     const title = runtime.indexOf('>Session usage</div>');
     const icon = runtime.indexOf('<ModelProviderIcon provider={currentModelProvider} />');
-    const switcher = runtime.indexOf('<ClaudeAccountSwitcher lastAttemptedAccount={lastClaudeAccountAttempt} />');
+    const header = runtime.indexOf('</header>', title);
     expect(statusBar).toContain('currentModelProvider={modelThinking.currentModel?.provider}');
     expect(runtime).toContain('{#if currentModelProvider && modelProviderBrand(currentModelProvider)}');
     expect(runtime).toContain('aria-label={`Current model provider: ${currentModelProvider}`}');
     expect(icon).toBeGreaterThan(title);
-    expect(icon).toBeLessThan(switcher);
-    expect(runtime.slice(runtime.lastIndexOf('class="flex shrink-0 items-center gap-1.5"', title), switcher))
+    expect(icon).toBeLessThan(header);
+    expect(runtime.slice(runtime.lastIndexOf('class="flex shrink-0 items-center gap-1.5"', title), header))
       .toContain('<ModelProviderIcon provider={currentModelProvider} />');
     expect(runtime).not.toContain('currentModelProvider={sessionUsage');
   });

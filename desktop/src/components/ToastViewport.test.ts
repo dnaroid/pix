@@ -17,7 +17,6 @@ describe("Desktop toast notifications", () => {
 
   it("keeps one-shot action results out of inline panel status lines", () => {
     expect(read("./GitPanel.svelte")).not.toContain("workflow.notice");
-    expect(read("./ClaudeAccountSwitcher.svelte")).not.toContain("Saved · limits cached");
     expect(read("./WorkspaceSidebarTaskQuickAdd.svelte")).not.toMatch(/\{notice\}/);
     expect(read("../app/desktop-project-services.ts")).toContain('source: "Git"');
   });

@@ -2,10 +2,21 @@
 
 ## [Unreleased]
 
+### Added
+
+- Before each Claude launch, a stored login expiring within Claude's five-minute refresh window is refreshed once through a dedicated `claude -p /usage --no-session-persistence` run (45 s timeout), so Claude refreshes it under its own cross-process lock. Concurrent requests share one refresh per process, and refresh launches are spaced at least 60 s apart. Failures never fail requests and are logged as `auth/login-refresh-failed`. `PI_CLAUDE_CODE_PROVIDER_LOGIN_REFRESH=off` disables the preflight.
+
 ### Changed
 
+- Supervised Claude process-group SIGTERM→SIGKILL grace rises from 500 ms to 3000 ms, because Claude can take up to 2 s on exit to persist a rotated refresh token; an earlier kill could lose it and revoke the login.
 - Claude Code 2.1.300's `rate_limit_info.unifiedWindows` now updates the five-hour and weekly quota from each `rate_limit_event`, including `allowed` events, rather than waiting for OAuth polling. Invalid windows are ignored individually; these telemetry-only updates do not show user-facing warnings. Older CLI versions continue to use polling and warning/429 observations.
+- Historical thinking blocks are no longer replayed into the serialized transcript. Without signatures they were only plain prompt text, and long tool loops resent tens of kilobytes of it on every request. `PI_CLAUDE_CODE_PROVIDER_REPLAY_THINKING=1` restores the previous replay; any value other than `1`/`true`/`0`/`false` fails the request with `replay_thinking_config`.
 - The default MCP tool-catalog readiness timeout rises from 5 to 15 seconds, so a bridge whose cold start is slowed by concurrent load no longer fails the request. `PI_CLAUDE_CODE_PROVIDER_MCP_READY_TIMEOUT_MS` still overrides it, capped by the total request timeout.
+
+### Removed
+
+- **Breaking.** Removed multi-account/profile rotation: account failover, rotation delay, per-account cooldown, account selection and the `accounts`, `autoRotate`, `selectedAccount` and `rotationDelaySeconds` settings. `claudeCodeProvider` accepts only `showRateLimitWarnings`; retired keys are ignored. Requests use the single default Claude Code login (`CLAUDE_CONFIG_DIR` is still forwarded when set).
+- Desktop's Claude account switcher, the Settings "Claude Accounts" section and the sign-in profile choice were removed. Sign-in runs `"${PI_CLAUDE_CODE_PROVIDER_PATH:-claude}" auth login --claudeai`.
 
 ### Fixed
 

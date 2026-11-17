@@ -21,7 +21,6 @@
   } from "../../lib/todo-thinking-overrides-settings";
   import { frontierModelRows, serializeFrontierModelRows } from "../../lib/frontier-models-settings";
   import { BUILTIN_AGENT_CATALOG } from "../../lib/builtin-agent-catalog";
-  import { claudeAccountRows } from "../../lib/claude-account-settings";
   import {
     toolsSuiteModuleStates,
     toolsSuiteUnknownModuleNames,
@@ -29,7 +28,6 @@
   } from "../../lib/tools-suite-module-visibility";
   import SettingsBuiltinAgentVisibility from "./SettingsBuiltinAgentVisibility.svelte";
   import SettingsModelSummary from "./SettingsModelSummary.svelte";
-  import SettingsClaudeAccounts from "./SettingsClaudeAccounts.svelte";
   import SettingsFieldRow from "./SettingsFieldRow.svelte";
   import SettingsKnowledgeJudge from "./SettingsKnowledgeJudge.svelte";
   import SettingsFrontierModels from "./SettingsFrontierModels.svelte";
@@ -158,15 +156,6 @@
     onChange(updateToolsSuiteModuleSource(source, parsed, name, enabled));
   }
 
-  function updateClaudeAccounts(rows: { name: string; configDir: string }[]): void {
-    let next = updateSettingsSource(source, ["claudeCodeProvider", "accounts"], rows);
-    const selected = settingsValue(parsed, ["claudeCodeProvider", "selectedAccount"]);
-    if (typeof selected === "string" && !rows.some((account) => account.name === selected)) {
-      next = removeSettingsValue(next, ["claudeCodeProvider", "selectedAccount"]);
-    }
-    onChange(next);
-  }
-
   function addTodoThinkingOverride(pattern: string, level: TodoThinkingOverrideValue): void {
     onChange(setTodoThinkingOverrideInSource(source, pattern, level));
   }
@@ -257,24 +246,12 @@
   </div>
 {:else if section === "claude"}
   <div class="px-2.5 py-2.5">
-    <h2 class="text-sm font-semibold text-foreground">Claude Code subscriptions</h2>
-    <p class="mt-0.5 text-xs leading-4 text-muted-foreground">Manage separate Claude Code OAuth profiles. On an explicit subscription limit rejection, retry the next eligible profile at most once, without repeating output or tool calls.</p>
+    <h2 class="text-sm font-semibold text-foreground">Claude Code subscription</h2>
+    <p class="mt-0.5 text-xs leading-4 text-muted-foreground">Uses the default Claude Code CLI login. Sign in with claude auth login.</p>
   </div>
   <div class="border-y border-sidebar-border/70 bg-panel">
     <SettingsFieldRow label="Claude quota warnings" description="Show warnings when approaching Claude usage limits. Off by default; quota usage and actual limit errors remain visible. Reload or restart sessions after changing this setting." explicit={has(["claudeCodeProvider", "showRateLimitWarnings"])} defaultLabel={defaultLabel(["claudeCodeProvider", "showRateLimitWarnings"])} onReset={() => reset(["claudeCodeProvider", "showRateLimitWarnings"])}>
       <SettingsSwitch value={bool(["claudeCodeProvider", "showRateLimitWarnings"])} onChange={(value) => set(["claudeCodeProvider", "showRateLimitWarnings"], value)} />
-    </SettingsFieldRow>
-    <SettingsFieldRow label="Automatic Claude account rotation" description="Opt-in. Switch only on an explicit five-hour or seven-day subscription rejection; do not rotate for network, auth or other errors. Profiles cool down until their quota reset." explicit={has(["claudeCodeProvider", "autoRotate"])} defaultLabel={defaultLabel(["claudeCodeProvider", "autoRotate"])} onReset={() => reset(["claudeCodeProvider", "autoRotate"])}>
-      <SettingsSwitch value={bool(["claudeCodeProvider", "autoRotate"])} disabled={claudeAccountRows(json(["claudeCodeProvider", "accounts"])).length < 2 && !bool(["claudeCodeProvider", "autoRotate"])} onChange={(value) => set(["claudeCodeProvider", "autoRotate"], value)} />
-      {#if claudeAccountRows(json(["claudeCodeProvider", "accounts"])).length < 2}
-        <p class="mt-1 text-xs text-muted-foreground">Add at least two profiles to enable auto-rotation.</p>
-      {/if}
-    </SettingsFieldRow>
-    <SettingsFieldRow label="Pause before switching (seconds)" description="Wait after a confirmed quota rejection before trying another profile. Default 60 seconds; range 0–300. Cancel stops the wait, and it counts toward the request timeout. A pause does not guarantee compliance with Anthropic's terms." explicit={has(["claudeCodeProvider", "rotationDelaySeconds"])} defaultLabel={defaultLabel(["claudeCodeProvider", "rotationDelaySeconds"])} onReset={() => reset(["claudeCodeProvider", "rotationDelaySeconds"])}>
-      <SettingsNumberInput value={number(["claudeCodeProvider", "rotationDelaySeconds"])} min={0} max={300} step={10} ariaLabel="Claude account rotation pause in seconds" onChange={(value) => updateNumber(["claudeCodeProvider", "rotationDelaySeconds"], value)} />
-    </SettingsFieldRow>
-    <SettingsFieldRow label="Claude OAuth profiles" description="Ordered list of independently authenticated Claude Code configuration folders. The first eligible account is used until it runs out of subscription quota." explicit={has(["claudeCodeProvider", "accounts"])} defaultLabel={defaultLabel(["claudeCodeProvider", "accounts"])} onReset={() => reset(["claudeCodeProvider", "accounts"])}>
-      <SettingsClaudeAccounts value={claudeAccountRows(json(["claudeCodeProvider", "accounts"]))} onChange={updateClaudeAccounts} />
     </SettingsFieldRow>
   </div>
 {:else if section === "automation"}

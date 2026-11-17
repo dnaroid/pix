@@ -7,9 +7,6 @@ export interface SessionEntry {
   imageStore: SessionImageStore;
   onRateLimitNotice: RateLimitNoticeSink;
   onRateLimitWindows?: RateLimitWindowsSink;
-  onAccountAttempt?: (name: string) => void;
-  onAccountPause?: (previous: string, seconds: number) => void;
-  onAccountSwitch?: (previous: string, next: string) => void;
 }
 
 /** Where the working directory came from, recorded in metrics. */

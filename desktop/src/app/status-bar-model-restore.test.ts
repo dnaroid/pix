@@ -30,7 +30,7 @@ function setup() {
     sessionNeedsInput: () => false, canClearTodos: () => true,
     subagentViewerState: () => viewer, clearSessionTodos,
     runtime: { statuses: new Map(), sessionUsageBySession: new Map(), sessionUsageRefreshing: new Set(),
-      sessionUsageFailed: new Set(), claudeAccountAttempts: new Map(), claudeLimitsRefreshing: new Set(), claudeLimitsFailed: new Set() },
+      sessionUsageFailed: new Set(), claudeLimitsRefreshing: new Set(), claudeLimitsFailed: new Set() },
     modelConfig, sessionCoordinator: {},
     quotaWait: { indicator: () => undefined, nowMs: 0 },
     headsUp: { state: () => undefined, isPending: () => false }, openObserverSettings: vi.fn(),

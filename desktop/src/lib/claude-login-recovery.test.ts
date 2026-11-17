@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claudeLoginCommand, claudeLoginProfiles, isClaudeLoginError } from "./claude-login-recovery";
+import { claudeLoginCommand, isClaudeLoginError } from "./claude-login-recovery";
 
 describe("Claude sign-in recovery", () => {
   const expired = "Claude Code request failed: Failed to authenticate: OAuth session expired and could not be refreshed";
@@ -15,22 +15,7 @@ describe("Claude sign-in recovery", () => {
     }
   });
 
-  it("uses the configured preference or rotation starting profile without changing settings", () => {
-    const config = { autoRotate: true, accounts: [{ name: "One", configDir: "~/.one" }, { name: "Two", configDir: "~/.two" }] };
-    const profiles = (value: object) => claudeLoginProfiles(JSON.stringify({ claudeCodeProvider: value }));
-    expect(profiles(config).selected).toBe("One");
-    expect(profiles({ ...config, selectedAccount: "Two" }).selected).toBe("Two");
-    expect(profiles({ ...config, autoRotate: false }).selected).toBe("");
-    expect(claudeLoginProfiles("{}").accounts).toEqual([]);
-    expect(() => claudeLoginProfiles("{broken")).toThrow();
-  });
-
-  it("pins named config paths and safely honors the CLI executable override", () => {
-    const command = '"${PI_CLAUDE_CODE_PROVIDER_PATH:-claude}" auth login --claudeai';
-    expect(claudeLoginCommand()).toBe(command);
-    expect(claudeLoginCommand("~/.claude-work")).toBe(`CLAUDE_CONFIG_DIR="$HOME/.claude-work" ${command}`);
-    expect(claudeLoginCommand("/a'b $(touch x)")).toBe(`CLAUDE_CONFIG_DIR='/a'\\''b $(touch x)' ${command}`);
-    expect(claudeLoginCommand('~/.a"$`\\')).toContain('"$HOME/.a\\"\\$\\`\\\\"');
-    for (const path of ["/a\nb", "/a\rb", "/a\0b"]) expect(() => claudeLoginCommand(path)).toThrow(/control characters/);
+  it("launches the default login and safely honors the CLI executable override", () => {
+    expect(claudeLoginCommand()).toBe('"${PI_CLAUDE_CODE_PROVIDER_PATH:-claude}" auth login --claudeai');
   });
 });

@@ -10,11 +10,21 @@ export interface ProcessResult {
   error?: Error;
 }
 
+/**
+ * SIGTERM -> SIGKILL grace for supervised Claude process groups. Claude Code
+ * waits up to 2 s on exit for an in-flight OAuth refresh to persist the rotated
+ * refresh token. Killing it earlier can lose a token the server has already
+ * rotated; reusing the old one then revokes the login for every process.
+ */
+export const CLAUDE_TERMINATION_GRACE_MS = 3_000;
+
 export interface ProcessSupervisorOptions {
   idleTimeoutMs: number;
   totalTimeoutMs: number;
   onFailure: (error: Error) => void;
   terminate?: (child: ChildProcess) => Promise<void>;
+  /** SIGTERM -> SIGKILL grace for the owned group; defaults to CLAUDE_TERMINATION_GRACE_MS. */
+  terminationGraceMs?: number;
 }
 
 export interface ProcessSupervisor {
@@ -59,7 +69,7 @@ export function superviseProcess(child: ChildProcess, options: ProcessSupervisor
   };
 
   const terminateOwnedProcess = (ownedChild: ChildProcess): Promise<void> =>
-    terminateProcessGroup(ownedChild, undefined, (pid, signal) => {
+    terminateProcessGroup(ownedChild, options.terminationGraceMs ?? CLAUDE_TERMINATION_GRACE_MS, (pid, signal) => {
       const sent = process.kill(pid, signal);
       if (signal === "SIGTERM" || signal === "SIGKILL") terminationSignals.push(signal);
       return sent;

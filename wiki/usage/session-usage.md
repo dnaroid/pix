@@ -119,22 +119,6 @@ blocks further BTW inference until reload rather than silently losing known spen
   usage still qualify. It opens a separate native modal with
   rotating-chevron task disclosures, role icons, requested/recorded models,
   tool-start counts, exact token categories and per-run token/cost totals.
-  Between `Session usage` and `Subagents`, active Claude Code routes or sessions
-  with recorded Claude Code calls additionally
-  show a compact OAuth-account select populated from the user-level
-  `pi-tools-suite.jsonc`. A named selection saves the preferred profile for
-  **future** model requests using a compare-and-swap JSONC write, without
-  changing any currently streaming request. `Default` or `Auto` clears that
-  preference depending on rotation mode. `Last: <name>` indicates the
-  profile most recently attempted in this session; it is not a billing/quota
-  attribution guarantee. Saved quota rows may still reflect a prior login,
-  and merely selecting a profile never triggers network quota polling.
-  Sessions without active or recorded Claude Code calls do not render this
-  selector. With no configured OAuth
-  profiles, the selector and last-attempted-account label are entirely hidden;
-  configuration remains in Tools Suite Settings. Details of profile selection
-  and bounded fallback belong in
-  [Claude Code provider](../providers/claude-code-provider.md).
   The modal shows the list of subagent calls and their expandable details,
   without run statuses, session-wide totals, main-agent comparisons or explanatory
   banners/footer. The role icon sits directly before the role name in a fixed

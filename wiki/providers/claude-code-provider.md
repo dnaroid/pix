@@ -24,123 +24,27 @@ load only the suite-relative standalone module entrypoint, not the whole suite
 and not a user/project npm package. Existing owned-launch, tool-guard and
 provider-web-search policies continue to apply.
 
-### Multiple Claude subscription profiles
+### Claude Code login, refresh and quota warnings
 
-Opt-in `claudeCodeProvider` settings live **only** in the user-level
-`~/.config/pi/pi-tools-suite.jsonc`, shared by Pix Desktop/ACP and TUI. A
-workspace's project config cannot supply OAuth paths. Desktop Settings → Tools
-Suite → Claude Accounts edits this file through the existing validated settings
-editor; no login tokens are read, copied, stored, or displayed by Pix. The
-account editor supports naming, ordering, adding, removing and copying CLI
-commands to log in/check status with a separate `CLAUDE_CONFIG_DIR`. The toggle
-is disabled until at least two profiles are listed. Saving changes takes effect
-on the next provider request; an existing in-flight request keeps its snapshot.
-
-Desktop Session usage, when the active model is Claude Code or the session
-has recorded Claude Code calls, includes a
-compact account selector between `Session usage` and `Subagents`. It reads
-only the user-level Tools Suite config when opened. `Default` with rotation
-off uses the ordinary Claude CLI login; `Auto` with rotation on clears the
-manual preference. Choosing a named profile writes `selectedAccount` under
-`claudeCodeProvider` via a compare-and-swap JSONC edit that preserves other
-settings and detects concurrent saves. This is a global **preferred account
-for the next model request**, not a change to an in-flight call; it also works
-while automatic rotation is off. With rotation enabled, the selected account
-is attempted first, and its quota rejection still triggers the bounded
-fallback and optional pause. Explicit preference changes clear only that
-account's process-local cooldown once; no account is retried twice in one
-request. Renaming/removing the preferred profile in Settings clears it, and an
-invalid stale name in manually edited JSONC falls back instead of blocking
-the provider.
-
-Each attempt publishes only a profile label and timestamp through the
-session-owned `claude-code-account` event, allowing Desktop to show
-`Last: <label>`. This identifies an attempted account, not a confirmed
-successful login. The selector does not automatically refresh subscription
-usage or relabel existing quota bars: previously displayed quotas may belong
-to the prior login. The UI displays no OAuth tokens or private config paths.
-All file reads/writes are asynchronous and scoped to the lifetime of the
-popup, and a concurrent-file conflict does not overwrite newer settings.
-
-Example (each directory must first be authenticated with Claude Code CLI):
+Provider settings live **only** in the user-level `~/.config/pi/pi-tools-suite.jsonc`, under `claudeCodeProvider`, shared by Pix Desktop/ACP and TUI. A workspace's project config cannot supply them. The only supported key is `showRateLimitWarnings` (schema `additionalProperties: false`):
 
 ```jsonc
 "claudeCodeProvider": {
-  "autoRotate": true,
-  "rotationDelaySeconds": 60,
-  "accounts": [
-    { "name": "Personal", "configDir": "~/.claude-personal" },
-    { "name": "Work", "configDir": "~/.claude-work" }
-  ]
+  "showRateLimitWarnings": true
 }
 ```
 
-In Desktop Settings → Tools Suite → Claude Accounts, the **Claude quota
-warnings** switch is discoverable through settings search, including quota and
-rate-limit terms, and controls whether the provider displays notices for Claude's
-`allowed_warning` rate-limit events. Its user-only setting is
-`claudeCodeProvider.showRateLimitWarnings` in
-`~/.config/pi/pi-tools-suite.jsonc`; it defaults to `false`. The provider reads
-this preference during initialization, so reload/restart sessions to apply a
-change. Disabling these notices suppresses only the `allowed_warning` UI
-notifications: structured quota telemetry, rejected-quota notifications/errors
-and account-rotation warnings are unchanged.
+The retired keys `accounts`, `autoRotate`, `selectedAccount` and `rotationDelaySeconds` are ignored by the provider loader, so an old file never disables the provider; Desktop schema validation flags them. There is no account rotation, profile selection or per-account cooldown.
 
-When disabled or absent, Claude Code retains its original single-profile login
-behavior. With rotation enabled, startup checks the first configured profile,
-not the implicit default `~/.claude`. Per-request model subprocesses receive
-a pinned `CLAUDE_CONFIG_DIR`; neither mutates `process.env` nor forwards an
-OAuth token. The provider-specific `pi_claude_code_provider_web_search` tool
-is not registered or used; the suite's separate `web_search`/`web_fetch`
-tools are unchanged.
-Two profiles with the same
-resolved path or duplicate names are invalid; the backend rejects malformed
-configuration rather than silently choosing the wrong login.
+Every request uses the single default Claude Code CLI login. `CLAUDE_CONFIG_DIR` is forwarded to Claude when it is set in the environment, and no OAuth token variable is forwarded. Pix never reads, copies, stores or displays login tokens.
 
-Only a **structured** `rate_limit_event` with `status: rejected` and
-`rateLimitType` of `five_hour` or `seven_day` qualifies for failover. A request
-starts at the selected available account and visits each configured account at
-most once; rate-limited accounts enter a shared process-wide cooldown until
-their reported reset time (or two minutes when unknown), capped at eight days.
-Concurrent requests may already be using the same account when a rejection
-arrives; subsequent selections honor the cooldown. A profile becomes eligible
-again after its reset. No implicit rotation happens for auth, transport,
-overload, cancellation, or other errors, nor after any model content or tool
-call has started streaming. Pre-output rejections discard the abandoned
-attempt's start/error events, preserving a single logical Pi stream. Retries
-reuse the remaining request deadline, not a fresh timeout per profile.
+**Login-refresh preflight.** Before each Claude launch, the provider reads only the `expiresAt` of the stored login: macOS Keychain item `Claude Code-credentials[-hash]`, otherwise `<config>/.credentials.json`. If the login expires within Claude's own five-minute refresh window, it runs one dedicated `claude -p /usage --no-session-persistence` (temporary cwd, 45 s timeout) so Claude refreshes it under its own cross-process lock. An expiry already known to be outside the window is cached per session, so ordinary requests read no credentials. Concurrent requests in one process share a single-flight refresh per executable; a caller's abort stops only that caller's wait. Refresh launches are spaced at least `LOGIN_REFRESH_RETRY_MS` (60 s) apart per process, so a failing refresh (for example a revoked login) does not add a Claude run to every request. Refresh failures never fail a request; they are reported as diagnostics `warn auth/login-refresh-failed`. `PI_CLAUDE_CODE_PROVIDER_LOGIN_REFRESH=off` disables the preflight (tests use it).
 
-After a confirmed quota rejection, the provider waits
-`claudeCodeProvider.rotationDelaySeconds` seconds before attempting another
-eligible account. This is a **non-blocking, abortable pause**, with an integer
-setting of 0–300 seconds and a 60-second default; omitting the setting still
-waits 60 seconds, while explicit 0 disables the pause. It is never applied to
-the first attempt, ordinary errors or an already-exhausted account pool.
-Before the wait, the session receives a warning naming the rejected account and
-duration. The selected next profile is re-evaluated after the wait, because
-another concurrent request may exhaust that profile in the meantime. The
-wait consumes the same overall request timeout; if there is insufficient time
-for the configured pause, the provider returns a terminal timeout error rather
-than launching another process or waiting indefinitely. Cancellation clears
-the timer and aborts the request without switching. The additional delay is a
-user-experience safety bound, **not** a guarantee of compliance with Anthropic's
-account or rate-limit terms.
+**Shutdown grace.** A supervised Claude process group receives SIGTERM and then SIGKILL after `CLAUDE_TERMINATION_GRACE_MS` (3000 ms, previously 500 ms). Claude can wait up to 2 s on exit to persist a rotated refresh token; an earlier kill could lose it and cause server-side revocation ("OAuth token revoked" across sessions).
 
-If every profile is blocked or has rejected this request, stop with one normal
-provider error that identifies the exhaustion and (when known) the earliest
-reset; do not recursively requeue or spin. The existing quota-wait extension
-may handle the final exhausted error after the turn as before. Automatic
-switches emit a session-scoped warning that names the two profile labels (never
-credential material). Structured quota telemetry carries the originating Pi
-session/model for provenance validation, but accepted samples are shared across
-Claude Code routes and sessions within one Pix process, not owned by that
-session/model. This is **not** a combined balance across accounts: the current
-cache assumes one Claude Code login per process and samples carry no account
-identity. With account rotation, one account's consumption can therefore appear
-on another account's session until polling or a subsequent event corrects it.
-Per-account telemetry isolation would require account identifiers and a cache
-keyed by them; it is not implemented. See the
-[runtime quota contract](../usage/desktop-runtime-status.md).
+**Quota warnings.** Desktop Settings → Tools Suite → Claude Code subscription has one control, **Claude quota warnings**, discoverable through settings search (quota and rate-limit terms). It sets `claudeCodeProvider.showRateLimitWarnings`, which defaults to `false`, and controls whether the provider displays notices for Claude's `allowed_warning` rate-limit events. The provider reads it during initialization, so reload/restart sessions to apply a change. Disabling it suppresses only `allowed_warning` UI notifications; structured quota telemetry and rejected-quota notifications/errors are unchanged.
+
+The provider-specific `pi_claude_code_provider_web_search` tool is not registered or used; the suite's separate `web_search`/`web_fetch` tools are unchanged.
 
 Claude Code is optional. When `claude` is absent from PATH and no nonblank
 `PI_CLAUDE_CODE_PROVIDER_PATH` is configured, initialization quietly leaves the
@@ -168,11 +72,19 @@ session ID, including notifications from either event.
 
 ### Experimental historical thinking pruning
 
-This transport has no provider-specific pruning setting. The suite-wide
-experimental `pruneHistoricalThinking` setting (module
-`historical-thinking-prune`, see `wiki/context/historical-thinking-prune.md`) removes
-earlier-turn thinking in Pi's `context` event, before this serializer runs, so
-it applies to Claude Code like any other provider.
+The serializer omits all historical thinking blocks from the transcript by
+default, including those from the current tool loop. Signatures cannot be
+replayed, so the text gives the model no resumable reasoning, and long loops
+used to resend tens of kilobytes of it on each request.
+`PI_CLAUDE_CODE_PROVIDER_REPLAY_THINKING=1` (or `true`) restores replay of the
+summary text; values other than `1`, `true`, `0`, or `false` fail with
+`replay_thinking_config`. Session files and the Desktop transcript keep all
+thinking.
+
+The suite-wide experimental `pruneHistoricalThinking` setting (module
+`historical-thinking-prune`, see `wiki/context/historical-thinking-prune.md`)
+removes earlier-turn thinking in Pi's `context` event, before this serializer
+runs. For Claude Code it only matters when replay is enabled.
 
 ### Desktop sign-in recovery
 
@@ -183,25 +95,12 @@ failed authentication or a missing login qualify; unrelated provider errors,
 quota warnings and ordinary transcript text do not.
 
 Historical authentication error cards and their text remain in the transcript,
-but the complete sign-in recovery block (profile selection, login action,
+but the complete sign-in recovery block (login action,
 Continue action and guidance) is shown only for the final transcript item when
 no prompt is running. Starting a retry hides stale recovery controls without
 removing the error; a later final authentication error offers recovery again.
 
-The action reads only the user-level Tools Suite configuration. With no named
-profiles it opens Pix's existing Terminal workbench and runs Claude's
-`auth login --claudeai`; with named profiles it first offers a Pix-styled
-profile selector and requires confirmation. The initial choice uses the saved
-preference, the first rotation profile, or Default when rotation is off. This
-choice is local to sign-in and does not change provider account preferences.
-Named profiles pin `CLAUDE_CONFIG_DIR`; Default inherits the terminal's ordinary
-Claude configuration. The command honors `PI_CLAUDE_CODE_PROVIDER_PATH` from the
-terminal environment, falling back to `claude`. Profile paths are shell-quoted,
-and CR/LF/NUL paths are rejected before writing into the PTY.
-
-Configuration is reread before launch so a changed path is used; removing the
-chosen profile requires another selection/confirmation rather than silently
-logging into Default. Repeated clicks are ignored while that action is pending,
+The action opens Pix's existing Terminal workbench and runs `"${PI_CLAUDE_CODE_PROVIDER_PATH:-claude}" auth login --claudeai`. The command honors `PI_CLAUDE_CODE_PROVIDER_PATH` from the terminal environment, falling back to `claude`. Configuration is reread before launch so a changed path is used. Repeated clicks are ignored while that action is pending,
 and stale configuration completions after unmount/session changes never launch
 a terminal. Config/launch failures have visible retry feedback and sanitized
 diagnostic reports. Terminal launch failures and a busy terminal propagate to

@@ -52,9 +52,13 @@ function fakePi(initialTools = []) {
 // Sessions are registered process-wide, so one test leaving a session open would
 // silently change how the next test's requests resolve.
 let originalHome;
+let originalLoginRefresh;
 let testHome;
 test.beforeEach(async () => {
     originalHome = process.env.HOME;
+    // The login-refresh preflight reads Claude's real stored login; never in tests.
+    originalLoginRefresh = process.env.PI_CLAUDE_CODE_PROVIDER_LOGIN_REFRESH;
+    process.env.PI_CLAUDE_CODE_PROVIDER_LOGIN_REFRESH = "off";
     testHome = await mkdtemp(join(tmpdir(), "claude-warning-settings-"));
     process.env.HOME = testHome;
     await mkdir(join(testHome, ".config", "pi"), { recursive: true });
@@ -70,6 +74,8 @@ let sessionCounter = 0;
 test.afterEach(async () => {
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
+    if (originalLoginRefresh === undefined) delete process.env.PI_CLAUDE_CODE_PROVIDER_LOGIN_REFRESH;
+    else process.env.PI_CLAUDE_CODE_PROVIDER_LOGIN_REFRESH = originalLoginRefresh;
     await rm(testHome, { recursive: true, force: true });
 });
 
@@ -80,7 +86,7 @@ function sessionContext(cwd, ui) {
     return { cwd, ui, sessionManager: { getSessionId: () => sessionId } };
 }
 
-async function createFakeClaude(searchResult = "ok", { searchDelayMs = 0, rateLimitInfo, resultError = false, reportCwd = false, reportConfigDir = false, providerTools = [], holdProviderUntilInput = false, authStatus = ELIGIBLE_CLAUDE_AUTH, authExitCode = 0 } = {}) {
+async function createFakeClaude(searchResult = "ok", { searchDelayMs = 0, rateLimitInfo, resultError = false, reportCwd = false, providerTools = [], holdProviderUntilInput = false, authStatus = ELIGIBLE_CLAUDE_AUTH, authExitCode = 0 } = {}) {
     const directory = await mkdtemp(join(tmpdir(), "pi-claude-code-provider-extension-"));
     const executable = join(directory, process.platform === "win32" ? "claude.cjs" : "claude");
     const rateLimitEvents = Array.isArray(rateLimitInfo) ? rateLimitInfo : rateLimitInfo ? [rateLimitInfo] : [];
@@ -105,7 +111,7 @@ else {
   const send = () => {
     process.stdout.write(JSON.stringify(providerMode ? ${JSON.stringify(providerInit)} : ${JSON.stringify(init)}) + "\\n");
     for (const rateLimitInfo of ${JSON.stringify(rateLimitEvents)}) process.stdout.write(JSON.stringify({type:"rate_limit_event",rate_limit_info:rateLimitInfo}) + "\\n");
-    process.stdout.write(JSON.stringify({type:"result",is_error:${resultError},result:${reportConfigDir ? "process.env.CLAUDE_CONFIG_DIR ?? ''" : reportCwd ? "providerMode ? process.cwd() : " + JSON.stringify(searchResult) : JSON.stringify(searchResult)}}) + "\\n");
+    process.stdout.write(JSON.stringify({type:"result",is_error:${resultError},result:${reportCwd ? "providerMode ? process.cwd() : " + JSON.stringify(searchResult) : JSON.stringify(searchResult)}}) + "\\n");
   };
   if (providerMode && ${holdProviderUntilInput}) {
     process.stdin.resume();
@@ -649,71 +655,6 @@ test("explicit missing Claude path retains the doctor and reports one session er
     finally {
         if (original === undefined) delete process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
         else process.env.PI_CLAUDE_CODE_PROVIDER_PATH = original;
-    }
-});
-
-test("a manually selected subscription profile routes new Claude requests without reloading", async () => {
-    const home = await mkdtemp(join(tmpdir(), "pix-claude-manual-profile-"));
-    const { directory, executable } = await createFakeClaude("unused", { reportConfigDir: true });
-    const originalHome = process.env.HOME;
-    const originalPath = process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
-    process.env.HOME = home;
-    process.env.PI_CLAUDE_CODE_PROVIDER_PATH = executable;
-    const selectedDirs = [join(home, "personal"), join(home, "work")];
-    const settings = join(home, ".config", "pi", "pi-tools-suite.jsonc");
-    try {
-        await mkdir(dirname(settings), { recursive: true });
-        const savePreference = async (selectedAccount) => writeFile(settings, JSON.stringify({
-            claudeCodeProvider: {
-                autoRotate: false,
-                accounts: [
-                    { name: "Personal", configDir: selectedDirs[0] },
-                    { name: "Work", configDir: selectedDirs[1] },
-                ],
-                selectedAccount,
-            },
-        }));
-        await savePreference("Work");
-        const pi = fakePi();
-        await piClaudeCodeProvider(pi.api);
-        const registered = pi.providers.get("pi-claude-code-provider");
-        assert.ok(registered, "a selected profile must allow preflight without the default ~/.claude login");
-        const model = {
-            ...registered.models.find((candidate) => candidate.id === "sonnet"),
-            provider: "pi-claude-code-provider", api: "pi-claude-code-provider-headless",
-            baseUrl: "pi-claude-code-provider://local",
-        };
-        const accountEvents = [];
-        const context = {
-            ...sessionContext(home, {
-                notify() {},
-                setWidget(id, lines) { accountEvents.push({ id, lines }); },
-            }),
-            mode: "rpc",
-        };
-        pi.handlers.get("session_start")[0]({}, context);
-        const request = async () => {
-            const result = await registered.streamSimple(model, providerContext(), {
-                reasoning: "medium", sessionId: context.sessionManager.getSessionId(),
-            }).result();
-            assert.equal(result.stopReason, "stop", result.errorMessage);
-            return result.content.find((part) => part.type === "text")?.text;
-        };
-        assert.equal(await request(), selectedDirs[1]);
-        await savePreference("Personal");
-        assert.equal(await request(), selectedDirs[0]);
-        assert.deepEqual(accountEvents.map((event) => {
-            assert.equal(event.id, "pix.session-state");
-            assert.equal(event.lines[0], "claude-code-account");
-            return JSON.parse(event.lines[1]).name;
-        }), ["Work", "Personal"]);
-        await pi.handlers.get("session_shutdown")[0]({}, {});
-    } finally {
-        if (originalHome === undefined) delete process.env.HOME;
-        else process.env.HOME = originalHome;
-        if (originalPath === undefined) delete process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
-        else process.env.PI_CLAUDE_CODE_PROVIDER_PATH = originalPath;
-        await Promise.all([home, directory].map((path) => rm(path, { recursive: true, force: true })));
     }
 });
 

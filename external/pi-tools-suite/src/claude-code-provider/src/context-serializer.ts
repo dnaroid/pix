@@ -124,6 +124,20 @@ function validateImage(image: ImageContent, limits: RequestPreparationLimits): {
   return { bytes, extension };
 }
 
+const REPLAY_THINKING_ENV = "PI_CLAUDE_CODE_PROVIDER_REPLAY_THINKING";
+
+/**
+ * Historical thinking is omitted by default: without signatures it is only
+ * plain text, and long tool loops replaying tens of kilobytes of it correlate
+ * with `reasoning_extraction` refusals. `1`/`true` restores replay.
+ */
+export function shouldReplayThinking(environment: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = environment[REPLAY_THINKING_ENV]?.trim().toLowerCase();
+  if (!raw || raw === "0" || raw === "false") return false;
+  if (raw === "1" || raw === "true") return true;
+  throw new ClaudeCodeError("replay_thinking_config", `${REPLAY_THINKING_ENV} must be "1", "true", "0", or "false"`);
+}
+
 function recordField(value: unknown, field: string): unknown {
   return value && typeof value === "object" ? (value as Record<string, unknown>)[field] : undefined;
 }
@@ -146,6 +160,7 @@ export async function prepareRequestWithLimits(
   imageStore?: ImageStoreLease,
 ): Promise<PreparedRequest> {
   const limits = { ...DEFAULT_REQUEST_PREPARATION_LIMITS, ...overrides };
+  const replayThinking = shouldReplayThinking();
   const directory = await createRuntimeDirectory("provider_request", { temporaryRoot });
   try {
     const systemPromptPath = join(directory, "system-prompt.txt");
@@ -197,6 +212,9 @@ export async function prepareRequestWithLimits(
             if (block.redacted !== undefined && typeof block.redacted !== "boolean") {
               throw new ClaudeCodeError("content_shape", "Pi thinking redacted must be boolean");
             }
+            // Unsigned summaries cannot resume earlier reasoning; replaying them
+            // as plain prompt text only inflates long tool loops (see DESIGN.md).
+            if (!replayThinking) break;
             output.push({
               type: "thinking",
               thinking: block.thinking,

@@ -37,7 +37,6 @@
     sessionUsageFailed,
     sessionUsageAvailable,
     claudeCodeRoute = false,
-    lastClaudeAccountAttempt,
     claudeLimitsRefreshing = false,
     claudeLimitsFailed = false,
     sessionActivity,
@@ -85,7 +84,6 @@
     sessionUsageFailed: boolean;
     sessionUsageAvailable: boolean;
     claudeCodeRoute?: boolean;
-    lastClaudeAccountAttempt?: string;
     claudeLimitsRefreshing?: boolean;
     claudeLimitsFailed?: boolean;
     sessionActivity: SessionActivitySummary;
@@ -176,7 +174,6 @@
       {sessionUsageFailed}
       {sessionUsageAvailable}
       {claudeCodeRoute}
-      {lastClaudeAccountAttempt}
       {claudeLimitsRefreshing}
       {claudeLimitsFailed}
       {quotaWaitIndicator}

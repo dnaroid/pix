@@ -301,14 +301,7 @@ const SearchConfig = Type.Object({
 
 const ClaudeCodeProviderConfig = Type.Object({
 	showRateLimitWarnings: Type.Optional(Type.Boolean({ default: false, description: "Show Claude Code approaching-quota warnings. Disabled by default; quota usage and actual rejection errors remain visible. Reload or restart sessions after changing this setting." })),
-	autoRotate: Type.Optional(Type.Boolean({ default: false, description: "Automatically use another Claude Code OAuth profile after a structured subscription rate-limit rejection. Each profile is tried at most once per request; disabled by default." })),
-	selectedAccount: Type.Optional(Type.String({ minLength: 1, maxLength: 64, description: "Preferred OAuth profile name from accounts. Manual selection applies to the next Claude Code model request, even when automatic rotation is off. If the profile is removed, falls back to the default." })),
-	rotationDelaySeconds: Type.Optional(Type.Integer({ default: 60, minimum: 0, maximum: 300, description: "Non-blocking pause (seconds) before trying another OAuth profile after an explicit subscription quota rejection. Defaults to 60; 0 skips the pause. Cancel stops waiting; the pause counts toward the request timeout." })),
-	accounts: Type.Optional(Type.Array(Type.Object({
-		name: Type.String({ minLength: 1, maxLength: 64, description: "Friendly label for this OAuth subscription profile." }),
-		configDir: Type.String({ minLength: 1, description: "Absolute path or ~/ path to a separate Claude Code configuration directory. Authenticate using CLAUDE_CONFIG_DIR=... claude auth login." }),
-	}, { additionalProperties: false }), { maxItems: 12, description: "Ordered OAuth profiles; auto-rotation requires at least two unique names and directories." })),
-}, { additionalProperties: false, description: "Claude Code subscription failover. Only the user-level file is trusted; OAuth tokens stay in Claude Code's own store." });
+}, { additionalProperties: false, description: "Claude Code subscription provider preferences. Only the user-level file is trusted; OAuth tokens stay in Claude Code's own store." });
 
 // ---------------------------------------------------------------------------
 // Top-level schema

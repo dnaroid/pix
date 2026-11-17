@@ -1,11 +1,8 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
   import LogIn from "@lucide/svelte/icons/log-in";
   import Play from "@lucide/svelte/icons/play";
   import { onDestroy } from "svelte";
-  import type { SettingsConfigDocument } from "../lib/settings";
   import { createClaudeLoginController } from "./claude-login-controller.svelte";
-  import TaskFieldSelect from "./TaskFieldSelect.svelte";
 
   let { onOpenTerminal, onError, onContinue }: {
     onOpenTerminal: (command: string) => Promise<void>;
@@ -14,7 +11,6 @@
     onContinue?: () => Promise<unknown>;
   } = $props();
   const controller = createClaudeLoginController({
-    readConfig: async () => (await invoke<SettingsConfigDocument>("read_user_config", { kind: "pi-tools-suite" })).content,
     openTerminal: (command) => onOpenTerminal(command),
     reportError: (error) => onError(error),
   });
@@ -45,18 +41,6 @@
 </script>
 
 <div class="mt-2 flex flex-col items-start gap-2" data-claude-login-action>
-  {#if controller.profiles}
-    <div class="w-full max-w-64">
-      <TaskFieldSelect
-        value={controller.selected}
-        options={[{ value: "", label: "Default Claude login" }, ...controller.profiles.accounts.map((account) => ({ value: account.name, label: account.name }))]}
-        onChange={controller.select}
-        ariaLabel="Claude account to sign in"
-        disabled={controller.busy}
-        compact
-      />
-    </div>
-  {/if}
   <div class="flex flex-wrap items-center gap-2">
     <button type="button" class={buttonClass} disabled={controller.busy} onclick={() => void controller.login()}>
       <LogIn class="h-3.5 w-3.5" aria-hidden="true" />

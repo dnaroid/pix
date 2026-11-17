@@ -175,7 +175,6 @@ export function createDesktopStatusBarViewModel(options: {
         && !viewer
         && !draft
         && modelThinkingConfigState(liveConfigOptions).currentModel?.provider === "pi-claude-code-provider",
-      lastClaudeAccountAttempt: sessionId && !draft ? options.runtime.claudeAccountAttempts.get(sessionId)?.name : undefined,
       claudeLimitsRefreshing: sessionId ? options.runtime.claudeLimitsRefreshing.has(sessionId) : false,
       claudeLimitsFailed: sessionId ? options.runtime.claudeLimitsFailed.has(sessionId) : false,
       sessionActivity,

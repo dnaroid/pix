@@ -14,10 +14,10 @@ import * as piAi from "@earendil-works/pi-ai";
 import { suiteDiagnostics } from "../../lib/suite-diagnostics.js";
 import { bridgeArgv, formatBridgeArgv, providerArgs, thinkingDisplay, transcriptBreakpointEnabled } from "./claude-args.ts";
 import { claimClaudeLaunch, settleFailure, spawnClaudeProcess, type ClaudeProcess } from "./claude-process.ts";
+import type { LoginRefresh } from "./login-refresh.ts";
 import { prepareRequest } from "./context-serializer.ts";
 import { appendCleanupFailure, ClaudeCodeError, errorCode, errorText } from "./errors.ts";
 import { JsonlParser } from "./jsonl.ts";
-import type { RateLimitNoticeSink } from "./claude-protocol.ts";
 import { recordRequestMetrics } from "./metrics.ts";
 import { createOutput } from "./output.ts";
 import { claimPaidTestLaunch } from "./paid-launch-budget.ts";
@@ -73,10 +73,11 @@ export interface ClaudeStreamDependencies {
    * compatibility opt-in; that does not establish the caller's actual cwd.
    */
   resolveSession?: (request: SessionRequest) => ResolvedSession | { error: string } | undefined;
-  /** Pinned OAuth profile for this request, never mutated in process.env. */
-  claudeConfigDir?: string;
-  /** Raw structured notice used for bounded account failover, independent of UI. */
-  onAccountRateLimitNotice?: RateLimitNoticeSink;
+  /**
+   * Refresh Claude Code's stored login before launch when it is about to
+   * expire, so a request's process never owns that refresh. Never throws.
+   */
+  loginRefresh?: LoginRefresh;
 }
 
 export function createClaudeStream(installation: ClaudeInstallation, dependencies: ClaudeStreamDependencies = {}) {
@@ -371,10 +372,7 @@ function createClaudeAttempt(
           toolNames: prepared.toolNames,
           onToolUse: stopForToolUse,
           onLengthStop: stopForLength,
-          onRateLimitNotice: (notice) => {
-            dependencies.onAccountRateLimitNotice?.(notice);
-            onRateLimitNotice?.(notice, `${model.provider}/${model.id}`);
-          },
+          onRateLimitNotice: (notice) => onRateLimitNotice?.(notice, `${model.provider}/${model.id}`),
           onRateLimitWindows: (windows) => onRateLimitWindows?.(windows, `${model.provider}/${model.id}`),
           onResponseAnnouncement: announceResponse,
           onPreStreamRetry: (notice) => {
@@ -396,6 +394,7 @@ function createClaudeAttempt(
         // Pi can cancel before asynchronous preparation finishes. An aborted
         // request fails here without launching Claude or its MCP child, and the
         // catch path still removes the prepared private directory.
+        await dependencies.loginRefresh?.(options?.signal);
         await claimClaudeLaunch(options?.signal, claimLaunch);
         const running = spawnClaudeProcess({
           installation,
@@ -403,7 +402,6 @@ function createClaudeAttempt(
           env: {
             CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(maxOutputTokens),
             ...(prepared.catalogPath ? { PI_CLAUDE_TOOL_CATALOG: prepared.catalogPath } : {}),
-            ...(dependencies.claudeConfigDir ? { CLAUDE_CONFIG_DIR: dependencies.claudeConfigDir } : {}),
           },
           directory: prepared.directory,
           privatePaths: prepared.imageStoreDirectory ? [prepared.imageStoreDirectory] : [],

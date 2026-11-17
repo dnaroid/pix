@@ -8,7 +8,11 @@ suite setting `pruneHistoricalThinking` (default `false`;
 ## Behavior
 
 - Runs in Pi's `context` event before every model call, so it applies to all
-  providers (zai, OpenAI, Gemini, Anthropic, Claude Code, ...).
+  providers (zai, OpenAI, Gemini, Anthropic, ...). Claude Code is the exception:
+  its serializer omits historical thinking unless
+  `PI_CLAUDE_CODE_PROVIDER_REPLAY_THINKING` enables replay, so this setting
+  changes its requests only in that case (see
+  [Claude Code provider](../providers/claude-code-provider.md)).
 - Removes `thinking` blocks from assistant messages before the turn boundary:
   the start of the latest consecutive `user` group not directly preceded by a
   `toolResult`. An entire group after a tool result is treated as steering inside

@@ -64,9 +64,10 @@ test("serializes Pi context, tools, literal at-paths, and images privately", asy
         assert.match(JSON.stringify(messages[2]), /image_attachment/);
         assert.deepEqual(header.toolNameMap.map((entry) => entry.piName), ["odd tool/name"]);
         assert.match(header.toolNameMap[0].transportName, /^mcp__pi__tool_[a-f0-9]{16}$/);
-        assert.equal(messages[1].content[1].name, header.toolNameMap[0].transportName);
+        assert.equal(messages[1].content[0].name, header.toolNameMap[0].transportName);
         assert.equal(messages[2].toolName, header.toolNameMap[0].transportName);
-        assert.equal(messages[1].content[0].thinkingSignature, undefined);
+        assert.equal(messages[1].content.some((block) => block.type === "thinking"), false);
+        assert.equal(transcript(prepared).includes("opaque"), false);
         assert.equal(messages[1].usage, undefined);
         assert.equal(prepared.attachmentPaths.length, 1);
         assert.equal(prepared.toolNames.size, 1);
@@ -117,6 +118,52 @@ test("preserves Unicode edge cases and orphaned tool calls as transcript data", 
     }
     finally {
         await rm(prepared.directory, { recursive: true, force: true });
+    }
+});
+
+test("omits replayed thinking by default and restores it only on opt-in", async () => {
+    const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+    const assistant = (content, stopReason) => ({ role: "assistant", content, api: "test", provider: "test", model: "test", usage, stopReason, timestamp: 2 });
+    const context = {
+        messages: [
+            { role: "user", content: "go", timestamp: 1 },
+            assistant([
+                { type: "thinking", thinking: "long private reasoning", thinkingSignature: "sig" },
+                { type: "toolCall", id: "call-1", name: "probe", arguments: {} },
+            ], "toolUse"),
+            { role: "toolResult", toolCallId: "call-1", toolName: "probe", content: [{ type: "text", text: "ok" }], isError: false, timestamp: 3 },
+            // A thinking-only assistant message must vanish rather than serialize as empty.
+            assistant([{ type: "thinking", thinking: "only reasoning" }], "stop"),
+            { role: "user", content: "continue", timestamp: 4 },
+        ],
+        tools: [],
+    };
+    const previous = process.env.PI_CLAUDE_CODE_PROVIDER_REPLAY_THINKING;
+    const prepared = [];
+    try {
+        delete process.env.PI_CLAUDE_CODE_PROVIDER_REPLAY_THINKING;
+        const omitted = await prepareRequest(context);
+        prepared.push(omitted);
+        const [, ...messages] = omitted.transcriptBlocks.map((line) => JSON.parse(line));
+        assert.equal(transcript(omitted).includes("reasoning"), false);
+        assert.deepEqual(messages.map((message) => message.role), ["user", "assistant", "toolResult", "user"]);
+        assert.deepEqual(messages[1].content.map((block) => block.type), ["toolCall"]);
+
+        process.env.PI_CLAUDE_CODE_PROVIDER_REPLAY_THINKING = "1";
+        const replayed = await prepareRequest(context);
+        prepared.push(replayed);
+        const [, ...replayedMessages] = replayed.transcriptBlocks.map((line) => JSON.parse(line));
+        assert.deepEqual(replayedMessages[1].content[0], { type: "thinking", thinking: "long private reasoning" });
+        assert.equal(replayedMessages.length, 5);
+        assert.equal(transcript(replayed).includes("sig"), false);
+
+        process.env.PI_CLAUDE_CODE_PROVIDER_REPLAY_THINKING = "maybe";
+        await assert.rejects(prepareRequest(context), (error) => error.code === "replay_thinking_config");
+    }
+    finally {
+        if (previous === undefined) delete process.env.PI_CLAUDE_CODE_PROVIDER_REPLAY_THINKING;
+        else process.env.PI_CLAUDE_CODE_PROVIDER_REPLAY_THINKING = previous;
+        await Promise.all(prepared.map((item) => rm(item.directory, { recursive: true, force: true })));
     }
 });
 

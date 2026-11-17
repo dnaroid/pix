@@ -2,7 +2,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { VERSION } from "@earendil-works/pi-coding-agent";
 import { inspectClaudeInstallation } from "../src/auth.ts";
-import { loadClaudeAccountRotationConfig } from "../src/account-rotation.ts";
+import { loadClaudeCodeProviderSettings } from "../src/provider-settings.ts";
 import { providerModels as catalogModels } from "../src/catalog.ts";
 import { bridgeArgv } from "../src/claude-args.ts";
 import { readClaudeModelAliases } from "../src/claude-models.ts";
@@ -11,7 +11,8 @@ import { writeDiagnosticReport } from "../src/diagnostics.ts";
 import { errorCode, errorText, normalizeClaudeOverflow } from "../src/errors.ts";
 import { formatDoctorSummary, probeBridge } from "../src/doctor.ts";
 import { flushMetricsLog, getLastRequestMetrics, getLastSearchMetrics, getMetricsLogError } from "../src/metrics.ts";
-import { createRotatingClaudeStream } from "../src/rotating-stream.ts";
+import { createLoginRefresher } from "../src/login-refresh.ts";
+import { createClaudeStream } from "../src/provider.ts";
 import { cleanupStaleRuntimeDirectories } from "../src/runtime-directories.ts";
 import { SessionImageStore } from "../src/session-image-store.ts";
 import { resolveSession, sessionRegistry, type SessionEntry } from "../src/session-registry.ts";
@@ -25,12 +26,9 @@ const API = "pi-claude-code-provider-headless";
 const NOTICE_PREFIX = "[pi-claude-code-provider]";
 const MAX_TRACKED_RATE_LIMIT_NOTICES = 64;
 
-/** Preflight and doctor must inspect the same configured subscription login. */
-async function inspectConfiguredClaudeInstallation(): Promise<ClaudeInstallation> {
-  const config = loadClaudeAccountRotationConfig();
-  const selected = config.accounts.find((account) => account.name === config.selectedAccount);
-  const configDir = selected?.configDir ?? (config.enabled ? config.accounts[0]?.configDir : undefined);
-  return inspectClaudeInstallation(configDir);
+/** Preflight and doctor inspect Claude Code's ordinary subscription login. */
+function inspectConfiguredClaudeInstallation(): Promise<ClaudeInstallation> {
+  return inspectClaudeInstallation();
 }
 
 export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<void> {
@@ -40,7 +38,7 @@ export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<vo
   let installation: ClaudeInstallation;
   let showRateLimitWarnings = false;
   try {
-    showRateLimitWarnings = loadClaudeAccountRotationConfig().showRateLimitWarnings === true;
+    showRateLimitWarnings = loadClaudeCodeProviderSettings().showRateLimitWarnings === true;
     installation = await inspectConfiguredClaudeInstallation();
   } catch (error) {
     // The suite enables this optional adapter by default, including on clean
@@ -75,20 +73,18 @@ export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<vo
     ownSessionEntry = undefined;
   };
 
-  const streamSimple = createRotatingClaudeStream(installation, {
-    onAccountAttempt: (name, sessionId) => {
-      if (sessionId) sessions.get(sessionId)?.onAccountAttempt?.(name);
-    },
-    onPause: (previous, seconds, sessionId) => {
-      if (sessionId) sessions.get(sessionId)?.onAccountPause?.(previous, seconds);
-    },
-    onSwitch: (previous, next, sessionId) => {
-      if (sessionId) sessions.get(sessionId)?.onAccountSwitch?.(previous, next);
-    },
+  const streamSimple = createClaudeStream(installation, {
     resolveSession: (request) => resolveSession(sessions, {
       ...request,
       allowBorrowSoleDirectory: process.env.PI_CLAUDE_CODE_PROVIDER_BORROW_SOLE_DIRECTORY?.trim() === "on",
     }),
+    // `off` disables the preflight (tests and hosts that manage Claude's login themselves).
+    loginRefresh: process.env.PI_CLAUDE_CODE_PROVIDER_LOGIN_REFRESH?.trim() === "off"
+      ? undefined
+      : createLoginRefresher(installation.executable, {
+        onFailure: (error) => suiteDiagnostics.report("warn", "auth", "login-refresh-failed", undefined,
+          { errorType: diagnosticErrorType(error) }),
+      }),
   });
   pi.registerProvider(PROVIDER, {
     name: "Claude Code Subscription",
@@ -174,21 +170,6 @@ export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<vo
       imageStore,
       onRateLimitNotice: rateLimitNotify,
       onRateLimitWindows: rateLimitWindows,
-      onAccountAttempt: (name) => {
-        if (ctx.mode === "rpc") {
-          try {
-            ctx.ui.setWidget("pix.session-state", ["claude-code-account", JSON.stringify({ version: 1, name, observedAt: Date.now() })]);
-          } catch { /* Optional UI telemetry. */ }
-        }
-      },
-      onAccountPause: (previous, seconds) => {
-        suiteDiagnostics.report("warn", "auth", "profile-rate-limited", ctx.cwd);
-        ctx.ui.notify(`${NOTICE_PREFIX} OAuth profile ${previous} reached its limit; waiting ${seconds}s before trying another profile`, "warning");
-      },
-      onAccountSwitch: (previous, next) => {
-        suiteDiagnostics.report("debug", "auth", "profile-switched", ctx.cwd);
-        ctx.ui.notify(`${NOTICE_PREFIX} OAuth profile ${previous} reached its limit; continuing with ${next}`, "warning");
-      },
     };
     sessions.set(ownSessionId, ownSessionEntry);
     const platformWarning = startupPlatformWarning(currentPlatform);

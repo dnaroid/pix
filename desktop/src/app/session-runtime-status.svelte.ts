@@ -1,5 +1,4 @@
 import type { ContextUsageStatus, RuntimeStatus, SessionUsageReport } from "../lib/acp-client";
-import { PIX_CLAUDE_CODE_ACCOUNT_CHANNEL, parseClaudeAccountAttempt, type ClaudeAccountAttempt } from "../lib/claude-account-event";
 import { parseContextUsageStatus, parseModelUsageStatus } from "../lib/acp-response-parsers";
 import { newerDcpContextMap, parseDcpContextMap } from "../lib/dcp-context-map";
 import {
@@ -30,7 +29,6 @@ type SessionRuntimeStatusOptions = Pick<SessionRuntimeStoreOptions, "client"> & 
 
 export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions) {
   let statuses = $state<Map<string, RuntimeStatus>>(new Map());
-  let claudeAccountAttempts = $state<Map<string, ClaudeAccountAttempt>>(new Map());
   let modelUsageRefreshing = $state<Set<string>>(new Set());
   let dcpStatsRefreshing = $state<Set<string>>(new Set());
   let sessionUsageBySession = $state<Map<string, SessionUsageReport>>(new Map());
@@ -161,17 +159,6 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
   }
 
   function handleSessionState(notification: SessionStateNotification): boolean {
-    if (notification.channel === PIX_CLAUDE_CODE_ACCOUNT_CHANNEL) {
-      if (!options.isReady(notification.sessionId)) return true;
-      const attempt = parseClaudeAccountAttempt(notification.data);
-      if (!attempt) return true;
-      const prior = claudeAccountAttempts.get(notification.sessionId);
-      if (prior && prior.observedAt > attempt.observedAt) return true;
-      const next = new Map(claudeAccountAttempts);
-      next.set(notification.sessionId, attempt);
-      claudeAccountAttempts = next;
-      return true;
-    }
     if (notification.channel === PIX_DCP_CONTEXT_MAP_CHANNEL) {
       if (!options.isReady(notification.sessionId)) return true;
       const incoming = parseDcpContextMap(notification.data);
@@ -474,11 +461,6 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
     // different owner even when its local counters start from one again.
     owners.delete(sessionId);
     quotaRecovery.forget(sessionId);
-    if (claudeAccountAttempts.has(sessionId)) {
-      const next = new Map(claudeAccountAttempts);
-      next.delete(sessionId);
-      claudeAccountAttempts = next;
-    }
     if (statuses.has(sessionId)) {
       const next = new Map(statuses);
       next.delete(sessionId);
@@ -526,7 +508,6 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
     quotaRecovery.reset();
     owners.clear();
     statuses = new Map();
-    claudeAccountAttempts = new Map();
     modelUsageRefreshing = new Set();
     dcpStatsRefreshing = new Set();
     sessionUsageBySession = new Map();
@@ -539,7 +520,6 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
   return {
     get ownedSessionCount() { return owners.size; },
     get statuses() { return statuses; },
-    get claudeAccountAttempts() { return claudeAccountAttempts; },
     get modelUsageRefreshing() { return modelUsageRefreshing; },
     get dcpStatsRefreshing() { return dcpStatsRefreshing; },
     get sessionUsageBySession() { return sessionUsageBySession; },

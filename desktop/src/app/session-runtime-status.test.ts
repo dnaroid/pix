@@ -43,26 +43,6 @@ function usageStatus(cost: number): SessionUsageStatus {
 }
 
 describe("runtime status lifecycle", () => {
-	it("keeps the last attempted Claude account scoped to a live session and clears it on forget/reset", () => {
-		const { store, setReady } = setup();
-		const now = Date.now();
-		const observe = (name: string, observedAt: number, sessionId = "a") =>
-			store.handleSessionState({ sessionId, channel: "claude-code-account",
-				data: { version: 1, name, observedAt } });
-		expect(observe("Personal", now)).toBe(true);
-		expect(store.claudeAccountAttempts.get("a")?.name).toBe("Personal");
-		observe("Work", now - 100);
-		expect(store.claudeAccountAttempts.get("a")?.name).toBe("Personal");
-		observe("Work", now + 1);
-		expect(store.claudeAccountAttempts.get("a")?.name).toBe("Work");
-		setReady(false);
-		observe("Other", now + 2);
-		expect(store.claudeAccountAttempts.get("a")?.name).toBe("Work");
-		store.forget("a");
-		expect(store.claudeAccountAttempts.has("a")).toBe(false);
-		store.reset();
-		expect(store.claudeAccountAttempts.size).toBe(0);
-	});
 	it("streamed Claude limits win over automatic and manual in-flight quota replies", async () => {
 		const { store, requests, limits } = setup();
 		const automatic = store.refreshStatus("a", true);
