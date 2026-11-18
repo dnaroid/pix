@@ -341,10 +341,11 @@ JSONC/task overlay import or fallback.
   reset allows a later streak to warn again.
 - Registry cleanup is allowlist-based and never resets project state. The
   canonical top-level project directories are `agents/`, `artifacts/`,
-  `plans/`, `search/`, `skills/`, `subagents/`, and `task-attachments/`.
+  `plans/`, `search/`, `skills/`, `subagents/`, `supervisor/`, and
+  `task-attachments/`.
   Unsupported legacy `tasks.d/` is not canonical and is reclaimable.
-- Cleanup preserves the canonical `agents/`, `plans/`, `search/`, `skills/`, and
-  `task-attachments/` trees, but removes every entry recursively inside
+- Cleanup preserves the canonical `agents/`, `plans/`, `search/`, `skills/`,
+  `supervisor/`, and `task-attachments/` trees, but removes every entry recursively inside
   `.pi/artifacts/` and `.pi/subagents/` while leaving those two container
   directories in place. Subagent cleanup preserves any scope containing
   owned-launch records; Manual Clean removes its other contents but retains

@@ -13,6 +13,7 @@ export type DesktopCommandId =
   | "session.jump"
   | "session.history"
   | "session.modelThinking"
+  | "session.supervisor"
   | "composer.focus"
   | "composer.enhance"
   | "composer.createTask"
@@ -130,6 +131,13 @@ const DEFINITIONS: Record<DesktopCommandId, DesktopCommandDefinition> = {
     scope: "session",
     keywords: ["model", "thinking", "reasoning", "effort"],
   },
+  "session.supervisor": {
+    id: "session.supervisor",
+    label: "Open Project Supervisor",
+    description: "Open the project's supervisor conversation, creating it on first use",
+    scope: "session",
+    keywords: ["supervisor", "orchestrator", "watch", "tasks", "sessions"],
+  },
   "composer.focus": {
     id: "composer.focus",
     label: "Focus Composer",
@@ -221,6 +229,7 @@ export const COMMAND_PALETTE_IDS: readonly DesktopCommandId[] = [
   "session.jump",
   "session.history",
   "session.modelThinking",
+  "session.supervisor",
 ];
 
 export function desktopCommandDefinition(id: DesktopCommandId): DesktopCommandDefinition {

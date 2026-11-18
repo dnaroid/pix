@@ -1,3 +1,4 @@
+import "./isolated-env.js";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DesktopTaskTypeClassifier, parseTaskTypeClassifyRequest } from "../src/tasks/type-classifier.js";

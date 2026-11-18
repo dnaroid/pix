@@ -3,7 +3,8 @@
   import GitFork from "@lucide/svelte/icons/git-fork";
   import Check from "@lucide/svelte/icons/check";
   import Bot from "@lucide/svelte/icons/bot";
-  import { sessionIsFork, type SessionTreeRow } from "../lib/session-tabs";
+  import Radar from "@lucide/svelte/icons/radar";
+  import { sessionIsFork, sessionIsSupervisor, type SessionTreeRow } from "../lib/session-tabs";
   import { subagentSessionLink } from "../lib/session-subagent-link";
 
   let { row, collapsed = false, related = false, selected = false, disabled = false,
@@ -57,6 +58,8 @@
         {#if selected}<Check class="h-3 w-3 shrink-0 text-primary" aria-hidden="true" />{/if}
         {#if subagent}
           <Bot class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+        {:else if sessionIsSupervisor(row.session)}
+          <Radar class="h-3 w-3 shrink-0 text-primary" aria-label="Project supervisor" role="img" />
         {:else if row.depth === 0 && sessionIsFork(row.session)}<GitFork class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />{/if}
         <span class="min-w-0 truncate">{title}</span>
       </strong>

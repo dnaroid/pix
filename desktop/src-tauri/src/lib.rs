@@ -155,6 +155,8 @@ const PROJECT_PI_CANONICAL_DIRECTORIES: &[&str] = &[
     // Preview translation and Explain caches; ACP applies their retention (30 days unused, 4,000 entries).
     "translations",
     "explanations",
+    // ACP-owned supervisor mandate, registry and ledger (decision 0077).
+    "supervisor",
 ];
 const PROJECT_PI_CANONICAL_FILES: &[&str] = &[
     "AGENTS.md",
@@ -11831,6 +11833,8 @@ mod tests {
             b"keep-attachment",
         )
         .expect("write canonical attachment");
+        fs::create_dir_all(workspace.join(".pi/supervisor")).expect("create supervisor dir");
+        fs::write(workspace.join(".pi/supervisor/ledger.jsonl"), b"{}\n").expect("write ledger");
         fs::write(workspace.join(".pi/qa_auth.jsonc"), b"{\"profiles\":{}}")
             .expect("write QA auth config");
         for canonical_file in [
@@ -11924,6 +11928,7 @@ mod tests {
         assert!(workspace.join(".pi/agents/demo.md").is_file());
         assert!(workspace.join(".pi/task-attachments/keep.bin").is_file());
         assert!(workspace.join(".pi/qa_auth.jsonc").is_file());
+        assert!(workspace.join(".pi/supervisor/ledger.jsonl").is_file());
         for canonical_file in [
             "AGENTS.md",
             "agent-model-overrides.json",

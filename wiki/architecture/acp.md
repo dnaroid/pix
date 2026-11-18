@@ -66,6 +66,20 @@ Zed (Agent Panel)  <--ACP JSON-RPC over stdio-->  pix-acp  <--JSONL RPC over std
   missed; the private SDK fields and startup ordering are a compatibility seam
   to recheck on SDK upgrades. The reader handles UTF-8 chunk boundaries, CRLF,
   final unterminated records, and stream disposal/close.
+- In-process per-session lifecycle event monitor (`src/acp/session-events.ts`,
+  decision [0077](../decisions/0077-project-supervisor-session.md) phase 0):
+  `settled`, `question`, `error`, `stalled` and `checklist` events for
+  `PixAcpAgent.subscribeSessionEvents`. These events are not sent over the ACP
+  protocol. Observers are disposed on teardown and forgotten on session delete.
+- Project supervisor phase 1, partial (decision [0077](../decisions/0077-project-supervisor-session.md)):
+  private `pix/supervisor/open` (`src/acp/supervisor-contract.ts`,
+  `src/acp/supervisor-service.ts`) opens or reuses one registered supervisor
+  session per project, recorded in `.pi/supervisor/registry.json`. Only that
+  session of a Pix Desktop client loads the `supervisor` extension
+  (`PIX_SUPERVISOR_BRIDGE=1`, `src/extensions/supervisor.ts`); its read-only
+  `status` and `read` ops answer over the correlated bridge in
+  `src/pi/supervisor-host.js` (60 s timeout). Digests, wakes and mutating ops
+  are not implemented yet. See [project supervisor](../work-management/project-supervisor.md).
 - Env config and stderr-only logging.
 
 **stdout is reserved for the protocol stream**; all diagnostics go to stderr.

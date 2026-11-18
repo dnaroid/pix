@@ -197,6 +197,42 @@ rationale.
 - Plan-run records live in ACP-owned `.pi/plan-launches.json`
   (`pix/plans/launches`, see [Work plans](registry/desktop-registry-plans.md)),
   so the supervisor and Desktop read the same outcomes (phase 0, done).
+- The per-session event source exists (phase 0, done): ACP
+  `acp/src/acp/session-events.ts` emits `settled` (stop reason + files
+  changed by successful write/edit calls), `question`, `error`
+  (model/compaction/run/process), `stalled` and `checklist` to in-process
+  subscribers (`PixAcpAgent.subscribeSessionEvents`). Session retirement emits
+  nothing and disposes the observer's timer. Touched files are kept per session
+  id across runtime replacement and dropped on session delete. The handover,
+  takeover and `conflict` events, debounce and digests are still phase 1–2 work.
+- The storage layer exists (phase 0, done): `acp/src/acp/supervisor-store.ts`
+  keeps `.pi/supervisor/mandate.json`, `registry.json` (atomic temp+rename,
+  serialized per project, bounded to 200 sessions) and append-only
+  `ledger.jsonl` (torn lines skipped). Invalid mandate fields fall back to
+  defaults, never to wider limits; a malformed pause flag reads as paused.
+  Desktop cleanup treats `.pi/supervisor/` as canonical.
+- The supervisor session and read-only tool exist (phase 1, partial).
+  Desktop's command palette entry **Open Project Supervisor** calls ACP
+  `pix/supervisor/open` (`acp/src/acp/supervisor-contract.ts`). ACP records
+  the session id in `registry.json` before spawning, so concurrent opens
+  share one session, and a reopen returns the existing session. A recorded but
+  missing session is journaled (`supervisor-missing`) and replaced by a new
+  one. Other ACP clients are refused. `session/list` marks the session with
+  `_meta["pix.supervisor"]`, and Desktop shows a radar icon on its row.
+  Deleting the supervisor or a managed session unregisters it and journals
+  `closed_by_user`.
+- ACP loads `acp/src/extensions/supervisor.ts` with `PIX_SUPERVISOR_BRIDGE=1`
+  only into the registered supervisor session of a Pix Desktop client.
+  `acp/src/pi/supervisor-host.js` installs the correlated bridge only under
+  that variable; requests carry random per-runtime ids, time out after 60 s,
+  and a replaced runtime gets no reply. ACP also rejects requests from any
+  session that is not the registered supervisor. `status` lists managed
+  sessions and, in this observer phase, up to 20 other recent project
+  sessions (excluding sub-agent viewers). Each entry includes the linked task,
+  run state, last lifecycle event and plan progress. `read` returns a bounded
+  digest built from the live runtime or the saved transcript's current branch
+  (`acp/src/acp/supervisor-service.ts`). Digests, debounced wakes and all
+  mutating ops are still to come.
 - On Desktop start, ACP reconciles the registry against saved tasks, plans and
   session state. Sessions interrupted by quitting become `interrupted`
   events. The supervisor may resume them through the existing Resume flow; this

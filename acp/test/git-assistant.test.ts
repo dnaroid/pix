@@ -1,3 +1,4 @@
+import "./isolated-env.js";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";

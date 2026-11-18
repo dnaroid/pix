@@ -58,6 +58,17 @@ import { forwardTaskRun } from "./task-run-bridge.js";
 import { PIX_PLAN_LAUNCHES_METHOD, parsePlanLaunchesRequest, type PlanLaunchesRequest } from "./plan-launches-contract.js";
 import { createPlanLaunchesStore, type PlanLaunchesStore } from "./plan-launches-store.js";
 import {
+	PIX_SUPERVISOR_META_KEY,
+	PIX_SUPERVISOR_OPEN_METHOD,
+	SUPERVISOR_SESSION_TITLE,
+	parseSupervisorOpenRequest,
+	type SupervisorOpenRequest,
+	type SupervisorOpenResponse,
+} from "./supervisor-contract.js";
+import { forwardSupervisorRequest } from "./supervisor-bridge.js";
+import { createSupervisorService, type SupervisorService } from "./supervisor-service.js";
+import { createSupervisorStore, type SupervisorStore } from "./supervisor-store.js";
+import {
 	createSessionEventMonitor,
 	type SessionEventListener,
 	type SessionEventMonitor,
@@ -537,6 +548,8 @@ export interface PixAcpAgentOptions {
 	readonly htmlSandboxExtensionPath?: string;
 	/** acp-owned `wiki_conflicts` tool; active only in projects with an initialized Wiki. */
 	readonly wikiConflictsExtensionPath?: string;
+	/** acp-owned `supervisor` tool; loaded only into the project supervisor session on Pix Desktop (0077). */
+	readonly supervisorExtensionPath?: string;
 	/** Agent resource directory override for hermetic draft-catalog tests. */
 	readonly agentDir?: string;
 	readonly logger: Logger;
@@ -577,6 +590,8 @@ export interface PixAcpAgentOptions {
 	readonly planLaunches?: PlanLaunchesStore;
 	/** Session lifecycle event monitor (overridable for deterministic timer tests). */
 	readonly sessionEvents?: SessionEventMonitor;
+	/** Project supervisor state under `.pi/supervisor/` (overridable for hermetic tests). */
+	readonly supervisorStore?: SupervisorStore;
 	/** Shared model-usage query (overridable for deterministic concurrency tests). */
 	readonly queryModelUsage?: (state: PiSessionState, options?: { freshOnly?: boolean }) => Promise<ModelUsageRefreshResult>;
 	/**
@@ -688,6 +703,11 @@ export class PixAcpAgent {
 	private readonly registryService: Pick<DesktopRegistryService, "action" | "diff"> & Partial<Pick<DesktopRegistryService, "dispose">>;
 	private readonly planLaunches: PlanLaunchesStore;
 	private readonly sessionEvents: SessionEventMonitor;
+	private readonly supervisorStore: SupervisorStore;
+	private readonly supervisor: SupervisorService;
+	private readonly unsubscribeSupervisorEvents: () => void;
+	/** Serializes `pix/supervisor/open` per project so one click creates one session. */
+	private readonly supervisorOpening = new Map<string, Promise<SupervisorOpenResponse>>();
 	private disposed = false;
 	private readonly fileMentionIndex = new FileMentionIndex();
 	private readonly retiringForkQueues = new Set<Promise<void>>();
@@ -797,6 +817,25 @@ export class PixAcpAgent {
 			planFor: async (cwd, sessionId) => (await this.planLaunches.handle({ cwd, action: "list" })).launches[sessionId]?.path,
 			report: (message) => this.options.logger.warn(message, { module: "session.events" }),
 		});
+		this.supervisorStore = options.supervisorStore ?? createSupervisorStore();
+		this.supervisor = createSupervisorService({
+			store: this.supervisorStore,
+			listRecords: (cwd) => this.sessionMap.list(cwd),
+			getRecord: (sessionId) => this.sessionMap.get(sessionId),
+			live: (sessionId) => {
+				const session = this.sessions.get(sessionId);
+				if (!session) return undefined;
+				return {
+					running: session.activeRun !== undefined,
+					pendingQuestions: session.pendingQuestionIds.size,
+					messages: () => session.pi.getMessages(),
+				};
+			},
+			touchedFiles: (sessionId) => this.sessionEvents.touchedFiles(sessionId),
+			planFor: async (cwd, sessionId) => (await this.planLaunches.handle({ cwd, action: "list" })).launches[sessionId]?.path,
+			report: (message) => this.options.logger.warn(message, { module: "supervisor" }),
+		});
+		this.unsubscribeSupervisorEvents = this.sessionEvents.subscribe((event) => this.supervisor.record(event));
 		this.completeAutocomplete = options.completeAutocomplete ?? createAutocompleteCompleter({
 			logger: options.logger,
 			loadConfig: this.loadAutocompleteConfig,
@@ -1037,6 +1076,8 @@ export class PixAcpAgent {
 			)
 			.onRequest(PIX_PLAN_LAUNCHES_METHOD, parsePlanLaunchesParams, (ctx) => this.withRequestLogging(PIX_PLAN_LAUNCHES_METHOD, ctx.params, ctx.signal, () => this.planLaunches.handle(ctx.params)),
 			)
+			.onRequest(PIX_SUPERVISOR_OPEN_METHOD, parseSupervisorOpenParams, (ctx) => this.withRequestLogging(PIX_SUPERVISOR_OPEN_METHOD, ctx.params, ctx.signal, () => this.openSupervisor(ctx.params, ctx.client)),
+			)
 			.onRequest(PIX_TAKE_AUTO_MESSAGE_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_TAKE_AUTO_MESSAGE_METHOD, ctx.params, ctx.signal, () => this.desktopTakeAutoMessage(ctx.params)),
 			)
 			.onRequest(PIX_RELOAD_SESSION_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_RELOAD_SESSION_METHOD, ctx.params, ctx.signal, () => this.withSessionLifecycle(ctx.params.sessionId, () => this.reloadSession(ctx.params, ctx.client))),
@@ -1093,6 +1134,7 @@ export class PixAcpAgent {
 		await Promise.allSettled([...this.pendingSpawns]);
 		await Promise.allSettled([...this.sessionLifecycle.values()]);
 		await Promise.all([...this.sessions.values()].map((session) => this.teardownSession(session)));
+		this.unsubscribeSupervisorEvents();
 		this.sessionEvents.dispose();
 		await Promise.all([...this.retiringForkQueues]);
 		await registryDisposed;
@@ -2379,11 +2421,13 @@ export class PixAcpAgent {
 		}
 
 		const records = await this.sessionMap.list(params.cwd ?? undefined);
+		const supervisorSessionId = params.cwd ? await this.supervisorSessionId(params.cwd) : undefined;
 		const sessionIdByPath = new Map(records
 			.map((record) => [resolve(record.piSessionPath), record.sessionId]));
 		const sessions: SessionInfo[] = records.map((record) => {
 			const info: SessionInfo = { sessionId: record.sessionId, cwd: record.cwd, updatedAt: record.updatedAt,
-				_meta: { "pix.sessionFile": resolve(record.piSessionPath) } };
+				_meta: { "pix.sessionFile": resolve(record.piSessionPath),
+					...(record.sessionId === supervisorSessionId ? { [PIX_SUPERVISOR_META_KEY]: true } : {}) } };
 			if (record.title !== undefined) info.title = record.title;
 			if (record.subagent) info._meta = { ...info._meta, [PIX_SUBAGENT_META_KEY]: record.subagent };
 			if (record.parentSessionPath !== undefined) {
@@ -2446,8 +2490,88 @@ export class PixAcpAgent {
 		}
 		await this.sessionMap.delete(sessionId);
 		this.sessionEvents.forget(sessionId);
+		this.supervisor.forget(sessionId);
+		if (record) await this.forgetSupervisorSession(record.cwd, sessionId);
 		if (record) this.searchService.changed(record.cwd);
 		this.options.logger.info(`session/delete: ${sessionId}`);
+	}
+
+	/** Registered supervisor session id; a broken store only hides the marker. */
+	private async supervisorSessionId(cwd: string): Promise<string | undefined> {
+		try {
+			return (await this.supervisorStore.readRegistry(cwd)).supervisorSessionId;
+		} catch (error) {
+			this.options.logger.warn(`supervisor registry read failed: ${stringifyUnknown(error)}`, { module: "supervisor" });
+			return undefined;
+		}
+	}
+
+	/**
+	 * The `supervisor` tool is loaded only into the registered supervisor
+	 * session of a Pix Desktop client (0077); every other runtime lacks it.
+	 */
+	private async supervisorExtensionFor(cwd: string, sessionId: string): Promise<string | undefined> {
+		const path = this.options.supervisorExtensionPath;
+		if (!path || this.clientName !== "pix-desktop") return undefined;
+		return await this.supervisorSessionId(cwd) === sessionId ? path : undefined;
+	}
+
+	/** Open the project's single supervisor session, creating it on first use. */
+	private openSupervisor(params: SupervisorOpenRequest, client: ClientCaller): Promise<SupervisorOpenResponse> {
+		if (this.clientName !== "pix-desktop") {
+			return Promise.reject(new RequestError(ERROR_SERVER, "the project supervisor requires Pix Desktop"));
+		}
+		const key = resolve(params.cwd);
+		const running = this.supervisorOpening.get(key);
+		if (running) return running;
+		const opening = this.openSupervisorOnce(params.cwd, client)
+			.finally(() => { if (this.supervisorOpening.get(key) === opening) this.supervisorOpening.delete(key); });
+		this.supervisorOpening.set(key, opening);
+		return opening;
+	}
+
+	private async openSupervisorOnce(cwd: string, client: ClientCaller): Promise<SupervisorOpenResponse> {
+		const existing = (await this.supervisorStore.readRegistry(cwd)).supervisorSessionId;
+		if (existing) {
+			const record = await this.sessionMap.get(existing);
+			if (record && record.cwd === cwd && !record.subagent) return { sessionId: existing, created: false };
+			// A missing session is reported, never silently replaced by a duplicate.
+			this.options.logger.warn(`supervisor session ${existing} is missing; creating a new one`, { module: "supervisor" });
+			await this.supervisorStore.appendLedger(cwd, { kind: "supervisor-missing", sessionId: existing });
+		}
+		const sessionId = randomUUID();
+		// Register first: the runtime decides on the supervisor extension at spawn.
+		await this.supervisorStore.updateRegistry(cwd, (current) => ({ ...current, supervisorSessionId: sessionId }));
+		try {
+			const { session } = await this.startNewSession(sessionId, cwd, client);
+			await session.pi.setSessionName(SUPERVISOR_SESSION_TITLE).catch((error: unknown) => {
+				this.options.logger.warn(`supervisor title failed: ${stringifyUnknown(error)}`, { module: "supervisor" });
+			});
+			await this.sessionMap.touch(sessionId, SUPERVISOR_SESSION_TITLE);
+		} catch (error) {
+			await this.supervisorStore.updateRegistry(cwd, (current) => current.supervisorSessionId === sessionId
+				? { version: current.version, sessions: current.sessions } : current).catch(() => undefined);
+			throw error;
+		}
+		await this.supervisorStore.appendLedger(cwd, { kind: "supervisor-created", sessionId });
+		return { sessionId, created: true };
+	}
+
+	/** Deleting the supervisor or a managed session unregisters it and journals the event. */
+	private async forgetSupervisorSession(cwd: string, sessionId: string): Promise<void> {
+		try {
+			const before = await this.supervisorStore.readRegistry(cwd);
+			if (before.supervisorSessionId !== sessionId && !before.sessions[sessionId]) return;
+			await this.supervisorStore.updateRegistry(cwd, (current) => {
+				const { [sessionId]: _removed, ...sessions } = current.sessions;
+				return current.supervisorSessionId === sessionId
+					? { version: current.version, sessions }
+					: { ...current, sessions };
+			});
+			await this.supervisorStore.appendLedger(cwd, { kind: "closed_by_user", sessionId });
+		} catch (error) {
+			this.options.logger.warn(`supervisor registry cleanup failed: ${stringifyUnknown(error)}`, { module: "supervisor" });
+		}
 	}
 
 	/** Cascade: a deleted parent session takes its `.pi/subagents/<id>/` children along (decision 0072). */
@@ -2591,9 +2715,15 @@ export class PixAcpAgent {
 			this.clientName === "pix-desktop" ? this.options.htmlSandboxExtensionPath : undefined,
 			this.options.wikiConflictsExtensionPath,
 		);
+		const supervisorExtension = startupOverride ? undefined : await this.supervisorExtensionFor(cwd, acpSessionId);
 		const pi = this.options.createPiClient({
 			...startup,
-			env: { ...startup.env, ...(privateAgentsPath ? { PIX_PROJECT_AGENTS_FILE: privateAgentsPath } : {}) },
+			...(supervisorExtension ? { args: [...(startup.args ?? []), "--extension", supervisorExtension] } : {}),
+			env: {
+				...startup.env,
+				...(privateAgentsPath ? { PIX_PROJECT_AGENTS_FILE: privateAgentsPath } : {}),
+				...(supervisorExtension ? { PIX_SUPERVISOR_BRIDGE: "1" } : {}),
+			},
 		});
 		const translator = new EventTranslator({ sessionId: acpSessionId, cwd });
 		const updates = new SessionUpdateCoalescer((notification) => {
@@ -2823,6 +2953,11 @@ export class PixAcpAgent {
       void forwardTaskRun(session, event, () => this.sessions.get(session.acpSessionId) === session, this.options.logger);
       return;
     }
+		if (event.type === "pix_supervisor_request") {
+			void forwardSupervisorRequest(session, event, (cwd, caller, request) => this.supervisor.handle(cwd, caller, request),
+				() => this.sessions.get(session.acpSessionId) === session, this.options.logger);
+			return;
+		}
 		if (event.type === "pix_btw_event") {
 			const data = parseBtwEvent(event.data);
 			if (data) this.btwOwners.set(session, data.runtimeId);
@@ -5107,6 +5242,14 @@ function commandPathArgument(value: string | undefined): string | undefined {
 
 /** Validate the registry extension's structured diff payload into ACP files. */
 /** Contract validation errors surface as JSON-RPC invalid params. */
+function parseSupervisorOpenParams(value: unknown): SupervisorOpenRequest {
+	try {
+		return parseSupervisorOpenRequest(value);
+	} catch (error) {
+		throw new RequestError(ERROR_INVALID_PARAMS, error instanceof Error ? error.message : String(error));
+	}
+}
+
 function parsePlanLaunchesParams(value: unknown): PlanLaunchesRequest {
 	try {
 		return parsePlanLaunchesRequest(value);

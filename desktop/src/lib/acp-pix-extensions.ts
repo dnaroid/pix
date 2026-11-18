@@ -19,6 +19,11 @@ import {
   type PlanLaunchesRequest,
 } from "../../../acp/src/acp/plan-launches-contract";
 import {
+  PIX_SUPERVISOR_OPEN_METHOD,
+  parseSupervisorOpenResponse,
+  type SupervisorOpenResponse,
+} from "../../../acp/src/acp/supervisor-contract";
+import {
   PIX_SUBAGENT_FORK_SESSION_METHOD,
   PIX_SUBAGENT_OPEN_SESSION_METHOD,
   PIX_SUBAGENT_SESSION_STATE_METHOD,
@@ -498,6 +503,11 @@ export class AcpPixExtensions {
   /** ACP-owned plan-launch records; every response is the full project snapshot. */
   async planLaunches(request: PlanLaunchesRequest): Promise<PlanLaunches> {
     return parsePlanLaunchesResponse(await this.request<unknown>(PIX_PLAN_LAUNCHES_METHOD, request));
+  }
+
+  /** Open (or create on first use) the project's single supervisor session (0077). */
+  async openSupervisor(cwd: string): Promise<SupervisorOpenResponse> {
+    return parseSupervisorOpenResponse(await this.request<unknown>(PIX_SUPERVISOR_OPEN_METHOD, { cwd }, 120_000));
   }
 
   async queueState(sessionId: string): Promise<QueueState> {

@@ -48,6 +48,7 @@ type DesktopCommandServicesOptions = {
   conversation: DesktopConversationServices;
   focusComposer: () => void | Promise<void>;
   setPromptText: (text: string) => void;
+  openSupervisor?: () => void | Promise<void>;
 };
 
 export function createDesktopCommandServices(options: DesktopCommandServicesOptions) {
@@ -82,6 +83,7 @@ export function createDesktopCommandServices(options: DesktopCommandServicesOpti
     selectWorkbenchTab: (id) => options.workbenchController().select(id),
     closeWorkbenchTab: (id, fallbackId) => options.workbenchController().close(id, fallbackId),
     openSessionStartTab: () => options.draftSession().openStartTab(),
+    ...(options.openSupervisor ? { openSupervisor: options.openSupervisor } : {}),
     openJumpPicker: options.conversation.navigation.openJumpPicker,
     openHistoryPicker: options.conversation.navigation.openHistoryPicker,
     openModelThinkingPicker: options.model.config.openPicker,

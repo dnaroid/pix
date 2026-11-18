@@ -113,7 +113,10 @@ clear inherited `PIX_CONFIG_PROFILE`, `PIX_BRAINSTORM_HOST_URL` and
 reach the live council host; tests can still explicitly choose a profile or
 supply their own fake host. Tools-suite
 tests receive an isolated HOME/config directory, without changing your shell's
-environment. The gate prepends the checkout's `node_modules/.bin` to each
+environment. ACP tests that read user or profile configuration import
+`acp/test/isolated-env.ts` first; it clears `PIX_CONFIG_PROFILE`, `PI_MODEL`,
+`PI_PROVIDER` and `PI_REASONING_LEVEL` and points `HOME` at a temporary
+directory. The gate prepends the checkout's `node_modules/.bin` to each
 check's `PATH`, so nested npm scripts retain access to root development binaries.
 Full per-step output and a machine-readable result (including
 steps not run) are written to a unique `.pi/artifacts/check-ci-*/` directory.

@@ -50,6 +50,7 @@
   import { createDesktopWorkbenchGitServices } from "./app/desktop-workbench-git-services";
   import { createDesktopModelServices } from "./app/desktop-model-services";
   import { createDesktopCommandServices } from "./app/desktop-command-services";
+  import { createSupervisorSessionAction } from "./app/supervisor-session";
   import { createDesktopInteractionServices } from "./app/desktop-interaction-services.svelte";
   import { createDesktopPresentationState } from "./app/desktop-presentation-state.svelte";
   import { createDesktopRootEffects } from "./app/desktop-root-effects.svelte";
@@ -514,8 +515,18 @@
     conversation: conversationServices,
     focusComposer: () => promptComposer?.focus(),
     setPromptText: (text) => promptText = text,
+    openSupervisor: () => supervisorSession.open(),
   });
   const desktopCommands = commandServices.controller;
+  // Callbacks run after initialization; the session tab controller is created below.
+  const supervisorSession = createSupervisorSessionAction({
+    client: () => client,
+    workspace: () => workspace,
+    refreshSessions: () => sessionCatalog.refresh(),
+    loadSession: (sessionId) => sessionTabController.loadSession(sessionId),
+    activateTab: (sessionId) => { activeWorkbenchTabId = workbenchSessionTabId(sessionId); },
+    reportError,
+  });
 
   const interactionServices = createDesktopInteractionServices({
     workspace: () => workspace,

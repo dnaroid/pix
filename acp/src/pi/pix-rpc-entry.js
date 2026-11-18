@@ -40,6 +40,9 @@ installContextInventoryHost(AgentSession, {
 installBtwHost(AgentSession);
 const { installTaskRunHost, handleTaskRunResponse } = await import("./task-run-host.js");
 installTaskRunHost(AgentSession);
+// Only the project supervisor's runtime gets the supervisor bridge (0077).
+const supervisorHost = process.env.PIX_SUPERVISOR_BRIDGE === "1" ? await import("./supervisor-host.js") : undefined;
+supervisorHost?.installSupervisorHost(AgentSession);
 const { installRpcQuestionRecovery } = await import("../../../dist/bundled-extensions/question/recovery.js");
 installRpcQuestionRecovery(AgentSession);
 
@@ -557,6 +560,11 @@ const originalPrompt = AgentSession.prototype.prompt;
 AgentSession.prototype.prompt = async function pixPrompt(text, options) {
   if (typeof text === "string" && text.startsWith("\u0000pix:task-run-response:")) {
     handleTaskRunResponse(this, text, options);
+    return;
+  }
+  if (typeof text === "string" && text.startsWith("\u0000pix:supervisor-response:")) {
+    // Without the bridge (non-supervisor runtime) the reply is dropped, never sent to the model.
+    if (supervisorHost) supervisorHost.handleSupervisorResponse(this, text, options);
     return;
   }
 	if (typeof text === "string" && text.startsWith(PIX_BTW_RPC_PREFIX)) {

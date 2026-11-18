@@ -6237,6 +6237,7 @@ test("session lifecycle events reach in-process subscribers and stop at teardown
 			const { sessionId } = await cx.request("session/new", { cwd: "/tmp/session-events", mcpServers: [] }) as { sessionId: string };
 			const pi = harness.clients[0]!;
 			const pending = cx.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "edit a file" }] });
+			await waitFor(() => pi.promptCalls.length === 1);
 			pi.emit({ type: "agent_start" });
 			pi.emit({ type: "tool_execution_start", toolCallId: "w1", toolName: "Write", args: { file_path: "src/a.ts" } } as unknown as PiEvent);
 			pi.emit({ type: "tool_execution_end", toolCallId: "w1", toolName: "Write", result: { content: [] }, isError: false } as unknown as PiEvent);
@@ -6262,5 +6263,71 @@ test("session lifecycle events reach in-process subscribers and stop at teardown
 	} finally {
 		unsubscribe();
 		await harness.adapter.dispose();
+	}
+});
+
+test("project supervisor: one Desktop-only session per project gets the supervisor tool and bridge", async (t) => {
+	const agentDir = mkdtempSync(join(tmpdir(), "pix-acp-supervisor-agent-"));
+	const cwd = mkdtempSync(join(tmpdir(), "pix-acp-supervisor-"));
+	t.after(() => Promise.all([rm(agentDir, { recursive: true, force: true }), rm(cwd, { recursive: true, force: true })]).then(() => undefined));
+	const path = "/opt/pix/supervisor.js";
+	const harness = createTestAdapter({ agentDir, supervisorExtensionPath: path });
+	try {
+		await connectAs(harness.adapter, "pix-desktop", async (cx) => {
+			await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientCapabilities: {}, clientInfo: { name: "pix-desktop", version: "test" } });
+			const [first, second] = await Promise.all([
+				cx.request("pix/supervisor/open", { cwd }) as Promise<{ sessionId: string; created: boolean }>,
+				cx.request("pix/supervisor/open", { cwd }) as Promise<{ sessionId: string; created: boolean }>,
+			]);
+			assert.equal(first.sessionId, second.sessionId, "concurrent opens share one session");
+			assert.equal(harness.clients.length, 1);
+			assert.ok(harness.options[0]?.args?.includes(path));
+			assert.equal(harness.options[0]?.env?.["PIX_SUPERVISOR_BRIDGE"], "1");
+			assert.deepEqual(harness.clients[0]!.nameCalls, ["Project supervisor"]);
+			const reopened = await cx.request("pix/supervisor/open", { cwd }) as { sessionId: string; created: boolean };
+			assert.deepEqual(reopened, { sessionId: first.sessionId, created: false });
+
+			const worker = await cx.request("session/new", { cwd, mcpServers: [] }) as { sessionId: string };
+			assert.equal(harness.options[1]?.args?.includes(path) ?? false, false, "workers never get the supervisor tool");
+			assert.equal(harness.options[1]?.env?.["PIX_SUPERVISOR_BRIDGE"], undefined);
+
+			const listed = await cx.request("session/list", { cwd }) as { sessions: Array<{ sessionId: string; _meta?: Record<string, unknown> }> };
+			const marked = listed.sessions.filter((session) => session._meta?.["pix.supervisor"] === true).map((session) => session.sessionId);
+			assert.deepEqual(marked, [first.sessionId]);
+
+			const replies: Array<[string, { result?: any; error?: string }]> = [];
+			for (const pi of harness.clients) {
+				(pi as unknown as { respondToSupervisor: unknown }).respondToSupervisor = async (requestId: string, response: { result?: unknown; error?: string }) => {
+					replies.push([requestId, response]);
+				};
+			}
+			harness.clients[0]!.emit({ type: "pix_supervisor_request", requestId: "r1", request: { op: "status" } } as unknown as PiEvent);
+			await waitFor(() => replies.length === 1);
+			assert.equal(replies[0]![0], "r1");
+			assert.deepEqual(replies[0]![1].result.observed.map((row: { sessionId: string }) => row.sessionId), [worker.sessionId]);
+			harness.clients[1]!.emit({ type: "pix_supervisor_request", requestId: "r2", request: { op: "status" } } as unknown as PiEvent);
+			await waitFor(() => replies.length === 2);
+			assert.match(replies[1]![1].error ?? "", /not the project supervisor/);
+
+			await cx.request("session/delete", { sessionId: first.sessionId });
+			const registry = JSON.parse(await readFile(join(cwd, ".pi/supervisor/registry.json"), "utf8")) as { supervisorSessionId?: string };
+			assert.equal(registry.supervisorSessionId, undefined);
+			const ledger = await readFile(join(cwd, ".pi/supervisor/ledger.jsonl"), "utf8");
+			assert.match(ledger, /"kind":"supervisor-created"/);
+			assert.match(ledger, /"kind":"closed_by_user"/);
+		});
+	} finally {
+		await harness.adapter.dispose();
+	}
+
+	const other = createTestAdapter({ agentDir, supervisorExtensionPath: path });
+	try {
+		await connectAs(other.adapter, "zed", async (cx) => {
+			await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientCapabilities: {}, clientInfo: { name: "zed", version: "test" } });
+			await assert.rejects(cx.request("pix/supervisor/open", { cwd }), /requires Pix Desktop/);
+		});
+		assert.equal(other.clients.length, 0);
+	} finally {
+		await other.adapter.dispose();
 	}
 });

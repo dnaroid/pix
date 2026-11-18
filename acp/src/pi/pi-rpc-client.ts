@@ -12,6 +12,7 @@ import { rpcStartupFailure } from "./startup-diagnostics.js";
 import { startRpcClient } from "./rpc-stdout.js";
 import { parseBtwState, type BtwCommand, type BtwEvent, type BtwState } from "../btw/contract.js";
 import { TASK_RUN_RESPONSE_PREFIX, type TaskRunResponse } from "../acp/task-run-contract.js";
+import { SUPERVISOR_RESPONSE_PREFIX } from "../acp/supervisor-contract.js";
 import {
 	RpcClient,
 	type JsonAgentSessionEvent,
@@ -54,7 +55,8 @@ export type PiEvent = ((JsonAgentSessionEvent | RpcExtensionUIRequest) & {
 	readonly pixForkSessionPath?: string;
 }) | { readonly type: "pix_btw_event"; readonly data: BtwEvent }
   | { readonly type: "pix_task_run_request"; readonly requestId: string; readonly op?: "run" | "models"; readonly taskId?: string; readonly modelRef?: string }
-  | { readonly type: "pix_task_run_cancel"; readonly requestId: string };
+  | { readonly type: "pix_task_run_cancel"; readonly requestId: string }
+  | { readonly type: "pix_supervisor_request"; readonly requestId: string; readonly request: unknown };
 
 export type PiEventListener = (event: PiEvent) => void;
 
@@ -225,6 +227,8 @@ export interface PiClient {
 	stop(): Promise<void>;
 	onEvent(listener: PiEventListener): () => void;
   respondToTaskRun?(requestId: string, response: { result?: TaskRunResponse; error?: string }): Promise<void>;
+  /** Reply to a `supervisor` tool request of the project supervisor runtime (0077). */
+  respondToSupervisor?(requestId: string, response: { result?: unknown; error?: string }): Promise<void>;
 	/**
 	 * Observe the pi process dying (crash or graceful exit). The listener is
 	 * invoked at most once, after which no further events can arrive; it lets
@@ -409,6 +413,15 @@ export class PiRpcClient implements PiClient {
       getData<T>(response: unknown): T;
     };
     const reply = await client.send({ type: "prompt", message: TASK_RUN_RESPONSE_PREFIX + JSON.stringify({ requestId, ...response }) });
+    client.getData<Record<string, never>>(reply);
+  }
+
+  async respondToSupervisor(requestId: string, response: { result?: unknown; error?: string }): Promise<void> {
+    const client = this.requireClient() as unknown as {
+      send(command: { type: "prompt"; message: string }): Promise<unknown>;
+      getData<T>(response: unknown): T;
+    };
+    const reply = await client.send({ type: "prompt", message: SUPERVISOR_RESPONSE_PREFIX + JSON.stringify({ requestId, ...response }) });
     client.getData<Record<string, never>>(reply);
   }
 

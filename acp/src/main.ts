@@ -17,8 +17,8 @@ import { PiRpcClient } from "./pi/pi-rpc-client.js";
 import { stringifyUnknown } from "./stringify-unknown.js";
 
 /** Compiled beside main.js in dist; the .ts source when run through tsx. */
-function wikiConflictsExtensionPath(): string | undefined {
-	for (const name of ["wiki-conflicts.js", "wiki-conflicts.ts"]) {
+function acpExtensionPath(stem: string): string | undefined {
+	for (const name of [`${stem}.js`, `${stem}.ts`]) {
 		const path = fileURLToPath(new URL(`./extensions/${name}`, import.meta.url));
 		if (existsSync(path)) return path;
 	}
@@ -29,7 +29,8 @@ async function main(): Promise<void> {
 	installPixProcessLogging({ module: "acp-process" }, acpFileLogger);
 	const config = adapterConfigFromEnv();
 	const logger = createLogger(config.logLevel);
-	const wikiConflicts = wikiConflictsExtensionPath();
+	const wikiConflicts = acpExtensionPath("wiki-conflicts");
+	const supervisor = acpExtensionPath("supervisor");
 
 	const adapter = new PixAcpAgent({
 		createPiClient: (options) => new PiRpcClient(options),
@@ -44,6 +45,7 @@ async function main(): Promise<void> {
 		...(config.headsUpExtensionPath ? { headsUpExtensionPath: config.headsUpExtensionPath } : {}),
 		...(config.htmlSandboxExtensionPath ? { htmlSandboxExtensionPath: config.htmlSandboxExtensionPath } : {}),
 		...(wikiConflicts ? { wikiConflictsExtensionPath: wikiConflicts } : {}),
+		...(supervisor ? { supervisorExtensionPath: supervisor } : {}),
 	});
 
 	const stream = ndJsonStream(

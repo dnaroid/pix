@@ -82,6 +82,9 @@ Decision: [0015 — Canonical disposable harness output](../decisions/0015-harne
   and Explain caches with their own retention (30 days unused, 4,000 entries),
   not scratch output; both Desktop cleanup paths preserve them. See
   [Desktop selection assistant](../desktop/conversations/desktop-selection-assist.md).
+- `.pi/supervisor/` holds ACP-owned durable supervisor state (mandate, registry
+  and ledger; see [project supervisor](../work-management/project-supervisor.md)).
+  Desktop `.pi` cleanup preserves it; it is not scratch output.
 - Project logo files `.pi/project-icon.{png,jpg,webp,gif,svg}` are canonical
   project state and are preserved by `.pi` cleanup; see the
   [project identity contract](../desktop/workbench/desktop-project-titlebar.md).

@@ -344,6 +344,10 @@ export class AcpClient {
     return this.pix.planLaunches(request);
   }
 
+  openSupervisor(cwd: string): Promise<{ sessionId: string; created: boolean }> {
+    return this.pix.openSupervisor(cwd);
+  }
+
   queueMessage(
     sessionId: string,
     prompt: readonly ContentBlock[],
