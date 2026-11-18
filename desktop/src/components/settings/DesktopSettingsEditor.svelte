@@ -184,15 +184,6 @@
       <SettingsSwitch value={bool(["desktop", "logPanelEnabled"])} onChange={(value) => set(["desktop", "logPanelEnabled"], value)} />
     </SettingsFieldRow>
     <SettingsFieldRow
-      label="Sleep duration (hours)"
-      description="Place a second marker this many hours after now on the weekly quota timeline. Applies after saving; does not predict quota consumption."
-      explicit={has(["desktop", "sleepHours"])}
-      defaultLabel={defaultLabel(["desktop", "sleepHours"])}
-      onReset={() => reset(["desktop", "sleepHours"])}
-    >
-      <SettingsNumberInput value={number(["desktop", "sleepHours"])} min={0.5} max={24} step={0.5} ariaLabel="Sleep duration (hours)" onChange={(value) => updateNumber(["desktop", "sleepHours"], value)} />
-    </SettingsFieldRow>
-    <SettingsFieldRow
       label="Show menu bar icon"
       description="Add the Pix icon to the macOS menu bar while keeping the Dock icon and application menus. Left-click to show all windows; right-click for the window list. Applies to all windows after restarting Pix."
       explicit={has(["desktop", "trayOnly"])}

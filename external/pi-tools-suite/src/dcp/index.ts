@@ -414,7 +414,9 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		warnedProgress.clear()
 		if (config.manualMode.enabled) state.manualMode = true
 		const startingEpoch = state.sessionEpoch
-		await loadJournalState(ctx, event.reason === "new" || event.reason === "startup")
+		// Desktop can reopen a session before its first turn. The verified full
+		// branch, not the resume event alone, determines whether it is still fresh.
+		await loadJournalState(ctx, event.reason === "new" || event.reason === "startup" || event.reason === "resume")
 		if (state.sessionEpoch !== startingEpoch) return
 		resetDiagnostics(event.reason)
 		writeDcpDebugLog(configForContext(ctx), "session_start.journal", {

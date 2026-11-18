@@ -81,7 +81,7 @@ Why consequential choices were made. Status and replacement metadata govern each
 - [0074 — Retain Markdown image DOM during streaming](0074-streaming-image-dom-retention.md) — accepted
 - [0075 — Pause-ready adopted continuations](0075-pause-ready-adopted-continuations.md) — accepted
 - [0076 — Scoped file-operation reservations](0076-scoped-file-operation-reservations.md) — accepted
-- [0077 — Project supervisor session on autopilot](0077-project-supervisor-session.md) — accepted (design direction; phase 0 and partial phase 1 implemented: supervisor session with read-only status/read tool; autopilot not implemented)
+- [0077 — Project supervisor session on autopilot](0077-project-supervisor-session.md) — accepted (design direction; phases 0–1 and partial phase 2 implemented: mandate UI, send/cancel/close/escalate with guards, user takeover; start/reopen/reconciliation not implemented)
 - [Decision log](README.md)
 - [NNNN — Decision title](TEMPLATE.md) — template, not a decision
 

@@ -546,13 +546,6 @@
           "default": false,
           "description": "Show the diagnostic Logs view in the Desktop sidebar. Global user preference only; disabled by default. Does not change log collection."
         },
-        "sleepHours": {
-          "type": "number",
-          "default": 6,
-          "minimum": 0.5,
-          "maximum": 24,
-          "description": "Sleep duration in hours for the second marker on the Desktop weekly quota timeline. Global user preference only. Defaults to 6; does not predict usage or future resets."
-        },
         "trayOnly": {
           "type": "boolean",
           "default": false,

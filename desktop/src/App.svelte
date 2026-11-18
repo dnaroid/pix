@@ -11,6 +11,9 @@
   import SelectionAssistPopover from "./components/SelectionAssistPopover.svelte";
   import { createSessionRename } from "./app/session-rename.svelte";
   import SessionRenameDialog from "./components/SessionRenameDialog.svelte";
+  import SupervisorMandateDialog from "./components/SupervisorMandateDialog.svelte";
+  import { createSupervisorMandate } from "./app/supervisor-mandate.svelte";
+  import { sessionIsSupervisor } from "./lib/session-tabs";
   import type { DesktopShortcutPlatform } from "./lib/desktop-commands";
   import type { Attachment } from "./lib/attachments";
   import DesktopTitlebar from "./components/DesktopTitlebar.svelte";
@@ -153,6 +156,7 @@
 
   const connection = createDesktopConnectionServices({
     onTaskRun: (request, signal) => projectActionServices.runTaskFromAgent(request, signal),
+    onSupervisorStart: (request, signal) => projectActionServices.startFromSupervisor(request, signal),
     workspace: () => workspace,
     onSessionCatalogChanged: (cwd) => sessionServices.catalog.nativeCatalogChanged(cwd),
     sessionCoordinator: () => sessionCoordinator,
@@ -1006,6 +1010,28 @@
     reportError,
   });
   onDestroy(sessionRename.cancel);
+  const supervisorMandate = createSupervisorMandate({
+    client: () => client,
+    workspace: () => workspace,
+    reportError,
+    reportWarning: (error) => diagnosticLogger.warn("frontend:supervisor-mandate", error),
+  });
+  const supervisorSessionVisible = $derived(activeWorkbenchTab?.kind === "session" && !!activeSessionId
+    && sessions.some((session) => session.sessionId === activeSessionId && sessionIsSupervisor(session)));
+  // Counters change without catalog events: poll only while the supervisor is on screen.
+  $effect(() => {
+    if (!supervisorSessionVisible || !client || !workspace) return;
+    return untrack(() => supervisorMandate.watch());
+  });
+  $effect(() => supervisorMandate.reconcile());
+  onDestroy(supervisorMandate.closeEditor);
+  const supervisorMandateBar = $derived(supervisorSessionVisible ? {
+    mandate: supervisorMandate.mandate,
+    saving: supervisorMandate.saving,
+    onSetUp: () => supervisorMandate.openEditor(true),
+    onEdit: () => supervisorMandate.openEditor(),
+    onPause: (paused: boolean) => void supervisorMandate.update({ paused }),
+  } : null);
 
   const selectionAssist = createSelectionAssistStore({ client: () => client, workspace: () => workspace, report: (error, label) => diagnosticLogger.warn(label ?? "frontend:selection-assist", error) });
   $effect(() => { void workspace; return () => selectionAssist.close(); });
@@ -1082,6 +1108,7 @@
     <div class="flex min-h-0 min-w-0 flex-1" data-btw-workspace>
     <DesktopWorkbenchSurface
       {...workbenchViewModel.props}
+      supervisorMandate={supervisorMandateBar}
       bind:transcriptPane
       bind:transcriptContent
       bind:promptComposer
@@ -1116,6 +1143,11 @@
   onError={reportError}
 />
 <DeleteConfirmationHost />
+{#if supervisorMandate.editor && supervisorMandate.mandate}
+  <SupervisorMandateDialog mandate={supervisorMandate.mandate} enable={supervisorMandate.editor.enable}
+    saving={supervisorMandate.saving} onsave={(draft) => void supervisorMandate.save(draft)}
+    oncancel={supervisorMandate.closeEditor} {reportError} />
+{/if}
 {#if sessionRename.request}
   <SessionRenameDialog title={sessionRename.request.title} saving={sessionRename.saving}
     onconfirm={(name) => void sessionRename.submit(name)} oncancel={sessionRename.cancel} {reportError} />

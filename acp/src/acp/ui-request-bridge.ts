@@ -41,6 +41,17 @@ export interface PixQuestion {
 	readonly maxSelections?: number;
 }
 
+export interface PixQuestionElicitation {
+	readonly mode: typeof PIX_QUESTION_ELICITATION_MODE;
+	readonly elicitationId: string;
+	readonly questions: readonly PixQuestion[];
+}
+
+// Only use this on the validated request constructed by toElicitationRequest.
+export function isQuestionElicitation(request: CreateElicitationRequest): request is CreateElicitationRequest & PixQuestionElicitation {
+	return request.mode === PIX_QUESTION_ELICITATION_MODE;
+}
+
 export interface ElicitationRequestOptions {
 	readonly sessionId?: string;
 	readonly elicitationId: string;

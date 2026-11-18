@@ -53,7 +53,6 @@ export const DEFAULT_DESKTOP_CONFIG_JSONC = String.raw`{
     "theme": "system",
     "trayOnly": false,
     "logPanelEnabled": false,
-    "sleepHours": 6,
     "notifications": {
       "enabled": true,
       "usePix": false

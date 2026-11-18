@@ -143,6 +143,12 @@ export function describeEvent(event: SessionEvent): string {
 			return `${event.source} error: ${clip(event.message)}`;
 		case "stalled":
 			return `stalled for ${Math.round(event.idleMs / 60_000)} min`;
+		case "manual_takeover":
+			return "taken over by the user (manual; supervisor ops on it are refused)";
+		case "interrupted":
+			return "interrupted when Pix quit (the last turn never finished); read it and decide whether it needs a new turn";
+		case "missing":
+			return "session no longer exists; it stays registered until you close it (outcome failed)";
 		case "checklist":
 			return event.progress
 				? `plan ${event.path}: ${event.progress.completed}/${event.progress.total} done`

@@ -67,6 +67,7 @@ status: active
   when the named task cannot be completed. That one-task authorization grants
   no access to other tasks. Report persistence failures; never silently
   create replacement tasks.
+- Supervisor-managed tasks change status only through the supervisor `close` op inside the supervisor session; `update` is not an exception for them.
 - These are restrictions on this tool, not an OS sandbox: a separately
   privileged shell/file tool could still modify SQLite directly if its
   permissions allow it. Agent system guidance must prohibit bypassing the

@@ -6,6 +6,7 @@ import {
 	MAX_STALLED_AFTER_MINUTES,
 	MIN_STALLED_AFTER_MINUTES,
 } from "./session-events.js";
+import { SUPERVISOR_MANDATE_LIMITS as LIMITS } from "./supervisor-contract.js";
 
 /**
  * ACP-owned durable supervisor state in `<project>/.pi/supervisor/`
@@ -48,6 +49,10 @@ export interface ManagedSession {
 	readonly mode: "managed" | "manual";
 	readonly registeredAt: number;
 	readonly reworkRounds: number;
+	/** Set by `escalate`: the item waits for the user (cleared by the next supervisor send). */
+	readonly escalation?: { readonly text: string; readonly at: number; readonly questionId?: string };
+	/** The worker rules preamble was delivered with a supervisor message. */
+	readonly briefed?: boolean;
 }
 
 export interface SupervisorRegistry {
@@ -67,8 +72,8 @@ export const DEFAULT_MANDATE: SupervisorMandate = {
 	version: 1,
 	enabled: false,
 	paused: false,
-	maxConcurrent: 5,
-	maxReworkRounds: 5,
+	maxConcurrent: LIMITS.maxConcurrent.default,
+	maxReworkRounds: LIMITS.maxReworkRounds.default,
 	stalledAfterMinutes: DEFAULT_STALLED_AFTER_MINUTES,
 	policy: "",
 	updatedAt: 0,
@@ -98,8 +103,8 @@ export function parseMandate(value: unknown): SupervisorMandate {
 		enabled: value["enabled"] === true,
 		// Unknown pause state is treated as paused: never resume by accident.
 		paused: value["paused"] === undefined ? false : value["paused"] !== false,
-		maxConcurrent: intIn(value["maxConcurrent"], 1, 20, DEFAULT_MANDATE.maxConcurrent),
-		maxReworkRounds: intIn(value["maxReworkRounds"], 0, 50, DEFAULT_MANDATE.maxReworkRounds),
+		maxConcurrent: intIn(value["maxConcurrent"], LIMITS.maxConcurrent.min, LIMITS.maxConcurrent.max, DEFAULT_MANDATE.maxConcurrent),
+		maxReworkRounds: intIn(value["maxReworkRounds"], LIMITS.maxReworkRounds.min, LIMITS.maxReworkRounds.max, DEFAULT_MANDATE.maxReworkRounds),
 		...(typeof budget === "number" && Number.isInteger(budget) && budget > 0 ? { budgetTokens: budget } : {}),
 		stalledAfterMinutes: intIn(value["stalledAfterMinutes"], MIN_STALLED_AFTER_MINUTES, MAX_STALLED_AFTER_MINUTES, DEFAULT_STALLED_AFTER_MINUTES),
 		...(model ? { workerModelRef: model } : {}),
@@ -108,7 +113,7 @@ export function parseMandate(value: unknown): SupervisorMandate {
 	};
 }
 
-function parseItem(value: unknown): SupervisorItem | undefined {
+export function parseSupervisorItem(value: unknown): SupervisorItem | undefined {
 	if (!isRecord(value)) return undefined;
 	if (value["kind"] === "task") {
 		const taskId = text(value["taskId"], MAX_ID);
@@ -128,14 +133,22 @@ export function parseRegistry(value: unknown): SupervisorRegistry {
 	const raw = isRecord(value["sessions"]) ? value["sessions"] : {};
 	for (const [sessionId, record] of Object.entries(raw)) {
 		if (!sessionId || sessionId.length > MAX_ID || !isRecord(record)) continue;
-		const item = parseItem(record["item"]);
+		const item = parseSupervisorItem(record["item"]);
 		if (!item) continue;
 		sessions[sessionId] = {
 			item,
 			mode: record["mode"] === "manual" ? "manual" : "managed",
 			registeredAt: typeof record["registeredAt"] === "number" ? record["registeredAt"] : 0,
 			reworkRounds: intIn(record["reworkRounds"], 0, 1_000, 0),
+			...(record["briefed"] === true ? { briefed: true } : {}),
 		};
+		const escalation = record["escalation"];
+		const escalationText = isRecord(escalation) ? text(escalation["text"], 2_000) : undefined;
+		if (isRecord(escalation) && escalationText) {
+			const questionId = text(escalation["questionId"], MAX_ID);
+			sessions[sessionId] = { ...sessions[sessionId]!, escalation: {
+				text: escalationText, at: typeof escalation["at"] === "number" ? escalation["at"] : 0, ...(questionId ? { questionId } : {}) } };
+		}
 	}
 	const supervisorSessionId = text(value["supervisorSessionId"], MAX_ID);
 	return { version: 1, ...(supervisorSessionId ? { supervisorSessionId } : {}), sessions: boundSessions(sessions) };
@@ -155,7 +168,9 @@ export interface SupervisorStoreOptions {
 export interface SupervisorStore {
 	readMandate(cwd: string): Promise<SupervisorMandate>;
 	/** Merge a patch into the saved mandate; returns the normalized result. */
-	updateMandate(cwd: string, patch: Partial<Omit<SupervisorMandate, "version" | "updatedAt">>): Promise<SupervisorMandate>;
+	updateMandate(cwd: string, patch: Partial<Omit<SupervisorMandate, "version" | "updatedAt" | "workerModelRef">> & {
+		workerModelRef?: string | null;
+	}): Promise<SupervisorMandate>;
 	readRegistry(cwd: string): Promise<SupervisorRegistry>;
 	/** Atomic read-modify-write; `update` must be synchronous and pure. */
 	updateRegistry(cwd: string, update: (current: SupervisorRegistry) => SupervisorRegistry): Promise<SupervisorRegistry>;

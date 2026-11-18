@@ -61,62 +61,10 @@ describe("QuotaResetCalendar continuous weekly timeline", () => {
     expect(body).toContain("of window time elapsed (start left, reset right)");
     const visible = body.replace(/<[^>]*>/g, "");
     expect(visible).not.toMatch(/Now|used|Resets in|Weekly reset|2026|Local time/);
-    expect(visible).not.toMatch(/sleep|After|hours/i);
-    expect(visible).toContain("+6h");
+    expect(body.match(/data-weekly-now-marker/g)).toHaveLength(1);
     expect(body).toContain("data-quota-reset-time");
     expect(visible).toContain("Reset ");
     expect(body).not.toContain("title=");
-  });
-
-  it("adds a +6h marker six hours after now without changing quota fill", () => {
-    const body = renderCalendar();
-    const expected = quotaCycleTimeline(window, now + 6 * 3_600_000)!.timePosition;
-    expect(body).toContain("data-weekly-sleep-marker");
-    expect(body).toContain(`left: clamp(5px, ${expected}%, calc(100% - 5px))`);
-    expect(body).toContain("After 6 hours of sleep:");
-    expect(body).toContain("+6h</span>");
-    expect(body).not.toContain("lucide-moon");
-    expect(body).toContain("bg-tool-agent ring-1 ring-popover");
-    expect(fills(body)).toEqual([57]);
-  });
-
-  it("uses the configured duration and the same absolute minute tick", () => {
-    const sleepHours = 8.5;
-    const start = window.resetAt - window.windowSeconds * 1000;
-    for (const at of [now, now + 60_000]) {
-      const body = render(QuotaResetCalendar, { props: { window, now: at, sleepHours } }).body;
-      const expected = (at + sleepHours * 3_600_000 - start) / (window.windowSeconds * 1000) * 100;
-      expect(body).toContain(`left: clamp(5px, ${expected}%, calc(100% - 5px))`);
-      expect(body).toContain("After 8.5 hours of sleep:");
-      expect(body).toContain("+8.5h</span>");
-      expect(fills(body)).toEqual([57]);
-    }
-  });
-
-  it.each([new Date(2026, 2, 8, 0, 30), new Date(2026, 10, 1, 0, 30)])(
-    "positions sleep by elapsed hours across DST at %s", date => {
-      const at = date.getTime();
-      const reported = { ...window, resetAt: at + 3 * 86_400_000 };
-      const body = render(QuotaResetCalendar, { props: { window: reported, now: at } }).body;
-      const expected = quotaCycleTimeline(reported, at + 6 * 3_600_000)!.timePosition;
-      expect(body).toContain(`left: clamp(5px, ${expected}%, calc(100% - 5px))`);
-      expect(body).toContain(new Date(at + 6 * 3_600_000).toLocaleString(undefined, {
-        month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-      }));
-    },
-  );
-
-  it.each([0, -1, 25, NaN, Infinity])("omits a marker with invalid duration %s", sleepHours => {
-    const body = render(QuotaResetCalendar, { props: { window, now, sleepHours } }).body;
-    expect(body).not.toContain("data-weekly-sleep-marker");
-  });
-
-  it("allows sleep ending exactly at reset but never predicts beyond the reported window", () => {
-    const at = window.resetAt - 6 * 3_600_000;
-    expect(render(QuotaResetCalendar, { props: { window, now: at } }).body).toContain("left: clamp(5px, 100%, calc(100% - 5px))");
-    for (const invalidNow of [at + 1, window.resetAt, window.resetAt + 1, window.resetAt - 8 * 86_400_000]) {
-      expect(render(QuotaResetCalendar, { props: { window, now: invalidNow } }).body).not.toContain("data-weekly-sleep-marker");
-    }
   });
 
   it.each([[8, 0], [7, 0], [3.5, 50], [0, 100], [-1, 100]])(
@@ -148,7 +96,6 @@ describe("QuotaResetCalendar continuous weekly timeline", () => {
       const body = renderCalendar(invalid);
       expect(body).not.toContain("data-quota-cycle-dates");
       expect(body).not.toContain("data-weekly-now-marker");
-      expect(body).not.toContain("data-weekly-sleep-marker");
       expect(body).toContain("unavailable");
     },
   );

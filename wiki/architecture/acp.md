@@ -79,15 +79,19 @@ Zed (Agent Panel)  <--ACP JSON-RPC over stdio-->  pix-acp  <--JSONL RPC over std
   (`PIX_SUPERVISOR_BRIDGE=1`, `src/extensions/supervisor.ts`); its read-only
   `status` and `read` ops answer over the correlated bridge in
   `src/pi/supervisor-host.js` (60 s timeout). Worker events wake it through debounced
-  digests queued in its auto queue (`src/acp/supervisor-wake.ts`); the
-  supervisor's own mutating tool ops are not implemented yet (the Desktop
-  handover RPC below is the only registry write). See [project supervisor](../work-management/project-supervisor.md).
+  digests queued in its auto queue (`src/acp/supervisor-wake.ts`). Mutating
+  ops `start`/`send`/`cancel`/`close`/`reopen`/`escalate` run in `src/acp/supervisor-actions.ts`
+  under a per-project lock shared with user takeover, handover and the
+  Desktop-only `pix/supervisor/mandate` RPC. `start` asks Desktop to launch
+  through the ACP→client request `pix/supervisor/start` (50 s timeout, then
+  `pix/tasks/run_cancel` with the same request id) and registers the returned
+  session as managed. See [project supervisor](../work-management/project-supervisor.md).
 - Manual handover (decision [0077](../decisions/0077-project-supervisor-session.md)):
   Desktop-only `pix/supervisor/handover` with `{cwd, sessionId, supervised}`
   (`src/acp/supervisor-contract.ts`, `src/acp/pix-acp-agent.ts`). It refuses
   non-Desktop clients, sub-agent sessions, the supervisor itself, and handover
   when no supervisor is open. A handover registers the session with
-  `mode: "manual"`; take-back removes it. Each real change appends a ledger entry
+  `mode: "managed"`; take-back removes it. Each real change appends a ledger entry
   (`handed_over` or `released`); repeats are no-ops. `session/list` exposes the
   registry mode as `_meta["pix.supervisorManaged"]`.
 - Env config and stderr-only logging.

@@ -9,8 +9,10 @@ status: proposal
 the project supervisor accepted in
 [0077](../decisions/0077-project-supervisor-session.md). Implemented so far:
 phase 0, the supervisor session with read-only `status`/`read`, debounced wakes,
-the pinned supervisor tab and manual handover (`pix/supervisor/handover`);
-the autopilot (mutating supervisor ops) is not. See *State and lifetime*. The staged rollout is tracked in the project plan
+the pinned supervisor tab, manual handover (`pix/supervisor/handover`), the
+mandate header block (`pix/supervisor/mandate`), the mutating ops `start`,
+`send`, `cancel`, `close` (with completion guards), `reopen` and `escalate`, the worker preamble, startup reconciliation, and user takeover.
+Not yet: `answer`, the token budget and `conflict` events. See *State and lifetime*. The staged rollout is tracked in the project plan
 `.pi/plans/project-supervisor.md`.
 
 [Work management](index.md)
@@ -72,8 +74,8 @@ decision outside its mandate.
     reference where reported but is never the limit. When absent, no budget
     check runs and the UI says so;
   - `stalledAfterMinutes`: 15 by default, allowed 5–60 (see `stalled`);
-  - `workerModelRef`: optional default for prompt sessions (tasks keep their
-    saved `modelRef`);
+  - `workerModelRef`: optional default for plan and prompt sessions (an explicit
+    `start` `modelRef` overrides it; tasks keep their saved `modelRef`);
   - free-text `policy`: what to escalate, priorities, areas not to touch.
 - Reaching a limit escalates; it never triggers a silent retry. Changing the
   mandate takes effect on the supervisor's next action; actions already started
@@ -83,7 +85,7 @@ decision outside its mandate.
 
 - A compact block in the supervisor session header shows state (active or
   paused), a one-click **Pause**/**Resume**, counters (running sessions,
-  rework rounds used, budget used) and **Edit mandate**, which opens the
+  rework rounds used, budget used — shown as "no limit" until the budget is implemented) and **Edit mandate**, which opens the
   mandate form. The mandate is stored in `.pi/supervisor/`.
 
 ## Pause
@@ -120,13 +122,13 @@ hosts. It calls ACP through a correlated request bridge modelled on
 |---|---|
 | `status` | Mandate, pause state, limits used, managed sessions with item, mode, run state, last stop reason, plan progress and rework count. |
 | `read` | A bounded digest of one managed session: last user/assistant turns, final report, pending question, tool errors, touched files. Never a full transcript. |
-| `start` | `{task}` / `{plan}` / `{prompt, modelRef?}`. Uses the existing Desktop Tasks Run / Plans Run actions, or a new session for a prompt, then registers the session. Enforces `maxConcurrent`. |
+| `start` | Exactly one of `{taskId}` / `{planPath}` / `{text}`, plus optional `modelRef`. Desktop launches it in the window showing that project, through the same Tasks Run / Plan run path (prompts get a new session), with the worker rules prepended; ACP then registers the session `managed`. Model: explicit `modelRef`, else the task's saved model, else `workerModelRef` for plans and prompts. Enforces `maxConcurrent`; a task or plan that is already registered is refused, and Desktop refuses a task already linked to a session. |
 | `send` | `{sessionId, text, kind: rework or answer or note}`. Uses the normal ACP queue: steering while busy, a new turn while idle. `rework` counts against `maxReworkRounds`. |
 | `answer` | Answers a pending `question` in a managed session with the chosen option(s) or custom text. |
 | `cancel` | Cancels the managed session's current turn. |
 | `close` | `{sessionId, outcome: done or failed, summary}`. Runs the completion guards, sets the task status, journals the evidence and unregisters the session. |
-| `reopen` | Restores a closed item to `in-progress` and re-registers its session, or starts a resume session. |
-| `escalate` | Posts a structured request to the user in the supervisor session and marks the item `waiting-user`. |
+| `reopen` | Restores a closed item to `in-progress` and re-registers its session. Refused if that session was deleted; run the item again with `start`. |
+| `escalate` | Posts a structured request to the user in the supervisor session and records an escalation on the item (it waits for the user; the next supervisor send clears it). Allowed while paused. |
 
 Each mutating op checks, inside ACP and atomically: the supervisor is not
 paused, the session is managed and in `managed` mode, limits allow the action,
@@ -205,8 +207,8 @@ rationale.
   (model/compaction/run/process), `stalled` and `checklist` to in-process
   subscribers (`PixAcpAgent.subscribeSessionEvents`). Session retirement emits
   nothing and disposes the observer's timer. Touched files are kept per session
-  id across runtime replacement and dropped on session delete. The handover,
-  takeover and `conflict` events are still phase 2–3 work.
+  id across runtime replacement and dropped on session delete. The `conflict`
+  event is still phase 3 work; `manual_takeover` is emitted by ACP (phase 2, below).
 - The storage layer exists (phase 0, done): `acp/src/acp/supervisor-store.ts`
   keeps `.pi/supervisor/mandate.json`, `registry.json` (atomic temp+rename,
   serialized per project, bounded to 200 sessions) and append-only
@@ -233,7 +235,63 @@ rationale.
   sessions (excluding sub-agent viewers). Each entry includes the linked task,
   run state, last lifecycle event and plan progress. `read` returns a bounded
   digest built from the live runtime or the saved transcript's current branch
-  (`acp/src/acp/supervisor-service.ts`). Mutating ops are still to come.
+  (`acp/src/acp/supervisor-service.ts`).
+- Mutating ops exist (phase 2, partial): `acp/src/acp/supervisor-actions.ts`
+  runs `send`, `cancel`, `close` and `escalate` under the per-project
+  supervisor lock that takeover, handover and mandate changes share, and
+  re-checks inside it that the caller is still the registered supervisor.
+  Everything except `escalate` needs the mandate enabled (default off) and not
+  paused, a registry entry in `managed` mode and an open session. `send`
+  (`rework`/`answer`/`note`) steers a streaming session or queues a turn in its
+  Desktop auto queue as `[Supervisor <kind>] text`; `rework` counts against
+  `maxReworkRounds`, and a send that would start a turn counts against
+  `maxConcurrent`. `close done` is refused (ledger `close_refused`) unless no
+  turn is in flight, the last stop reason is `end_turn`, no question is
+  pending, the linked plan has every item checked and the final report has a
+  verification section; on success ACP writes the task status in
+  `.pi/tasks.sqlite` (`supervisor-tasks.ts`), then unregisters the session and
+  journals `closed` with evidence (including the item and rework count).
+  `reopen` reverts a supervisor closure from that ledger entry: the session
+  must still exist and not be registered; it is registered `managed` again with
+  its item and rework count, and the task returns to `in-progress`
+  (ledger `reopened`). `escalate` works while paused and marks the item as
+  waiting for the user. The first supervisor `send` to a session prepends the
+  worker rules (`SUPERVISOR_WORKER_PREAMBLE`) and marks the entry `briefed`.
+  `start` runs under the same lock: it refuses an already registered task or
+  plan and a full `maxConcurrent`, then sends Desktop `pix/supervisor/start`
+  `{requestId, cwd, sourceSessionId, item, modelRef?}` through the supervisor
+  session's client. The model is the explicit `modelRef`, else the task's
+  saved model for tasks, else `workerModelRef` for plans and prompts. Desktop
+  launches only in the window showing that project and when no other launch is
+  preparing; it refuses a task already linked to a session (use `reopen` or a
+  handover). It prepends `SUPERVISOR_WORKER_PREAMBLE` to the launch prompt
+  (so ACP does not treat it as a user takeover) and replies with the new
+  session id once the prompt is dispatched. ACP checks that the session
+  belongs to the project, registers it `managed` and `briefed`, and journals
+  `started`. After 50 s ACP gives up and sends `pix/tasks/run_cancel` with the
+  same request id; a failed or timed-out start may still have launched, so the
+  supervisor checks `status` before retrying.
+- A user message into a `managed` session (prompt or queued message) switches
+  it to `manual` under the same lock before dispatch, drops supervisor
+  messages still queued there, journals `manual_takeover` and wakes the
+  supervisor; messages the supervisor itself queued are recognized and do not
+  count. Handover registers sessions as `managed`.
+- Desktop-only `pix/supervisor/mandate` reads (`{cwd}`) or patches
+  (`{cwd, patch}`) the mandate and returns it with live counters (`managed`,
+  `manual`, `running`, `reworkRounds`); ACP clamps limits and journals
+  `mandate_changed`. Desktop shows a compact block above the supervisor
+  transcript (`SupervisorMandateBar.svelte`, store
+  `desktop/src/app/supervisor-mandate.svelte.ts`, polled every 5 s while
+  visible): state Off/Active/Paused, counters, **Set up** when disabled,
+  **Pause**/**Resume** and **Edit mandate** (`SupervisorMandateDialog.svelte`:
+  enable, parallel sessions 1–20, rework rounds 0–50, stalled 5–60 min,
+  default worker model, policy). The default worker model applies to plans and
+  prompts when `start` does not specify a model. Enter `provider/model[:thinking]`
+  or leave the field blank to clear it. In the RPC patch, `workerModelRef: null`
+  clears the saved value, omission leaves it unchanged, and responses include
+  `workerModelRef` only when saved. The RPC accepts up to 512 characters and
+  trims surrounding whitespace before saving. The token budget shows "no limit"
+  until it is implemented.
 - Debounced wakes exist (phase 1): `acp/src/acp/supervisor-wake.ts` coalesces
   worker events per project for 5 s into one `[Supervisor digest]` text (one
   line per session, newest event per type, at most 20 sessions; the
@@ -254,11 +312,14 @@ rationale.
   availability rule. A click before the project is ready (startup, workspace
   switch, running session mutation) shows an info notice instead of being
   dropped silently.
-- On Desktop start, ACP reconciles the registry against saved tasks, plans and
-  session state. Sessions interrupted by quitting become `interrupted`
-  events. The supervisor may resume them through the existing Resume flow; this
-  counts as a rework round. Missing sessions are reported and are never
-  silently replaced.
+- Startup reconciliation exists (`acp/src/acp/supervisor-reconcile.ts`): when
+  the supervisor runtime first starts in an ACP lifetime, each registered
+  session without a turn in flight is checked against its saved transcript.
+  A branch ending in a user message, tool result or `toolUse` assistant
+  message becomes an `interrupted` event; a session missing from the session
+  map becomes `missing`. Both go to the digest and the ledger (`reconciled`);
+  nothing is resumed, replaced or unregistered automatically. The supervisor
+  continues an interrupted session with `send rework` (a rework round).
 - Write the supervisor's continuity state (ledger cursor, open escalations) as
   session custom entries as well, so compaction does not lose it.
 

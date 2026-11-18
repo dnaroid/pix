@@ -59,6 +59,16 @@ import { PIX_PLAN_LAUNCHES_METHOD, parsePlanLaunchesRequest, type PlanLaunchesRe
 import { createPlanLaunchesStore, type PlanLaunchesStore } from "./plan-launches-store.js";
 import {
 	PIX_SUPERVISOR_HANDOVER_METHOD,
+	PIX_SUPERVISOR_MANDATE_METHOD,
+	PIX_SUPERVISOR_START_METHOD,
+	SUPERVISOR_WORKER_PREAMBLE,
+	parseSupervisorStartResponse,
+	type SupervisorStartItem,
+	type SupervisorStartRequest,
+	type SupervisorStartResponse,
+	parseSupervisorMandateRequest,
+	type SupervisorMandateRequest,
+	type SupervisorMandateResponse,
 	PIX_SUPERVISOR_MANAGED_META_KEY,
 	PIX_SUPERVISOR_META_KEY,
 	PIX_SUPERVISOR_OPEN_METHOD,
@@ -71,7 +81,11 @@ import {
 	type SupervisorOpenResponse,
 } from "./supervisor-contract.js";
 import { forwardSupervisorRequest } from "./supervisor-bridge.js";
-import { createSupervisorService, type SupervisorService } from "./supervisor-service.js";
+import { createSupervisorService, readSessionBranchMessages, type SupervisorService } from "./supervisor-service.js";
+import { createSupervisorActions, type SupervisorActions } from "./supervisor-actions.js";
+import { writeTaskStatus } from "./supervisor-tasks.js";
+import { reconcileSupervisor } from "./supervisor-reconcile.js";
+import type { SessionEvent as SupervisorSessionEvent } from "./session-events.js";
 import { createSupervisorWaker, type SupervisorWaker } from "./supervisor-wake.js";
 import { createSupervisorStore, type SupervisorRegistry, type SupervisorStore } from "./supervisor-store.js";
 import {
@@ -406,7 +420,11 @@ type ClientCaller = {
 	request(method: "elicitation/create", params: CreateElicitationRequest): Promise<CreateElicitationResponse>;
   request(method: typeof TASK_RUN_METHOD, params: TaskRunRequest): Promise<TaskRunResponse>;
   notify(method: typeof TASK_RUN_CANCEL_METHOD, params: { requestId: string }): Promise<void>;
+	request(method: typeof PIX_SUPERVISOR_START_METHOD, params: SupervisorStartRequest): Promise<SupervisorStartResponse>;
 };
+
+/** Below the supervisor bridge's 60 s timeout, so the model gets the real reason. */
+const SUPERVISOR_LAUNCH_TIMEOUT_MS = 50_000;
 
 // JSON-RPC server-error range; plain `throw new Error(...)` would surface
 // to the client as an opaque "Internal error".
@@ -715,8 +733,15 @@ export class PixAcpAgent {
 	private readonly supervisor: SupervisorService;
 	private readonly unsubscribeSupervisorEvents: () => void;
 	private readonly supervisorWaker: SupervisorWaker;
+	private readonly supervisorActions: SupervisorActions;
+	/** Per-project lock shared by supervisor mutations, user takeover, handover and mandate edits. */
+	private readonly supervisorLocks = new Map<string, Promise<unknown>>();
+	/** Messages the supervisor queued per session (itemId → text): their prompts are not user takeovers. */
+	private readonly supervisorDelivered = new Map<string, Map<string, string>>();
 	/** Serializes `pix/supervisor/open` per project so one click creates one session. */
 	private readonly supervisorOpening = new Map<string, Promise<SupervisorOpenResponse>>();
+	/** Projects whose registry was reconciled in this ACP lifetime (0077). */
+	private readonly supervisorReconciled = new Set<string>();
 	private disposed = false;
 	private readonly fileMentionIndex = new FileMentionIndex();
 	private readonly retiringForkQueues = new Set<Promise<void>>();
@@ -842,7 +867,33 @@ export class PixAcpAgent {
 			},
 			touchedFiles: (sessionId) => this.sessionEvents.touchedFiles(sessionId),
 			planFor: async (cwd, sessionId) => (await this.planLaunches.handle({ cwd, action: "list" })).launches[sessionId]?.path,
+			mutate: (cwd, caller, request) => this.supervisorActions.handle(cwd, caller, request),
 			report: (message) => this.options.logger.warn(message, { module: "supervisor" }),
+		});
+		this.supervisorActions = createSupervisorActions({
+			store: this.supervisorStore,
+			live: (sessionId) => {
+				const session = this.sessions.get(sessionId);
+				if (!session) return undefined;
+				return {
+					running: session.activeRun !== undefined,
+					pendingQuestions: session.pendingQuestionIds.size,
+					messages: () => session.pi.getMessages(),
+				};
+			},
+			digest: (cwd, caller, sessionId) => this.supervisor.digest(cwd, caller, sessionId),
+			lastStopReason: (sessionId) => this.supervisor.lastStopReason(sessionId),
+			sessionExists: async (cwd, sessionId) => {
+				const record = await this.sessionMap.get(sessionId);
+				return Boolean(record && resolve(record.cwd) === resolve(cwd) && !record.subagent);
+			},
+			runtime: {
+				exclusive: (cwd, operation) => this.supervisorExclusive(cwd, operation),
+				deliver: (sessionId, text) => this.deliverSupervisorMessage(sessionId, text),
+				cancel: (sessionId) => this.cancel(sessionId),
+				launch: (cwd, caller, item, modelRef) => this.launchSupervisorItem(cwd, caller, item, modelRef),
+				writeTaskStatus,
+			},
 		});
 		this.supervisorWaker = createSupervisorWaker({
 			debounceMs: options.supervisorWakeDebounceMs,
@@ -1099,6 +1150,8 @@ export class PixAcpAgent {
 			.onRequest(PIX_SUPERVISOR_OPEN_METHOD, parseSupervisorOpenParams, (ctx) => this.withRequestLogging(PIX_SUPERVISOR_OPEN_METHOD, ctx.params, ctx.signal, () => this.openSupervisor(ctx.params, ctx.client)),
 			)
 			.onRequest(PIX_SUPERVISOR_HANDOVER_METHOD, parseSupervisorHandoverParams, (ctx) => this.withRequestLogging(PIX_SUPERVISOR_HANDOVER_METHOD, ctx.params, ctx.signal, () => this.handOverToSupervisor(ctx.params)),
+			)
+			.onRequest(PIX_SUPERVISOR_MANDATE_METHOD, parseSupervisorMandateParams, (ctx) => this.withRequestLogging(PIX_SUPERVISOR_MANDATE_METHOD, ctx.params, ctx.signal, () => this.supervisorMandate(ctx.params)),
 			)
 			.onRequest(PIX_TAKE_AUTO_MESSAGE_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_TAKE_AUTO_MESSAGE_METHOD, ctx.params, ctx.signal, () => this.desktopTakeAutoMessage(ctx.params)),
 			)
@@ -1527,6 +1580,7 @@ export class PixAcpAgent {
 		const session = this.requireDesktopSession(params.sessionId);
 		await this.ensureDesktopQueuesLoaded(session);
 		const message = await this.desktopQueuedMessage(params);
+		await this.takeOverFromSupervisor(session, message.promptText);
 		if (this.clientName === "pix-desktop" && message.displayText.trim()) {
 			void queueRequestHistoryEntry(message.displayText).catch(() => undefined);
 		}
@@ -2542,6 +2596,7 @@ export class PixAcpAgent {
 		this.sessionEvents.forget(sessionId);
 		this.supervisor.forget(sessionId);
 		if (record) await this.forgetSupervisorSession(record.cwd, sessionId);
+		this.supervisorDelivered.delete(sessionId);
 		if (record) this.searchService.changed(record.cwd);
 		this.options.logger.info(`session/delete: ${sessionId}`);
 	}
@@ -2574,26 +2629,212 @@ export class PixAcpAgent {
 		if (!record || resolve(record.cwd) !== resolve(cwd)) throw new RequestError(ERROR_SERVER, `session ${sessionId} not found in this project`);
 		if (record.subagent) throw new RequestError(ERROR_SERVER, "sub-agent sessions cannot be handed to the supervisor");
 		let changed = false;
-		await this.supervisorStore.updateRegistry(cwd, (current) => {
+		// Under the supervisor lock: a hand-over never interleaves with a supervisor op.
+		await this.supervisorExclusive(cwd, () => this.supervisorStore.updateRegistry(cwd, (current) => {
 			if (supervised && !current.supervisorSessionId) throw new RequestError(ERROR_SERVER, "open the project supervisor first");
 			if (current.supervisorSessionId === sessionId) throw new RequestError(ERROR_SERVER, "the supervisor cannot supervise itself");
 			const existing = current.sessions[sessionId];
 			if (supervised) {
-				if (existing) return current;
+				if (existing?.mode === "managed") return current;
 				changed = true;
-				return { ...current, sessions: { ...current.sessions,
-					[sessionId]: { item: { kind: "prompt" }, mode: "manual", registeredAt: Date.now(), reworkRounds: 0 } } };
+				return { ...current, sessions: { ...current.sessions, [sessionId]: existing
+					? { ...existing, mode: "managed" }
+					: { item: { kind: "prompt" }, mode: "managed", registeredAt: Date.now(), reworkRounds: 0 } } };
 			}
 			if (!existing) return current;
 			changed = true;
 			const { [sessionId]: _removed, ...sessions } = current.sessions;
 			return { ...current, sessions };
-		});
+		}));
 		if (changed) {
 			await this.supervisorStore.appendLedger(cwd, { kind: supervised ? "handed_over" : "released", sessionId })
 				.catch((error: unknown) => this.options.logger.warn(`supervisor ledger append failed: ${stringifyUnknown(error)}`, { module: "supervisor" }));
 		}
 		return { supervised };
+	}
+
+	/** Run `operation` after every earlier supervisor-state change of the project. */
+	private supervisorExclusive<T>(cwd: string, operation: () => Promise<T>): Promise<T> {
+		const key = resolve(cwd);
+		const previous = this.supervisorLocks.get(key) ?? Promise.resolve();
+		const run = previous.then(operation);
+		const tail = run.then(() => undefined, () => undefined);
+		this.supervisorLocks.set(key, tail);
+		void tail.then(() => { if (this.supervisorLocks.get(key) === tail) this.supervisorLocks.delete(key); });
+		return run;
+	}
+
+	/**
+	 * Supervisor `send`: steer a streaming session, otherwise queue a turn in
+	 * its auto queue for Desktop to run, like any queued message.
+	 */
+	private async deliverSupervisorMessage(sessionId: string, text: string): Promise<"steering" | "queued"> {
+		const session = this.sessions.get(sessionId);
+		if (!session || this.disposed) throw new Error(`Session ${sessionId} is not open in Desktop`);
+		await this.ensureDesktopQueuesLoaded(session);
+		if (this.disposed || this.sessions.get(sessionId) !== session) throw new Error(`Session ${sessionId} was closed`);
+		const state = await session.pi.getState();
+		if (state.isStreaming && !state.isCompacting) {
+			await session.pi.steer(text);
+			return "steering";
+		}
+		const message = textOnlyQueuedMessage(text);
+		session.autoUserMessages.push(message);
+		let delivered = this.supervisorDelivered.get(sessionId);
+		if (!delivered) {
+			delivered = new Map();
+			this.supervisorDelivered.set(sessionId, delivered);
+			while (this.supervisorDelivered.size > MAX_SUPERVISOR_DELIVERY_SESSIONS) {
+				const oldest = this.supervisorDelivered.keys().next().value;
+				if (oldest === undefined) break;
+				this.supervisorDelivered.delete(oldest);
+			}
+		}
+		delivered.set(message.id, text);
+		while (delivered.size > MAX_SUPERVISOR_DELIVERIES) {
+			const oldest = delivered.keys().next().value;
+			if (oldest === undefined) break;
+			delivered.delete(oldest);
+		}
+		try {
+			await this.persistDesktopQueues(session);
+		} catch (error) {
+			const index = session.autoUserMessages.indexOf(message);
+			if (index >= 0) session.autoUserMessages.splice(index, 1);
+			delivered.delete(message.id);
+			throw error;
+		}
+		await this.notifyDesktopQueueState(session);
+		return "queued";
+	}
+
+	/**
+	 * Supervisor `start`: ask the Desktop window that owns the supervisor
+	 * session to launch the item through its Run actions. Called under the
+	 * project supervisor lock; a timeout cancels the Desktop side.
+	 */
+	private async launchSupervisorItem(
+		cwd: string,
+		callerSessionId: string,
+		item: SupervisorStartItem,
+		modelRef: string | undefined,
+	): Promise<{ sessionId: string }> {
+		const supervisor = this.sessions.get(callerSessionId);
+		if (!supervisor || this.disposed || this.clientName !== "pix-desktop") throw new Error("The supervisor session is not open in Pix Desktop");
+		const request: SupervisorStartRequest = { requestId: randomUUID(), cwd, sourceSessionId: callerSessionId, item, ...(modelRef ? { modelRef } : {}) };
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const timeout = new Promise<never>((_resolve, reject) => {
+			timer = setTimeout(() => {
+				void supervisor.client.notify(TASK_RUN_CANCEL_METHOD, { requestId: request.requestId }).catch(() => undefined);
+				reject(new Error("Desktop did not start the session in time; check status before retrying"));
+			}, SUPERVISOR_LAUNCH_TIMEOUT_MS);
+			timer.unref?.();
+		});
+		let response: SupervisorStartResponse;
+		try {
+			response = parseSupervisorStartResponse(await Promise.race([
+				supervisor.client.request(PIX_SUPERVISOR_START_METHOD, request) as Promise<unknown>, timeout]));
+		} catch (error) {
+			this.options.logger.warn(`supervisor start failed: ${stringifyUnknown(error)}`, { module: "supervisor" });
+			throw error;
+		} finally {
+			clearTimeout(timer);
+		}
+		const live = this.sessions.get(response.sessionId)?.cwd ?? (await this.sessionMap.get(response.sessionId))?.cwd;
+		if (!live || resolve(live) !== resolve(cwd) || response.sessionId === callerSessionId) {
+			throw new Error(`Desktop reported session ${response.sessionId}, which is not a work session of this project`);
+		}
+		return response;
+	}
+
+	/**
+	 * A user message into a managed session makes it `manual` before it is
+	 * dispatched (0077): the supervisor's later ops on it are refused. Prompts
+	 * the supervisor itself queued are recognized and do not count.
+	 */
+	private async takeOverFromSupervisor(session: AgentSessionState, text: string): Promise<void> {
+		if (this.clientName !== "pix-desktop") return;
+		const sessionId = session.acpSessionId;
+		// Supervisor launch prompts (and first sends) carry the worker rules.
+		if (text.startsWith(SUPERVISOR_WORKER_PREAMBLE)) return;
+		const delivered = this.supervisorDelivered.get(sessionId);
+		if (delivered) {
+			for (const [itemId, queued] of delivered) {
+				if (queued !== text) continue;
+				delivered.delete(itemId);
+				if (delivered.size === 0) this.supervisorDelivered.delete(sessionId);
+				return;
+			}
+		}
+		try {
+			if ((await this.supervisorStore.readRegistry(session.cwd)).sessions[sessionId]?.mode !== "managed") return;
+			await this.supervisorExclusive(session.cwd, async () => {
+				let changed = false;
+				await this.supervisorStore.updateRegistry(session.cwd, (current) => {
+					const existing = current.sessions[sessionId];
+					if (existing?.mode !== "managed") return current;
+					changed = true;
+					return { ...current, sessions: { ...current.sessions, [sessionId]: { ...existing, mode: "manual" } } };
+				});
+				if (!changed) return;
+				await this.dropSupervisorDeliveries(session);
+				await this.supervisorStore.appendLedger(session.cwd, { kind: "manual_takeover", sessionId })
+					.catch((error: unknown) => this.options.logger.warn(`supervisor ledger append failed: ${stringifyUnknown(error)}`, { module: "supervisor" }));
+				const event: SupervisorSessionEvent = { type: "manual_takeover", sessionId, at: Date.now() };
+				this.supervisor.record(event);
+				this.supervisorWaker.push(session.cwd, event);
+			});
+		} catch (error) {
+			// The user's message is never blocked by supervisor bookkeeping.
+			this.options.logger.warn(`supervisor takeover failed: ${stringifyUnknown(error)}`, { module: "supervisor" });
+		}
+	}
+
+	/** Remove supervisor messages still waiting in a taken-over session's auto queue. */
+	private async dropSupervisorDeliveries(session: AgentSessionState): Promise<void> {
+		const delivered = this.supervisorDelivered.get(session.acpSessionId);
+		this.supervisorDelivered.delete(session.acpSessionId);
+		if (!delivered?.size) return;
+		const before = session.autoUserMessages.length;
+		session.autoUserMessages = session.autoUserMessages.filter((item) => !delivered.has(item.id));
+		if (session.autoUserMessages.length === before) return;
+		await this.persistDesktopQueues(session);
+		await this.notifyDesktopQueueState(session);
+	}
+
+	/** `pix/supervisor/mandate`: read or patch the saved mandate (Desktop header block). */
+	private async supervisorMandate(params: SupervisorMandateRequest): Promise<SupervisorMandateResponse> {
+		if (this.clientName !== "pix-desktop") {
+			throw new RequestError(ERROR_SERVER, "the project supervisor requires Pix Desktop");
+		}
+		const { cwd, patch } = params;
+		return await this.supervisorExclusive(cwd, async () => {
+			const mandate = patch ? await this.supervisorStore.updateMandate(cwd, patch) : await this.supervisorStore.readMandate(cwd);
+			if (patch) {
+				const { policy, ...fields } = patch;
+				await this.supervisorStore.appendLedger(cwd, { kind: "mandate_changed",
+					detail: { ...fields, ...(policy !== undefined ? { policyChanged: true } : {}) } })
+					.catch((error: unknown) => this.options.logger.warn(`supervisor ledger append failed: ${stringifyUnknown(error)}`, { module: "supervisor" }));
+			}
+			const registry = await this.supervisorStore.readRegistry(cwd);
+			let managed = 0;
+			let manual = 0;
+			let running = 0;
+			let reworkRounds = 0;
+			for (const [sessionId, entry] of Object.entries(registry.sessions)) {
+				if (entry.mode === "manual") { manual += 1; continue; }
+				managed += 1;
+				reworkRounds += entry.reworkRounds;
+				const live = this.sessions.get(sessionId);
+				if (live && (live.activeRun || live.pendingQuestionIds.size > 0)) running += 1;
+			}
+			return {
+				enabled: mandate.enabled, paused: mandate.paused, maxConcurrent: mandate.maxConcurrent,
+				maxReworkRounds: mandate.maxReworkRounds, stalledAfterMinutes: mandate.stalledAfterMinutes,
+				...(mandate.workerModelRef === undefined ? {} : { workerModelRef: mandate.workerModelRef }),
+				policy: mandate.policy, managed, manual, running, reworkRounds,
+			};
+		});
 	}
 
 	/**
@@ -2890,8 +3131,40 @@ export class PixAcpAgent {
 				`failed to start pi (${this.options.piEntry}): ${stringifyUnknown(error)}`,
 			);
 		}
+		if (supervisorExtension) this.reconcileSupervisorOnce(cwd);
 		void session.forks.tryIdle();
 		return session;
+	}
+
+	/**
+	 * When the supervisor runtime first starts in this ACP lifetime, report
+	 * registered sessions interrupted by quitting or gone missing (0077).
+	 * Background work: a failure is logged and never blocks the session.
+	 */
+	private reconcileSupervisorOnce(cwd: string): void {
+		const key = resolve(cwd);
+		if (this.supervisorReconciled.has(key)) return;
+		this.supervisorReconciled.add(key);
+		void reconcileSupervisor(cwd, {
+			store: this.supervisorStore,
+			record: async (projectCwd, sessionId) => {
+				const record = await this.sessionMap.get(sessionId);
+				return record && resolve(record.cwd) === resolve(projectCwd) && !record.subagent ? record : undefined;
+			},
+			messages: (path) => readSessionBranchMessages(path),
+			running: (sessionId) => {
+				const live = this.sessions.get(sessionId);
+				return Boolean(live && (live.activeRun || live.pendingQuestionIds.size > 0));
+			},
+			emit: (event) => {
+				if (this.disposed) return;
+				this.supervisor.record(event);
+				this.supervisorWaker.push(cwd, event);
+			},
+			report: (message) => this.options.logger.warn(message, { module: "supervisor" }),
+		}).catch((error: unknown) => {
+			this.options.logger.warn(`supervisor reconcile failed: ${stringifyUnknown(error)}`, { module: "supervisor" });
+		});
 	}
 
 	/**
@@ -4078,6 +4351,7 @@ export class PixAcpAgent {
 			return await this.runExtensionSlashCommand(session, input.text);
 		}
 
+		await this.takeOverFromSupervisor(session, input.text);
 		if (session.activeRun || session.builtinRunning) {
 			if (session.activeRun) await this.refreshAgentControlState(session);
 			throw new RequestError(ERROR_SERVER, "a prompt is already in progress for this session");
@@ -5331,6 +5605,17 @@ function commandPathArgument(value: string | undefined): string | undefined {
 
 
 /** Validate the registry extension's structured diff payload into ACP files. */
+function parseSupervisorMandateParams(value: unknown): SupervisorMandateRequest {
+	try {
+		return parseSupervisorMandateRequest(value);
+	} catch (error) {
+		throw new RequestError(ERROR_INVALID_PARAMS, error instanceof Error ? error.message : String(error));
+	}
+}
+
+const MAX_SUPERVISOR_DELIVERIES = 50;
+const MAX_SUPERVISOR_DELIVERY_SESSIONS = 256;
+
 function parseSupervisorHandoverParams(value: unknown): SupervisorHandoverRequest {
 	try {
 		return parseSupervisorHandoverRequest(value);

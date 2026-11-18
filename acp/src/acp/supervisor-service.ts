@@ -1,14 +1,15 @@
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { openTaskDatabase } from "../registry/task-database.js";
-import type { SupervisorToolRequest } from "./supervisor-contract.js";
+import { isSupervisorMutation, type SupervisorMutation, type SupervisorToolRequest } from "./supervisor-contract.js";
 import { readPlanProgress as defaultReadPlanProgress, type PlanProgress, type SessionEvent } from "./session-events.js";
 import type { ManagedSession, SupervisorStore } from "./supervisor-store.js";
+import type { PixQuestion } from "./ui-request-bridge.js";
 
 /**
- * Read-only `supervisor` tool operations (decision 0077, phase 1: observer).
- * Everything here is derived from ACP state and saved project files; no model
- * call and no mutation of sessions, tasks or plans.
+ * `supervisor` tool operations (decision 0077). `status` and `read` are
+ * derived from ACP state and saved project files with no model call; mutating
+ * ops are delegated to `mutate` (supervisor-actions.ts) after the caller check.
  */
 
 export const MAX_STATUS_MANAGED = 50;
@@ -37,16 +38,24 @@ export interface SupervisorLiveSession {
 	messages(): Promise<readonly unknown[]>;
 }
 
+export interface SupervisorPendingQuestion {
+	readonly questionId: string;
+	readonly questions: readonly PixQuestion[];
+}
+
 export interface SupervisorServiceDeps {
 	readonly store: SupervisorStore;
 	listRecords(cwd: string): Promise<readonly SupervisorSessionRecord[]>;
 	getRecord(sessionId: string): Promise<SupervisorSessionRecord | undefined>;
 	live(sessionId: string): SupervisorLiveSession | undefined;
+	questions?(sessionId: string): readonly SupervisorPendingQuestion[];
 	touchedFiles(sessionId: string): readonly string[];
 	planFor(cwd: string, sessionId: string): Promise<string | undefined>;
 	readPlanProgress?(cwd: string, path: string): Promise<PlanProgress | null>;
 	readTaskLinks?(cwd: string): Promise<ReadonlyMap<string, TaskLink>>;
 	readTranscript?(path: string): Promise<readonly unknown[]>;
+	/** Mutating ops; absent means the host offers only observation. */
+	mutate?(cwd: string, callerSessionId: string, request: SupervisorMutation, callerIsCurrent?: () => boolean): Promise<unknown>;
 	report?(message: string): void;
 }
 
@@ -70,7 +79,7 @@ export interface LastEvent {
 export interface SupervisorSessionSummary {
 	readonly sessionId: string;
 	readonly title?: string;
-	readonly managed?: Pick<ManagedSession, "item" | "mode" | "reworkRounds">;
+	readonly managed?: Pick<ManagedSession, "item" | "mode" | "reworkRounds" | "escalation">;
 	readonly task?: TaskLink;
 	readonly run: RunState;
 	readonly last?: LastEvent;
@@ -80,6 +89,7 @@ export interface SupervisorSessionSummary {
 
 export interface SupervisorDigest extends SupervisorSessionSummary {
 	readonly pendingQuestion: boolean;
+	readonly questions?: readonly SupervisorPendingQuestion[];
 	readonly touchedFiles: readonly string[];
 	readonly touchedFilesTotal: number;
 	readonly lastUserMessages: readonly string[];
@@ -91,12 +101,17 @@ export interface SupervisorDigest extends SupervisorSessionSummary {
 export interface SupervisorService {
 	/** Remember the newest lifecycle event per session (bounded). */
 	record(event: SessionEvent): void;
-	handle(cwd: string, callerSessionId: string, request: SupervisorToolRequest): Promise<unknown>;
+	handle(cwd: string, callerSessionId: string, request: SupervisorToolRequest, callerIsCurrent?: () => boolean): Promise<unknown>;
+	/** Bounded digest of one worker session (the `read` op without the caller check). */
+	digest(cwd: string, callerSessionId: string, sessionId: string): Promise<SupervisorDigest>;
+	/** Stop reason of the last settled turn ACP saw for the session. */
+	lastStopReason(sessionId: string): string | undefined;
 	forget(sessionId: string): void;
 }
 
 export function createSupervisorService(deps: SupervisorServiceDeps): SupervisorService {
 	const lastEvents = new Map<string, LastEvent>();
+	const lastStops = new Map<string, string>();
 	const readProgress = deps.readPlanProgress ?? defaultReadPlanProgress;
 	const readTasks = deps.readTaskLinks ?? readTaskLinks;
 	const readTranscript = deps.readTranscript ?? readSessionBranchMessages;
@@ -142,7 +157,8 @@ export function createSupervisorService(deps: SupervisorServiceDeps): Supervisor
 		return {
 			sessionId,
 			...(record?.title ? { title: record.title } : {}),
-			...(managed ? { managed: { item: managed.item, mode: managed.mode, reworkRounds: managed.reworkRounds } } : {}),
+			...(managed ? { managed: { item: managed.item, mode: managed.mode, reworkRounds: managed.reworkRounds,
+				...(managed.escalation ? { escalation: managed.escalation } : {}) } } : {}),
 			...(task ? { task } : {}),
 			run: runState(sessionId),
 			...(last ? { last } : {}),
@@ -184,7 +200,9 @@ export function createSupervisorService(deps: SupervisorServiceDeps): Supervisor
 			managed,
 			managedTotal: managedIds.length,
 			observed,
-			note: "Observer phase: supervisor can only read. Use op=read with a sessionId for a bounded digest.",
+			note: deps.mutate
+				? "Use op=read for a bounded digest and live questions; start launches new managed work; send/answer/cancel/close/reopen act only on managed sessions. All need the mandate enabled and not paused."
+				: "Observer phase: supervisor can only read. Use op=read with a sessionId for a bounded digest.",
 		};
 	}
 
@@ -206,9 +224,15 @@ export function createSupervisorService(deps: SupervisorServiceDeps): Supervisor
 			throw new Error(`Could not read session ${sessionId}: ${errorMessage(error)}`);
 		}
 		const touched = deps.touchedFiles(sessionId);
+		const questions = registry.sessions[sessionId]?.mode === "managed" ? deps.questions?.(sessionId) : undefined;
 		return {
 			...base,
 			pendingQuestion: (live?.pendingQuestions ?? 0) > 0,
+			...(questions?.length ? { questions: questions.slice(0, 5).map(({ questionId, questions }) => ({ questionId,
+				questions: questions.map((question) => ({ ...question, label: clip(question.label, 300), prompt: clip(question.prompt, MAX_USER_TEXT),
+					choices: question.choices.map((choice) => ({ ...choice, label: clip(choice.label, 300),
+						...(choice.description ? { description: clip(choice.description, 500) } : {}) })) })),
+			})) } : {}),
 			touchedFiles: touched.slice(-MAX_DIGEST_FILES),
 			touchedFilesTotal: touched.length,
 			...digestMessages(messages),
@@ -224,16 +248,31 @@ export function createSupervisorService(deps: SupervisorServiceDeps): Supervisor
 				if (oldest === undefined) break;
 				lastEvents.delete(oldest);
 			}
+			if (event.type === "settled") {
+				lastStops.delete(event.sessionId);
+				lastStops.set(event.sessionId, event.stopReason);
+				while (lastStops.size > MAX_LAST_EVENTS) {
+					const oldest = lastStops.keys().next().value;
+					if (oldest === undefined) break;
+					lastStops.delete(oldest);
+				}
+			}
 		},
-		async handle(cwd, callerSessionId, request) {
+		async handle(cwd, callerSessionId, request, callerIsCurrent) {
 			const registry = await deps.store.readRegistry(cwd);
 			if (registry.supervisorSessionId !== callerSessionId) {
 				throw new Error("This session is not the project supervisor; open it from Desktop (Open Project Supervisor)");
 			}
-			return request.op === "status" ? status(cwd, callerSessionId) : read(cwd, callerSessionId, request.sessionId);
+			if (request.op === "status") return status(cwd, callerSessionId);
+			if (request.op === "read") return read(cwd, callerSessionId, request.sessionId);
+			if (!isSupervisorMutation(request) || !deps.mutate) throw new Error(`supervisor ${request.op} is not available on this host`);
+			return deps.mutate(cwd, callerSessionId, request, callerIsCurrent);
 		},
+		digest: read,
+		lastStopReason: (sessionId) => lastStops.get(sessionId),
 		forget(sessionId) {
 			lastEvents.delete(sessionId);
+			lastStops.delete(sessionId);
 		},
 	};
 }

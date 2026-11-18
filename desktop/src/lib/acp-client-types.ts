@@ -10,6 +10,7 @@ import type { UsageStatsChangedNotification } from "../../../acp/src/acp/usage-s
 import type { AgentControlState } from "./agent-control";
 import type { SessionStateNotification } from "./session-state";
 import type { TaskRunRequest, TaskRunResponse } from "../../../acp/src/acp/task-run-contract";
+import type { SupervisorStartRequest, SupervisorStartResponse } from "../../../acp/src/acp/supervisor-contract";
 
 export interface AcpExit {
   readonly generation: number;
@@ -35,6 +36,8 @@ export interface AcpTransport {
 
 export interface AcpClientHandlers {
   readonly onTaskRun?: (request: TaskRunRequest, signal: AbortSignal) => Promise<TaskRunResponse>;
+  /** Supervisor `start`: launch an item; resolve once its prompt is dispatched. */
+  readonly onSupervisorStart?: (request: SupervisorStartRequest, signal: AbortSignal) => Promise<SupervisorStartResponse>;
 	readonly onSessionUpdate: (notification: SessionNotification) => void;
 	readonly onSessionCatalogChanged?: (cwd: string) => void;
   /** A newer usage snapshot for `source` is available; `cwd` only for project-scoped sources. */

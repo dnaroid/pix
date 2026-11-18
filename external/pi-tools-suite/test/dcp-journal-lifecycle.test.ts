@@ -167,6 +167,26 @@ describe("DCP journal lifecycle", () => {
     }
   });
 
+  test("a metadata-only session resumed before its first turn initializes DCP once", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "dcp-journal-empty-resume-"));
+    try {
+      const manager = SessionManager.create(dir, dir, { id: "empty-resume" });
+      manager.appendCustomEntry("test-runtime-metadata", {});
+      await initialize(makeRuntime(manager), "resume");
+      expect(journalEntries(manager).map((entry) => entry.data.kind)).toEqual(["init"]);
+
+      manager.appendMessage(text("user", "first request", 1) as any);
+      manager.appendMessage(text("assistant", "first answer", 2) as any);
+      const reopened = SessionManager.open(manager.getSessionFile()!, dir, dir);
+      const runtime = makeRuntime(reopened);
+      await initialize(runtime, "resume");
+      await project(runtime);
+      expect(journalEntries(reopened).map((entry) => entry.data.kind).filter((kind) => kind === "init")).toEqual(["init"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("pre-journal persisted sessions are not adopted or converted", async () => {
     const dir = mkdtempSync(join(tmpdir(), "dcp-journal-clean-break-"));
     try {

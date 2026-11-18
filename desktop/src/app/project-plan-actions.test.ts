@@ -181,3 +181,51 @@ describe("plan launch in a new session", () => {
     expect(options.settlePlanLaunch).not.toHaveBeenCalled();
   });
 });
+
+describe("agent launches of plans and prompts", () => {
+  it("prepends the prefix, applies the model and resolves on dispatch with the new session", async () => {
+    const { actions, client, options } = fixture();
+    const sessionId = await actions.startFromAgent({ kind: "prompt", text: "fix the test" }, new AbortController().signal, "RULES\n\n", "p/m:high");
+    expect(sessionId).toBe("new");
+    expect(client.newSession).toHaveBeenCalledWith("/project", { modelRef: "p/m", thinkingLevel: "high" });
+    expect(options.runPrompt).toHaveBeenCalledWith(client, "new", [{ type: "text", text: "RULES\n\nfix the test" }], [], "message");
+    expect(options.recordPlanLaunch).not.toHaveBeenCalled();
+    expect(actions.actionId).toBeNull();
+  });
+
+  it("records a plan launch and keeps the plan prompt after the prefix", async () => {
+    const { actions, options } = fixture();
+    await actions.startFromAgent({ kind: "plan", path }, new AbortController().signal, "RULES\n\n");
+    expect(options.recordPlanLaunch).toHaveBeenCalledExactlyOnceWith("/project", "new", path);
+    expect(options.appendUserMessage).toHaveBeenCalledWith("new", `RULES\n\n${buildProjectPlanPrompt(path)}`, []);
+  });
+
+  it("rejects instead of hanging when a guard stops the launch", async () => {
+    const { actions, client, options } = fixture();
+    options.sessionMutationRunning = () => true;
+    await expect(actions.startFromAgent({ kind: "prompt", text: "x" }, new AbortController().signal, "")).rejects.toThrow("did not start");
+    await expect(actions.startFromAgent({ kind: "plan", path: "README.md" }, new AbortController().signal, "")).rejects.toThrow("did not start");
+    expect(client.newSession).not.toHaveBeenCalled();
+  });
+
+  it("closes the new session when the agent cancels before dispatch", async () => {
+    const { actions, client, options } = fixture();
+    const created = deferred<{ sessionId: string }>();
+    vi.mocked(client.newSession).mockReturnValue(created.promise);
+    const controller = new AbortController();
+    const run = actions.startFromAgent({ kind: "prompt", text: "x" }, controller.signal, "");
+    controller.abort();
+    created.resolve({ sessionId: "late" });
+    await expect(run).rejects.toThrow("did not start");
+    expect(client.closeSession).toHaveBeenCalledWith("late");
+    expect(options.runPrompt).not.toHaveBeenCalled();
+    expect(actions.actionId).toBeNull();
+  });
+
+  it("rejects with the launch error and an invalid model", async () => {
+    const { actions, client } = fixture();
+    await expect(actions.startFromAgent({ kind: "prompt", text: "x" }, new AbortController().signal, "", "nomodel")).rejects.toThrow("provider/model");
+    client.newSession.mockRejectedValueOnce(new Error("offline"));
+    await expect(actions.startFromAgent({ kind: "prompt", text: "x" }, new AbortController().signal, "")).rejects.toThrow("offline");
+  });
+});

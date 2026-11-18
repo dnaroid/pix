@@ -1,23 +1,11 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import type { ModelUsageLimitWindow } from "../lib/acp-client";
   import { quotaCycleTimeline } from "../lib/quota-calendar";
   import { clampUsagePercent, formatResetDuration } from "../lib/runtime-status";
-  import { createSleepPreference } from "../lib/sleep-preference.svelte";
 
-  let { window, now, deadlines = [], sleepHours }: { window: ModelUsageLimitWindow; now: number; deadlines?: readonly number[]; sleepHours?: number } = $props();
-  const sleepPreference = createSleepPreference();
-  onMount(() => sleepPreference.mount());
+  let { window, now, deadlines = [] }: { window: ModelUsageLimitWindow; now: number; deadlines?: readonly number[] } = $props();
   const timeline = $derived(quotaCycleTimeline(window, now));
-  const sleepDurationHours = $derived(sleepHours ?? sleepPreference.hours);
-  const sleepAt = $derived(now + sleepDurationHours * 3_600_000);
-  // Never put a future-cycle prediction on the reported window or clamp it to reset.
-  const sleepPosition = $derived(timeline && Number.isFinite(sleepDurationHours) && sleepDurationHours >= 0.5 && sleepDurationHours <= 24
-    && now >= window.resetAt - window.windowSeconds * 1000 && now < window.resetAt && sleepAt <= window.resetAt
-    ? (sleepAt - (window.resetAt - window.windowSeconds * 1000)) / (window.windowSeconds * 1000) * 100 : null);
-  const sleepLabel = $derived(sleepPosition !== null
-    ? `After ${sleepDurationHours} hours of sleep: ${new Date(sleepAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}.` : "");
   const remainingPercent = $derived(clampUsagePercent(window.remainingPercent));
   const days = $derived(timeline?.days ?? []);
   const elapsed = $derived((timeline?.timePosition ?? 0) / 100);
@@ -53,7 +41,7 @@
     : "Window timing unavailable");
 </script>
 
-<div class="mt-1" role="group" aria-label={`Weekly account quota: ${Math.round(usedPercent)}% used, ${Math.round(window.remainingPercent)}% remaining. ${timingLabel}.${sleepLabel ? ` ${sleepLabel}` : ""}${deadlineMarks.length ? ` Reset credits expire: ${deadlineMarks.map(m => m.label).join("; ")}.` : ""} Reset: ${resetLabel}${validReset ? `, ${formatResetDuration(window.resetAt, now)}` : ""}`} data-quota-calendar>
+<div class="mt-1" role="group" aria-label={`Weekly account quota: ${Math.round(usedPercent)}% used, ${Math.round(window.remainingPercent)}% remaining. ${timingLabel}.${deadlineMarks.length ? ` Reset credits expire: ${deadlineMarks.map(m => m.label).join("; ")}.` : ""} Reset: ${resetLabel}${validReset ? `, ${formatResetDuration(window.resetAt, now)}` : ""}`} data-quota-calendar>
   <div class="relative h-3.5 w-full" aria-hidden="true">
     <div class="relative h-full overflow-hidden rounded-sm bg-border" data-weekly-progress-track>
       <span class="absolute inset-y-0 right-0 bg-foreground" style={`width: ${remainingPercent}%`} data-weekly-remaining-fill></span>
@@ -64,12 +52,6 @@
     {#each deadlineMarks as mark}
       <span class="absolute -bottom-1 -top-0.5 z-[5] w-0.5 -translate-x-1/2 rounded-full bg-tool-error ring-1 ring-popover" style:left={`clamp(1px, ${mark.left}, calc(100% - 1px))`} data-reset-credit-deadline></span>
     {/each}
-    {#if sleepPosition !== null}
-      <span class="absolute -top-1 z-[5] h-[calc(100%+8px)] w-0 text-tool-agent" style={`left: clamp(5px, ${sleepPosition}%, calc(100% - 5px))`} data-weekly-sleep-marker>
-        <span class="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-tool-agent ring-1 ring-popover"></span>
-        <span class="absolute -top-2 left-1/2 -translate-x-1/2 whitespace-nowrap bg-popover px-0.5 text-xs leading-none tabular-nums">+{sleepDurationHours}h</span>
-      </span>
-    {/if}
     {#if timeline}
       <span class="absolute -top-1 z-10 h-[calc(100%+8px)] w-0" style={`left: clamp(3px, ${timeline.timePosition}%, calc(100% - 3px))`} data-weekly-now-marker>
         <span class="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-primary ring-1 ring-popover"></span>

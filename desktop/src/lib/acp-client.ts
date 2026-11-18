@@ -23,6 +23,13 @@ import {
 } from "./session-state";
 import type { RegistryActionRequest, RegistryDiff, RegistryResourceType, RegistrySnapshot } from "./registry";
 import type { PlanLaunches, PlanLaunchesRequest } from "../../../acp/src/acp/plan-launches-contract";
+import {
+  PIX_SUPERVISOR_START_METHOD,
+  parseSupervisorStartRequest,
+  parseSupervisorStartResponse,
+  type SupervisorMandatePatch,
+  type SupervisorMandateResponse,
+} from "../../../acp/src/acp/supervisor-contract";
 import type { AgentControlAction } from "./agent-control";
 import { isRecord, parseQueueState, parseQueuedUserMessage } from "./acp-response-parsers";
 import { AcpIncomingRequestError, AcpJsonRpcConnection } from "./acp-json-rpc";
@@ -352,6 +359,10 @@ export class AcpClient {
     return this.pix.supervisorHandover(cwd, sessionId, supervised);
   }
 
+  supervisorMandate(cwd: string, patch?: SupervisorMandatePatch): Promise<SupervisorMandateResponse> {
+    return this.pix.supervisorMandate(cwd, patch);
+  }
+
   queueMessage(
     sessionId: string,
     prompt: readonly ContentBlock[],
@@ -640,16 +651,27 @@ export class AcpClient {
   private async handleIncomingRequest(method: string, params: unknown): Promise<unknown> {
     if (method === TASK_RUN_METHOD && this.handlers.onTaskRun) {
       const request = parseTaskRunRequest(params);
-      if (this.taskRuns.has(request.requestId)) throw new Error("Duplicate task launch request");
-      const controller = new AbortController();
-      this.taskRuns.set(request.requestId, controller);
-      try { return parseTaskRunResponse(await this.handlers.onTaskRun(request, controller.signal), request.op === "models"); }
-      finally { this.taskRuns.delete(request.requestId); }
+      const run = this.handlers.onTaskRun;
+      return this.trackLaunch(request.requestId, async (signal) => parseTaskRunResponse(await run(request, signal), request.op === "models"));
+    }
+    if (method === PIX_SUPERVISOR_START_METHOD && this.handlers.onSupervisorStart) {
+      const request = parseSupervisorStartRequest(params);
+      const start = this.handlers.onSupervisorStart;
+      return this.trackLaunch(request.requestId, async (signal) => parseSupervisorStartResponse(await start(request, signal)));
     }
     if (method !== "elicitation/create" || !isRecord(params)) {
       throw new AcpIncomingRequestError(-32601, `unsupported client method: ${method}`);
     }
     return this.handlers.onElicitation(params as CreateElicitationRequest);
+  }
+
+  /** Agent launches share one id space: `pix/tasks/run_cancel` aborts either kind. */
+  private async trackLaunch<T>(requestId: string, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    if (this.taskRuns.has(requestId)) throw new Error("Duplicate task launch request");
+    const controller = new AbortController();
+    this.taskRuns.set(requestId, controller);
+    try { return await run(controller.signal); }
+    finally { this.taskRuns.delete(requestId); }
   }
 
   private cancelTaskRuns(): void {

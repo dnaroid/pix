@@ -20,10 +20,14 @@ import {
 } from "../../../acp/src/acp/plan-launches-contract";
 import {
   PIX_SUPERVISOR_HANDOVER_METHOD,
+  PIX_SUPERVISOR_MANDATE_METHOD,
   PIX_SUPERVISOR_OPEN_METHOD,
   parseSupervisorHandoverResponse,
+  parseSupervisorMandateResponse,
   parseSupervisorOpenResponse,
   type SupervisorHandoverResponse,
+  type SupervisorMandatePatch,
+  type SupervisorMandateResponse,
   type SupervisorOpenResponse,
 } from "../../../acp/src/acp/supervisor-contract";
 import {
@@ -513,9 +517,14 @@ export class AcpPixExtensions {
     return parseSupervisorOpenResponse(await this.request<unknown>(PIX_SUPERVISOR_OPEN_METHOD, { cwd }, 120_000));
   }
 
-  /** Hand a session over to the project supervisor (`manual` mode) or take it back. */
+  /** Hand a session over to the project supervisor (`managed` mode) or take it back. */
   async supervisorHandover(cwd: string, sessionId: string, supervised: boolean): Promise<SupervisorHandoverResponse> {
     return parseSupervisorHandoverResponse(await this.request<unknown>(PIX_SUPERVISOR_HANDOVER_METHOD, { cwd, sessionId, supervised }));
+  }
+
+  /** Read (no patch) or change the saved supervisor mandate; returns the mandate and live counters. */
+  async supervisorMandate(cwd: string, patch?: SupervisorMandatePatch): Promise<SupervisorMandateResponse> {
+    return parseSupervisorMandateResponse(await this.request<unknown>(PIX_SUPERVISOR_MANDATE_METHOD, patch ? { cwd, patch } : { cwd }));
   }
 
   async queueState(sessionId: string): Promise<QueueState> {

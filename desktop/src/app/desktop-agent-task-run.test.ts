@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { createDesktopProjectActionServices } from "./desktop-project-action-services";
 import type { ProjectTask } from "../lib/project-tasks";
 import type { TaskRunRequest } from "../../../acp/src/acp/task-run-contract";
+import { SUPERVISOR_WORKER_PREAMBLE, type SupervisorStartRequest } from "../../../acp/src/acp/supervisor-contract";
 
-const actions = vi.hoisted(() => ({ actionId: null, runTaskFromAgent: vi.fn() }));
+const actions = vi.hoisted(() => ({ actionId: null as string | null, runTaskFromAgent: vi.fn(), startFromAgent: vi.fn() }));
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: native.invoke }));
 vi.mock("./project-actions.svelte", () => ({ createProjectActions: () => actions }));
@@ -26,6 +27,8 @@ function fixture() {
     sessions: { runtime: { getConfigOptions: () => configOptions }, catalog: {} }, transitions: { sessionTabs: {} }, project: { tasks },
   } as any);
   actions.runTaskFromAgent.mockReset().mockResolvedValue({ sessionId: "child", outcome: "started" });
+  actions.startFromAgent.mockReset().mockResolvedValue("worker");
+  actions.actionId = null;
   const request = { requestId: "r1", cwd: "/project", taskId: task.id, sourceSessionId: "parent" } satisfies TaskRunRequest;
   return { services, tasks, task, request, setWorkspace: (value: string) => { workspace = value; },
     replaceClient: () => { client = {}; } };
@@ -135,5 +138,43 @@ describe("agent Tasks Run boundary", () => {
     tasks.loading = true;
     await expect(services.runTaskFromAgent(request, signal)).rejects.toThrow("busy");
     expect(tasks.load).not.toHaveBeenCalled();
+  });
+});
+
+describe("supervisor start boundary", () => {
+  const prefix = `${SUPERVISOR_WORKER_PREAMBLE}\n\n`;
+  const start = (item: SupervisorStartRequest["item"], extra: Partial<SupervisorStartRequest> = {}): SupervisorStartRequest =>
+    ({ requestId: "s1", cwd: "/project", sourceSessionId: "sup", item, ...extra });
+
+  it("launches plans and prompts with the worker rules and the requested model", async () => {
+    const { services } = fixture();
+    const signal = new AbortController().signal;
+    await expect(services.startFromSupervisor(start({ kind: "plan", path: ".pi/plans/p.md" }, { modelRef: "p/m" }), signal))
+      .resolves.toEqual({ sessionId: "worker" });
+    expect(actions.startFromAgent).toHaveBeenCalledWith({ kind: "plan", path: ".pi/plans/p.md" }, signal, prefix, "p/m");
+    await services.startFromSupervisor(start({ kind: "prompt", text: "fix it" }), signal);
+    expect(actions.startFromAgent).toHaveBeenLastCalledWith({ kind: "prompt", text: "fix it" }, signal, prefix, undefined);
+  });
+
+  it("runs a fresh saved task with the worker rules and refuses one already linked to a session", async () => {
+    const { services, tasks, task } = fixture();
+    const signal = new AbortController().signal;
+    await expect(services.startFromSupervisor(start({ kind: "task", taskId: task.id }), signal)).resolves.toEqual({ sessionId: "child" });
+    expect(tasks.load).toHaveBeenCalledWith("/project");
+    expect(actions.runTaskFromAgent).toHaveBeenCalledWith(task, signal, undefined, prefix);
+    task.sessionId = "old";
+    await expect(services.startFromSupervisor(start({ kind: "task", taskId: task.id }), signal)).rejects.toThrow("already has session old");
+    await expect(services.startFromSupervisor(start({ kind: "task", taskId: "missing" }), signal)).rejects.toThrow("Unknown project task id");
+    expect(actions.runTaskFromAgent).toHaveBeenCalledOnce();
+  });
+
+  it.each(["workspace", "busy", "aborted"])("refuses to launch when the window is %s", async (reason) => {
+    const { services } = fixture();
+    const controller = new AbortController();
+    if (reason === "aborted") controller.abort();
+    if (reason === "busy") actions.actionId = "other-task";
+    const request = start({ kind: "prompt", text: "x" }, reason === "workspace" ? { cwd: "/elsewhere" } : {});
+    await expect(services.startFromSupervisor(request, controller.signal)).rejects.toThrow("busy or showing another project");
+    expect(actions.startFromAgent).not.toHaveBeenCalled();
   });
 });

@@ -127,7 +127,7 @@ export function createProjectActions(options: ProjectActionsOptions) {
     }
   }
 
-  async function runTask(task: ProjectTask, launch?: { signal: AbortSignal; modelRef?: string; started: (result: TaskRunResult) => void }): Promise<void> {
+  async function runTask(task: ProjectTask, launch?: { signal: AbortSignal; modelRef?: string; prefix?: string; started: (result: TaskRunResult) => void }): Promise<void> {
     launch?.signal.throwIfAborted();
     // A caller may still hold the pre-launch row after its session was saved.
     task = options.taskDocument().tasks.find((candidate) => candidate.id === task.id) ?? task;
@@ -178,6 +178,7 @@ export function createProjectActions(options: ProjectActionsOptions) {
       if (!current()) return;
       const taskPrompt = {
         ...basePrompt,
+        text: `${launch?.prefix ?? ""}${basePrompt.text}`,
         attachments: [
           ...basePrompt.attachments,
           ...taskFiles.map((file, index) => attachmentFromFile(file, `task:${task.id}:sqlite:${index}`)),
@@ -262,10 +263,10 @@ export function createProjectActions(options: ProjectActionsOptions) {
   }
 
   /** Resolve on prompt dispatch, never on the child agent's eventual completion. */
-  function runTaskFromAgent(task: ProjectTask, signal: AbortSignal, modelRef?: string): Promise<TaskRunResult> {
+  function runTaskFromAgent(task: ProjectTask, signal: AbortSignal, modelRef?: string, prefix?: string): Promise<TaskRunResult> {
     return new Promise((resolve, reject) => {
       let started = false;
-      void runTask(task, { signal, modelRef, started: (result) => { started = true; resolve(result); } }).then(() => {
+      void runTask(task, { signal, modelRef, ...(prefix ? { prefix } : {}), started: (result) => { started = true; resolve(result); } }).then(() => {
         if (!started) reject(new Error("Task launch did not start; inspect the task sessionId and Desktop diagnostics before retrying"));
       }, reject);
     });
@@ -343,6 +344,7 @@ export function createProjectActions(options: ProjectActionsOptions) {
   return {
     get actionId() { return actionId ?? plans.actionId; },
     runPlan: plans.runPlan,
+    startFromAgent: plans.startFromAgent,
     resumePlan: plans.resumePlan,
     createTaskFromComposer,
     runTask,

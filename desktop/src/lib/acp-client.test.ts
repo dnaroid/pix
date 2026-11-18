@@ -7,6 +7,7 @@ import { createSessionActivityStore } from "../app/session-activity.svelte";
 import { TODO_STATE_CHANNEL } from "./session-todos";
 import { parseQueueState } from "./acp-response-parsers";
 import { TASK_RUN_METHOD, TASK_RUN_CANCEL_METHOD } from "../../../acp/src/acp/task-run-contract";
+import { PIX_SUPERVISOR_START_METHOD } from "../../../acp/src/acp/supervisor-contract";
 
 class FakeTransport implements AcpTransport {
   handlers?: AcpTransportHandlers;
@@ -106,6 +107,30 @@ describe("ACP JSON-RPC client", () => {
     await vi.waitFor(() => expect(transport.sent).toHaveLength(3));
     expect(requestAt(transport, 2)).toHaveProperty("error");
     expect(onTaskRun).toHaveBeenCalledOnce();
+    await client.dispose();
+  });
+
+  it("routes validated supervisor starts and cancels them through the shared task-run cancel", async () => {
+    const transport = new FakeTransport();
+    let signal!: AbortSignal;
+    let finish!: () => void;
+    const onSupervisorStart = vi.fn(async (_request: unknown, abort: AbortSignal) => {
+      signal = abort;
+      await new Promise<void>((resolve) => { finish = resolve; });
+      return { sessionId: "worker" };
+    });
+    const client = await startedClient(transport, { onSupervisorStart });
+    const request = { requestId: "s1", cwd: "/workspace", sourceSessionId: "sup", item: { kind: "prompt", text: "fix it" } };
+    transport.message({ jsonrpc: "2.0", id: 100, method: PIX_SUPERVISOR_START_METHOD, params: { ...request, item: { kind: "plan", path: "/etc/passwd" } } });
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toHaveProperty("error");
+    transport.message({ jsonrpc: "2.0", id: 101, method: PIX_SUPERVISOR_START_METHOD, params: request });
+    await vi.waitFor(() => expect(onSupervisorStart).toHaveBeenCalledWith(request, expect.any(AbortSignal)));
+    transport.message({ jsonrpc: "2.0", method: TASK_RUN_CANCEL_METHOD, params: { requestId: "s1" } });
+    expect(signal.aborted).toBe(true);
+    finish();
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(3));
+    expect(requestAt(transport, 2)).toMatchObject({ id: 101, result: { sessionId: "worker" } });
     await client.dispose();
   });
 

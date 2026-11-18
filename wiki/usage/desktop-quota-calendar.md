@@ -39,19 +39,6 @@ tone (`text-tool-warning`, `data-weekend`); a current weekend day stays
 full-contrast. Boundaries use absolute window time, so local dates may
 shift across DST; neither extra days nor future resets are predicted. Any window length is split by its actual calendar days, not invented daily measurements. Expiries of available reset credits that fall within the window are drawn as thin red ticks (`data-reset-credit-deadline`, `text-tool-error` tone) on the same time axis as the pin; expiries outside the window are not shown.
 
-An optional second marker with a compact `+Nh` label shows the configured sleep
-endpoint on the weekly timeline (for example, `+6h` or `+8.5h`). **Sleep duration (hours)** in Desktop → General defaults
-to 6 hours and accepts values from 0.5 through 24; it has a reset-to-default
-affordance and is searchable in Settings. The global Desktop preference reloads
-after saved config changes and on window focus. A failed read retains the last
-known value and emits a diagnostic warning. Its compact label is visible without
-a tooltip; its accessible group label includes the duration and local endpoint.
-It uses the existing supplied `now` tick and does not affect quota fill, predict
-usage, request quota data, or predict another reset. It is omitted when timing
-is unknown, now is before the reported window start or at/after reset, or the
-sleep endpoint exceeds the reported reset; an endpoint exactly at reset is
-allowed.
-
 A thin primary-colored pin with triangular head marks elapsed time:
 `clamp((now - (resetAt - windowSeconds * 1000)) / (windowSeconds * 1000) * 100, 0, 100)`.
 It moves right independently of quota consumption and stays visible at either

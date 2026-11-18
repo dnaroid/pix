@@ -60,7 +60,10 @@
   disabled until the ACP client is initialized and startup restoration of the
   workspace's active session has finished (restoration may replace the active
   session, so an earlier click would be lost). The launch action repeats the
-  same guard. Browsing and deletion remain available offline.
+  same guard. Browsing and deletion remain available offline. The supervisor's
+  `start` op for a plan uses the same launch path, with the worker preamble and
+  an optional `modelRef`; it resolves on prompt dispatch (see
+  [project supervisor](../project-supervisor.md)).
 - A successful plan launch records `sessionId → plan path` (and the latest
   prompt outcome) in the ACP-owned project file `.pi/plan-launches.json`
   through `pix/plans/launches` (actions `list`, `record`, `settle`,

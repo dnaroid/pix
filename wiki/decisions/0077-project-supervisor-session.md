@@ -1,6 +1,6 @@
 # 0077 — Project supervisor session on autopilot
 
-- Status: accepted (design direction; phase 0 and partial phase 1 implemented: supervisor session with read-only status/read tool; autopilot not implemented)
+- Status: accepted (design direction; phases 0–1 and partial phase 2 implemented: mandate UI, send/cancel/close/reopen/escalate with guards, startup reconciliation, user takeover; start not implemented)
 - Recorded: 2026-11-17
 - Decided: 2026-11-17
 - Owner / approval evidence: user request in Pi session

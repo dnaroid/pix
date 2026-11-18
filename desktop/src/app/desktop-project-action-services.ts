@@ -14,6 +14,7 @@ import { AUTO_MODEL_REF, modelThinkingConfigState } from "../lib/model-thinking"
 import { visibleModelRefsFromPixConfig } from "../lib/model-visibility";
 import type { SettingsConfigDocument } from "../lib/settings";
 import { parseDesktopModelRef } from "./desktop-helpers";
+import { SUPERVISOR_WORKER_PREAMBLE, type SupervisorStartRequest, type SupervisorStartResponse } from "../../../acp/src/acp/supervisor-contract";
 
 type DesktopProjectActionServicesOptions = {
   client: () => AcpClient | null;
@@ -155,7 +156,35 @@ export function createDesktopProjectActionServices(options: DesktopProjectAction
     return actions.runTaskFromAgent(task, signal);
   }
 
-  return { actions, runTaskFromAgent };
+  /**
+   * Supervisor `start`: run a saved task, plan or prompt in a new session with
+   * the worker rules prepended. Resolves on dispatch; ACP registers the session.
+   */
+  async function startFromSupervisor(request: SupervisorStartRequest, signal: AbortSignal): Promise<SupervisorStartResponse> {
+    const client = options.client();
+    const current = () => client && client === options.client() && options.workspace() === request.cwd && !signal.aborted;
+    if (!current() || options.workspaceOpening?.() || !options.canUseSession() || actions.actionId) {
+      throw new Error("Desktop is busy or showing another project; retry later");
+    }
+    const prefix = `${SUPERVISOR_WORKER_PREAMBLE}\n\n`;
+    const { item, modelRef } = request;
+    if (item.kind !== "task") {
+      const sessionId = await actions.startFromAgent(item.kind === "plan" ? { kind: "plan", path: item.path } : { kind: "prompt", text: item.text },
+        signal, prefix, modelRef);
+      return { sessionId };
+    }
+    if (options.project.tasks.saving || options.project.tasks.loading) throw new Error("Project tasks are being saved; retry later");
+    await options.project.tasks.load(request.cwd);
+    if (!current() || options.project.tasks.loadFailed) throw new Error("Task launch workspace changed or tasks could not be loaded");
+    const task = options.project.tasks.document.tasks.find((candidate) => candidate.id === item.taskId);
+    if (!task) throw new Error(`Unknown project task id: ${item.taskId}`);
+    // A linked task would only reopen its old session, which the supervisor never briefed.
+    if (task.sessionId) throw new Error(`Task ${task.id} already has session ${task.sessionId}; reopen it or ask the user to hand it over`);
+    const result = await actions.runTaskFromAgent(task, signal, modelRef, prefix);
+    return { sessionId: result.sessionId };
+  }
+
+  return { actions, runTaskFromAgent, startFromSupervisor };
 }
 
 export type DesktopProjectActionServices = ReturnType<typeof createDesktopProjectActionServices>;

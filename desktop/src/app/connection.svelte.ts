@@ -12,11 +12,13 @@ import { TauriAcpTransport } from "../lib/tauri-transport";
 import { emitUsageStatsChanged } from "../lib/usage-stats-events";
 import type { DesktopDiagnosticEvent } from "../lib/diagnostic-logging";
 import type { TaskRunRequest, TaskRunResponse } from "../../../acp/src/acp/task-run-contract";
+import type { SupervisorStartRequest, SupervisorStartResponse } from "../../../acp/src/acp/supervisor-contract";
 
 export type ConnectionStatus = "starting" | "ready" | "error" | "stopped";
 
 type ConnectionStoreOptions = {
   onTaskRun?: (request: TaskRunRequest, signal: AbortSignal) => Promise<TaskRunResponse>;
+  onSupervisorStart?: (request: SupervisorStartRequest, signal: AbortSignal) => Promise<SupervisorStartResponse>;
   workspace: () => string;
   onSessionUpdate: (notification: SessionNotification) => void;
   onSessionCatalogChanged?: (cwd: string) => void;
@@ -96,6 +98,10 @@ export function createConnectionStore(options: ConnectionStoreOptions) {
       onTaskRun: async (request, signal) => {
         if (client !== next || !options.onTaskRun) throw new Error("Task launch connection is unavailable");
         return options.onTaskRun(request, signal);
+      },
+      onSupervisorStart: async (request, signal) => {
+        if (client !== next || !options.onSupervisorStart) throw new Error("Supervisor launch connection is unavailable");
+        return options.onSupervisorStart(request, signal);
       },
       onSessionUpdate: (notification) => {
         if (client === next) options.onSessionUpdate(notification);

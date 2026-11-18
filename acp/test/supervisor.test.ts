@@ -3,7 +3,13 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { parseSupervisorOpenRequest, parseSupervisorToolRequest, SUPERVISOR_RESPONSE_PREFIX } from "../src/acp/supervisor-contract.js";
+import {
+	parseSupervisorOpenRequest,
+	parseSupervisorStartRequest,
+	parseSupervisorStartResponse,
+	parseSupervisorToolRequest,
+	SUPERVISOR_RESPONSE_PREFIX,
+} from "../src/acp/supervisor-contract.js";
 import { forwardSupervisorRequest } from "../src/acp/supervisor-bridge.js";
 import {
 	createSupervisorService,
@@ -36,6 +42,24 @@ test("supervisor contract accepts only status and read with a session id", () =>
 		assert.throws(() => parseSupervisorToolRequest(bad));
 	}
 	assert.throws(() => parseSupervisorOpenRequest({ cwd: "" }));
+});
+
+test("supervisor start takes exactly one item and a safe plan path", () => {
+	assert.deepEqual(parseSupervisorToolRequest({ op: "start", taskId: " t1 " }), { op: "start", item: { kind: "task", taskId: "t1" } });
+	assert.deepEqual(parseSupervisorToolRequest({ op: "start", planPath: ".pi/plans/a/b.md", modelRef: "p/m:high" }),
+		{ op: "start", item: { kind: "plan", path: ".pi/plans/a/b.md" }, modelRef: "p/m:high" });
+	assert.deepEqual(parseSupervisorToolRequest({ op: "start", text: "do it" }), { op: "start", item: { kind: "prompt", text: "do it" } });
+	for (const bad of [
+		{ op: "start", taskId: "t", text: "x" }, { op: "start", planPath: "README.md" }, { op: "start", planPath: ".pi/plans/../x.md" },
+		{ op: "start", planPath: ".pi/plans/x.txt" }, { op: "start", text: "" }, { op: "start", text: "x", modelRef: "nomodel" },
+	]) assert.throws(() => parseSupervisorToolRequest(bad), undefined, JSON.stringify(bad));
+	const request = { requestId: "r", cwd: "/p", sourceSessionId: "sup", item: { kind: "plan", path: ".pi/plans/p.md" }, modelRef: "p/m" };
+	assert.deepEqual(parseSupervisorStartRequest(request), request);
+	assert.throws(() => parseSupervisorStartRequest({ ...request, item: { kind: "plan", path: "/etc/passwd" } }));
+	assert.throws(() => parseSupervisorStartRequest({ ...request, item: { kind: "shell", text: "x" } }));
+	assert.throws(() => parseSupervisorStartRequest({ ...request, requestId: "" }));
+	assert.deepEqual(parseSupervisorStartResponse({ sessionId: "s" }), { sessionId: "s" });
+	assert.throws(() => parseSupervisorStartResponse(null), /check status/);
 });
 
 test("supervisor service answers only the registered supervisor and reports sessions read-only", async (t) => {
@@ -203,7 +227,7 @@ test("ACP forwards supervisor requests and never answers a replaced runtime", as
 	await forwardSupervisorRequest(session, { requestId: "r1", request: { op: "status" } },
 		async (cwd, caller, request) => ({ cwd, caller, request }), () => true, logger);
 	assert.deepEqual(replies, [["r1", { result: { cwd: "/p", caller: "sup", request: { op: "status" } } }]]);
-	await forwardSupervisorRequest(session, { requestId: "r2", request: { op: "start" } }, async () => 1, () => true, logger);
+	await forwardSupervisorRequest(session, { requestId: "r2", request: { op: "spawn" } }, async () => 1, () => true, logger);
 	assert.match((replies[1] as any)[1].error, /Unknown supervisor op/);
 	let current = true;
 	await forwardSupervisorRequest(session, { requestId: "r3", request: { op: "status" } },

@@ -2,6 +2,7 @@ import { isCanonicalProjectPlanPath } from "../lib/project-documents";
 import type { PlanLaunchOutcome } from "../lib/plan-launches";
 import type { ProjectActionsOptions } from "./project-actions.svelte";
 import { buildProjectPlanPrompt, buildProjectPlanResumePrompt } from "./project-plan-prompt";
+import { parseDesktopModelRef } from "./desktop-helpers";
 
 type PlanActionsOptions = Pick<ProjectActionsOptions,
   | "client" | "workspace" | "canUseSession" | "sessionMutationRunning" | "workspaceOpening" | "planAvailable"
@@ -14,19 +15,37 @@ type PlanActionsOptions = Pick<ProjectActionsOptions,
 /** `resume` continues a plan whose earlier run stopped before finishing. */
 export type PlanRunMode = "run" | "resume";
 
+/** A plan or free prompt launched in a new session on an agent's request. */
+export type AgentSessionItem = { kind: "plan"; path: string } | { kind: "prompt"; text: string };
+
+type AgentLaunch = {
+  signal: AbortSignal;
+  modelRef?: string;
+  /** Prepended to the launch prompt (the supervisor's worker rules). */
+  prefix: string;
+  started: (sessionId: string) => void;
+};
+
+type LaunchItem = { kind: "plan"; path: string; mode: PlanRunMode } | { kind: "prompt"; text: string };
+
 export function createProjectPlanActions(options: PlanActionsOptions, busy: () => boolean) {
   let actionId = $state<string | null>(null);
   let owner = 0;
 
-  async function runPlan(path: string, mode: PlanRunMode = "run"): Promise<void> {
+  async function launch(item: LaunchItem, agent?: AgentLaunch): Promise<void> {
+    agent?.signal.throwIfAborted();
     const client = options.client();
     const workspace = options.workspace();
-    if (!client || !workspace || !isCanonicalProjectPlanPath(path) || busy() || actionId
+    const path = item.kind === "plan" ? item.path : null;
+    if (!client || !workspace || busy() || actionId
       || options.workspaceOpening?.() || !options.canUseSession() || options.sessionMutationRunning()
-      || options.planAvailable?.(path) === false) return;
+      || (path !== null && (!isCanonicalProjectPlanPath(path) || options.planAvailable?.(path) === false))) return;
     const request = ++owner;
-    const current = () => request === owner && options.client() === client && options.workspace() === workspace;
-    actionId = `plan:${path}`;
+    // An agent launch stays cancellable until its prompt is dispatched.
+    let dispatched = false;
+    const current = () => request === owner && options.client() === client && options.workspace() === workspace
+      && (dispatched || !agent?.signal.aborted);
+    actionId = path !== null ? `plan:${path}` : "prompt";
     options.closeProjectSelector();
     options.closeSessionSelector();
     options.setOperationRunning(true);
@@ -36,15 +55,24 @@ export function createProjectPlanActions(options: PlanActionsOptions, busy: () =
     let launched: string | null = null;
     let unsent: PlanLaunchOutcome = "cancelled";
     try {
-      const created = await client.newSession(workspace);
+      const chosenModel = agent?.modelRef ? parseDesktopModelRef(agent.modelRef) : undefined;
+      if (agent?.modelRef && !chosenModel) throw new Error("Launch model must use provider/model[:thinking] format.");
+      const created = chosenModel
+        ? await client.newSession(workspace, {
+            modelRef: chosenModel.modelRef,
+            ...(chosenModel.thinking ? { thinkingLevel: chosenModel.thinking } : {}),
+          })
+        : await client.newSession(workspace);
       if (!current()) {
         options.forgetRuntime(created.sessionId);
         void client.closeSession(created.sessionId).catch(options.reportError);
         return;
       }
       options.activateSession(created.sessionId, workspace, false);
-      options.recordPlanLaunch?.(workspace, created.sessionId, path);
-      launched = created.sessionId;
+      if (path !== null) {
+        options.recordPlanLaunch?.(workspace, created.sessionId, path);
+        launched = created.sessionId;
+      }
       const active = () => current() && options.activeSessionId() === created.sessionId;
       await options.ensureRuntime(client, created.sessionId, workspace);
       if (!active()) return;
@@ -54,23 +82,32 @@ export function createProjectPlanActions(options: PlanActionsOptions, busy: () =
       }
       // The plan may be deleted while the session starts; never send a prompt
       // that points at a file that no longer exists.
-      if (options.planAvailable?.(path) === false) {
+      if (path !== null && options.planAvailable?.(path) === false) {
         unsent = "failed";
         options.setErrorMessage(`Plan ${path} was removed before the run started.`);
         return;
       }
-      const text = mode === "resume" ? buildProjectPlanResumePrompt(path) : buildProjectPlanPrompt(path);
+      const base = item.kind === "prompt" ? item.text
+        : item.mode === "resume" ? buildProjectPlanResumePrompt(item.path) : buildProjectPlanPrompt(item.path);
+      const text = `${agent?.prefix ?? ""}${base}`;
       const messageId = options.appendUserMessage(created.sessionId, text, []);
       await options.scrollToLatest();
       if (!active()) return;
       options.setOperationRunning(false);
       // From here the prompt lifecycle (settled/error hooks) owns the outcome.
       launched = null;
-      await options.runPrompt(client, created.sessionId, [{ type: "text", text }], [], messageId);
+      dispatched = true;
+      // Like agent task runs, only preparation is exclusive: the next supervisor
+      // start must not wait for this session's whole turn.
+      if (agent) actionId = null;
+      const promptRun = options.runPrompt(client, created.sessionId, [{ type: "text", text }], [], messageId);
+      agent?.started(created.sessionId);
+      await promptRun;
       if (current()) void options.refreshSessions();
     } catch (error) {
       unsent = "failed";
       if (current()) options.reportError(error);
+      if (agent && !dispatched) throw error;
     } finally {
       if (launched) options.settlePlanLaunch?.(launched, unsent, workspace);
       if (request === owner) {
@@ -80,9 +117,26 @@ export function createProjectPlanActions(options: PlanActionsOptions, busy: () =
     }
   }
 
+  function runPlan(path: string, mode: PlanRunMode = "run"): Promise<void> {
+    return launch({ kind: "plan", path, mode });
+  }
+
+  /** Resolve on prompt dispatch, never on the new session's eventual completion. */
+  function startFromAgent(item: AgentSessionItem, signal: AbortSignal, prefix: string, modelRef?: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      let started = false;
+      const target: LaunchItem = item.kind === "plan" ? { ...item, mode: "run" } : item;
+      void launch(target, { signal, prefix, ...(modelRef ? { modelRef } : {}), started: (sessionId) => { started = true; resolve(sessionId); } })
+        .then(() => {
+          if (!started) reject(new Error("Desktop did not start the session (workspace busy, plan missing or launch interrupted)"));
+        }, reject);
+    });
+  }
+
   return {
     get actionId() { return actionId; },
     runPlan,
+    startFromAgent,
     resumePlan: (path: string) => runPlan(path, "resume"),
     reset() { owner += 1; actionId = null; },
   };

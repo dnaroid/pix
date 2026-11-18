@@ -85,6 +85,7 @@ import type {
 	AutocompleteResponse,
 } from "../src/acp/autocomplete.js";
 import { SessionMapStore } from "../src/acp/session-map.js";
+import { parseSupervisorMandateResponse, SUPERVISOR_WORKER_PREAMBLE } from "../src/acp/supervisor-contract.js";
 import { PIX_SESSION_CATALOG_CHANGED_METHOD } from "../src/acp/session-catalog-contract.js";
 import type { PersistedDesktopQueues } from "../src/acp/queue-store.js";
 import type { DesktopForkSnapshot, DesktopForkChild } from "../src/acp/desktop-fork-snapshot.js";
@@ -6301,7 +6302,7 @@ test("project supervisor: one Desktop-only session per project gets the supervis
 			};
 			assert.deepEqual(await cx.request("pix/supervisor/handover", { cwd, sessionId: worker.sessionId, supervised: true }), { supervised: true });
 			await cx.request("pix/supervisor/handover", { cwd, sessionId: worker.sessionId, supervised: true });
-			assert.equal(await managedMode(), "manual");
+			assert.equal(await managedMode(), "managed");
 			await assert.rejects(cx.request("pix/supervisor/handover", { cwd, sessionId: first.sessionId, supervised: true }), /cannot supervise itself/);
 			assert.deepEqual(await cx.request("pix/supervisor/handover", { cwd, sessionId: worker.sessionId, supervised: false }), { supervised: false });
 			assert.equal(await managedMode(), undefined);
@@ -6381,6 +6382,195 @@ test("project supervisor: worker events wake the supervisor with one coalesced q
 			assert.equal(queue().length, 1, "a still-queued digest is rewritten, not multiplied");
 			assert.equal(queue()[0]!.id, firstId);
 			assert.equal(harness.clients[0]!.promptCalls.length, 0, "ACP queues the wake; Desktop runs it");
+		});
+	} finally {
+		await harness.adapter.dispose();
+	}
+});
+
+test("project supervisor: Desktop mandate gates sends, and a user message takes the session back", async (t) => {
+	const agentDir = mkdtempSync(join(tmpdir(), "pix-acp-supervisor-mandate-agent-"));
+	const cwd = mkdtempSync(join(tmpdir(), "pix-acp-supervisor-mandate-"));
+	t.after(() => Promise.all([rm(agentDir, { recursive: true, force: true }), rm(cwd, { recursive: true, force: true })]).then(() => undefined));
+	const harness = createTestAdapter({
+		agentDir,
+		supervisorExtensionPath: "/opt/pix/supervisor.js",
+		supervisorWakeDebounceMs: 5,
+		loadDesktopQueues: async () => ({ auto: [], deferred: [] }),
+		saveDesktopQueues: async () => {},
+	});
+	try {
+		await connectAs(harness.adapter, "pix-desktop", async (cx) => {
+			await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientCapabilities: {}, clientInfo: { name: "pix-desktop", version: "test" } });
+			await cx.request("pix/supervisor/open", { cwd });
+			const worker = await cx.request("session/new", { cwd, mcpServers: [] }) as { sessionId: string };
+			await cx.request("pix/supervisor/handover", { cwd, sessionId: worker.sessionId, supervised: true });
+
+			const replies: Array<{ result?: any; error?: string }> = [];
+			for (const pi of harness.clients) {
+				(pi as unknown as { respondToSupervisor: unknown }).respondToSupervisor = async (_requestId: string, response: { result?: unknown; error?: string }) => {
+					replies.push(response);
+				};
+			}
+			let requests = 0;
+			const ask = async (request: Record<string, unknown>) => {
+				const index = replies.length;
+				harness.clients[0]!.emit({ type: "pix_supervisor_request", requestId: `r${++requests}`, request } as unknown as PiEvent);
+				await waitFor(() => replies.length > index);
+				return replies[index]!;
+			};
+			const send = { op: "send", sessionId: worker.sessionId, text: "please add tests", kind: "rework" };
+
+			const initial = await cx.request("pix/supervisor/mandate", { cwd }) as Record<string, unknown>;
+			assert.equal(initial["enabled"], false);
+			assert.equal(initial["managed"], 1);
+			assert.match((await ask(send)).error ?? "", /not enabled/);
+
+			await assert.rejects(cx.request("pix/supervisor/mandate", { cwd, patch: { maxConcurrent: "3" } }), /Invalid supervisor mandate maxConcurrent/);
+			const enabled = await cx.request("pix/supervisor/mandate", { cwd, patch: { enabled: true, maxConcurrent: 99 } }) as Record<string, unknown>;
+			assert.equal(enabled["enabled"], true);
+			assert.equal(enabled["maxConcurrent"], 20, "ACP clamps limits");
+			await cx.request("pix/supervisor/mandate", { cwd, patch: { paused: true } });
+			assert.match((await ask(send)).error ?? "", /paused/);
+			assert.equal((await ask({ op: "escalate", sessionId: worker.sessionId, text: "need a call" })).result?.escalated, true);
+			await cx.request("pix/supervisor/mandate", { cwd, patch: { paused: false } });
+
+			const sent = await ask(send);
+			assert.equal(sent.result?.disposition, "queued");
+			const workerSession = harness.adapter.getSession(worker.sessionId)!;
+			assert.deepEqual(workerSession.autoUserMessages.map((item) => item.promptText), [`${SUPERVISOR_WORKER_PREAMBLE}\n\n[Supervisor rework] please add tests`]);
+			assert.equal((await cx.request("pix/supervisor/mandate", { cwd }) as Record<string, unknown>)["reworkRounds"], 1);
+
+			// The user types into the managed session: it turns manual before dispatch.
+			const pi = harness.clients[1]!;
+			const pending = cx.request("session/prompt", { sessionId: worker.sessionId, prompt: [{ type: "text", text: "I'll take it from here" }] });
+			await waitFor(() => pi.promptCalls.length === 1);
+			pi.emit({ type: "agent_start" });
+			pi.emit({ type: "agent_end", messages: [{ role: "assistant", content: [], stopReason: "stop" }], willRetry: false } as unknown as JsonAgentSessionEvent);
+			pi.emit({ type: "agent_settled" });
+			await pending;
+			const registry = JSON.parse(await readFile(join(cwd, ".pi/supervisor/registry.json"), "utf8")) as { sessions: Record<string, { mode: string }> };
+			assert.equal(registry.sessions[worker.sessionId]?.mode, "manual");
+			assert.deepEqual(workerSession.autoUserMessages, [], "pending supervisor deliveries are dropped");
+			assert.match((await ask(send)).error ?? "", /taken over by the user/);
+			const counts = await cx.request("pix/supervisor/mandate", { cwd }) as Record<string, unknown>;
+			assert.deepEqual([counts["managed"], counts["manual"]], [0, 1]);
+			const ledger = await readFile(join(cwd, ".pi/supervisor/ledger.jsonl"), "utf8");
+			for (const kind of ["mandate_changed", "escalated", "sent", "manual_takeover"]) assert.match(ledger, new RegExp(`"kind":"${kind}"`));
+			assert.equal(harness.clients[0]!.promptCalls.length, 0);
+		});
+	} finally {
+		await harness.adapter.dispose();
+	}
+
+	const other = createTestAdapter({ agentDir, supervisorExtensionPath: "/opt/pix/supervisor.js" });
+	try {
+		await connectAs(other.adapter, "zed", async (cx) => {
+			await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientCapabilities: {}, clientInfo: { name: "zed", version: "test" } });
+			await assert.rejects(cx.request("pix/supervisor/mandate", { cwd, patch: { enabled: true } }), /requires Pix Desktop/);
+		});
+	} finally {
+		await other.adapter.dispose();
+	}
+});
+
+test("project supervisor: mandate saves, reads and clears the default worker model", async (t) => {
+	const agentDir = mkdtempSync(join(tmpdir(), "pix-acp-worker-model-agent-"));
+	const cwd = mkdtempSync(join(tmpdir(), "pix-acp-worker-model-"));
+	t.after(() => Promise.all([rm(agentDir, { recursive: true, force: true }), rm(cwd, { recursive: true, force: true })]).then(() => undefined));
+	const { adapter } = createTestAdapter({ agentDir });
+	try {
+		await connectAs(adapter, "pix-desktop", async (cx) => {
+			await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientCapabilities: {}, clientInfo: { name: "pix-desktop", version: "test" } });
+			const method = "pix/supervisor/mandate";
+			const readSaved = async () => JSON.parse(await readFile(join(cwd, ".pi/supervisor/mandate.json"), "utf8"));
+			assert.equal(Object.hasOwn(parseSupervisorMandateResponse(await cx.request(method, { cwd })), "workerModelRef"), false);
+
+			const workerModelRef = "provider/model:high";
+			const saved = await cx.request(method, { cwd, patch: { workerModelRef: ` ${workerModelRef} ` } });
+			assert.equal(parseSupervisorMandateResponse(saved).workerModelRef, workerModelRef);
+			assert.equal((await readSaved()).workerModelRef, workerModelRef);
+			await cx.request(method, { cwd, patch: { maxConcurrent: 3 } });
+			for (const invalid of [42, "", "model", "provider/", `p/${"x".repeat(511)}`]) {
+				await assert.rejects(cx.request(method, { cwd, patch: { workerModelRef: invalid } }), /Invalid supervisor mandate workerModelRef/);
+			}
+			assert.equal(parseSupervisorMandateResponse(await cx.request(method, { cwd })).workerModelRef, workerModelRef);
+
+			const cleared = await cx.request(method, { cwd, patch: { workerModelRef: null } });
+			assert.equal(Object.hasOwn(parseSupervisorMandateResponse(cleared), "workerModelRef"), false);
+			assert.equal(Object.hasOwn(await readSaved(), "workerModelRef"), false);
+			const reread = parseSupervisorMandateResponse(await cx.request(method, { cwd }));
+			assert.equal(Object.hasOwn(reread, "workerModelRef"), false);
+			assert.equal(reread.maxConcurrent, 3);
+		});
+	} finally {
+		await adapter.dispose();
+	}
+});
+
+test("project supervisor: start asks Desktop to launch, registers the session managed and rejects a foreign receipt", async (t) => {
+	const agentDir = mkdtempSync(join(tmpdir(), "pix-acp-supervisor-start-agent-"));
+	const cwd = mkdtempSync(join(tmpdir(), "pix-acp-supervisor-start-"));
+	t.after(() => Promise.all([rm(agentDir, { recursive: true, force: true }), rm(cwd, { recursive: true, force: true })]).then(() => undefined));
+	const harness = createTestAdapter({
+		agentDir,
+		supervisorExtensionPath: "/opt/pix/supervisor.js",
+		supervisorWakeDebounceMs: 5,
+		loadDesktopQueues: async () => ({ auto: [], deferred: [] }),
+		saveDesktopQueues: async () => {},
+	});
+	const launches: Array<Record<string, unknown>> = [];
+	let launched = "";
+	try {
+		await connectAs(harness.adapter, "pix-desktop", async (cx) => {
+			await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientCapabilities: {}, clientInfo: { name: "pix-desktop", version: "test" } });
+			await cx.request("pix/supervisor/open", { cwd });
+			const worker = await cx.request("session/new", { cwd, mcpServers: [] }) as { sessionId: string };
+			await cx.request("pix/supervisor/mandate", { cwd, patch: { enabled: true } });
+
+			const replies: Array<{ result?: any; error?: string }> = [];
+			for (const pi of harness.clients) {
+				(pi as unknown as { respondToSupervisor: unknown }).respondToSupervisor = async (_requestId: string, response: { result?: unknown; error?: string }) => {
+					replies.push(response);
+				};
+			}
+			let requests = 0;
+			const ask = async (request: Record<string, unknown>) => {
+				const index = replies.length;
+				harness.clients[0]!.emit({ type: "pix_supervisor_request", requestId: `r${++requests}`, request } as unknown as PiEvent);
+				await waitFor(() => replies.length > index);
+				return replies[index]!;
+			};
+
+			launched = "foreign-session";
+			assert.match((await ask({ op: "start", text: "fix the flaky test" })).error ?? "", /not a work session of this project/);
+			launched = worker.sessionId;
+			const started = await ask({ op: "start", planPath: ".pi/plans/p.md" });
+			assert.equal(started.result?.sessionId, worker.sessionId);
+			assert.deepEqual(launches.at(-1)?.["item"], { kind: "plan", path: ".pi/plans/p.md" });
+			assert.equal(launches.at(-1)?.["modelRef"], undefined, "no mandate default and no explicit model");
+			assert.equal(launches.at(-1)?.["sourceSessionId"], launches[0]?.["sourceSessionId"]);
+			assert.equal(launches.at(-1)?.["cwd"], cwd);
+			const registry = JSON.parse(await readFile(join(cwd, ".pi/supervisor/registry.json"), "utf8")) as { sessions: Record<string, { mode: string; briefed?: boolean }> };
+			assert.deepEqual([registry.sessions[worker.sessionId]?.mode, registry.sessions[worker.sessionId]?.briefed], ["managed", true]);
+			assert.match((await ask({ op: "start", planPath: ".pi/plans/p.md" })).error ?? "", /Already registered/);
+
+			// The launch prompt carries the worker rules, so it is not a user takeover.
+			const pi = harness.clients[1]!;
+			const pending = cx.request("session/prompt", { sessionId: worker.sessionId, prompt: [{ type: "text", text: `${SUPERVISOR_WORKER_PREAMBLE}\n\nRun the plan` }] });
+			await waitFor(() => pi.promptCalls.length === 1);
+			pi.emit({ type: "agent_start" });
+			pi.emit({ type: "agent_end", messages: [{ role: "assistant", content: [], stopReason: "stop" }], willRetry: false } as unknown as JsonAgentSessionEvent);
+			pi.emit({ type: "agent_settled" });
+			await pending;
+			const after = JSON.parse(await readFile(join(cwd, ".pi/supervisor/registry.json"), "utf8")) as { sessions: Record<string, { mode: string }> };
+			assert.equal(after.sessions[worker.sessionId]?.mode, "managed");
+			assert.match(await readFile(join(cwd, ".pi/supervisor/ledger.jsonl"), "utf8"), /"kind":"started"/);
+		}, (app) => {
+			app.onRequest("pix/supervisor/start" as never, ((params: unknown) => params) as never, ((ctx: { params: Record<string, unknown> }) => {
+				launches.push(ctx.params);
+				return { sessionId: launched };
+			}) as never);
 		});
 	} finally {
 		await harness.adapter.dispose();

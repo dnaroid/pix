@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { StopReason } from "@agentclientprotocol/sdk";
+import { SUPERVISOR_MANDATE_LIMITS } from "./supervisor-contract.js";
 
 /**
  * Deterministic per-session lifecycle events for the project supervisor
@@ -17,9 +18,9 @@ import type { StopReason } from "@agentclientprotocol/sdk";
  * - `checklist`: the saved checklist of the plan that launched the session,
  *   on first observation and whenever its counts change.
  */
-export const DEFAULT_STALLED_AFTER_MINUTES = 15;
-export const MIN_STALLED_AFTER_MINUTES = 5;
-export const MAX_STALLED_AFTER_MINUTES = 60;
+export const DEFAULT_STALLED_AFTER_MINUTES: number = SUPERVISOR_MANDATE_LIMITS.stalledAfterMinutes.default;
+export const MIN_STALLED_AFTER_MINUTES: number = SUPERVISOR_MANDATE_LIMITS.stalledAfterMinutes.min;
+export const MAX_STALLED_AFTER_MINUTES: number = SUPERVISOR_MANDATE_LIMITS.stalledAfterMinutes.max;
 export const MAX_TOUCHED_FILES = 500;
 /** Sessions whose touched files outlive runtime replacement (oldest dropped). */
 export const MAX_TRACKED_SESSIONS = 256;
@@ -44,6 +45,12 @@ export type SessionEvent = SessionEventBase & (
 	| { readonly type: "error"; readonly source: SessionErrorSource; readonly message: string }
 	| { readonly type: "stalled"; readonly idleMs: number }
 	| { readonly type: "checklist"; readonly path: string; readonly progress: PlanProgress | null }
+	/** Emitted by ACP (not the monitor) when the user takes a managed session over. */
+	| { readonly type: "manual_takeover" }
+	/** Emitted by ACP startup reconciliation: the saved last turn never finished. */
+	| { readonly type: "interrupted" }
+	/** Emitted by ACP startup reconciliation: a registered session no longer exists. */
+	| { readonly type: "missing" }
 );
 export type SessionEventListener = (event: SessionEvent) => void;
 

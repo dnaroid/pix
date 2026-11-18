@@ -5,10 +5,11 @@ import modelSource from "./ModelThinkingPicker.svelte?raw";
 import settingsSource from "./ProjectSettingsDialog.svelte?raw";
 import searchSource from "./UniversalSearch.svelte?raw";
 import renameSource from "./SessionRenameDialog.svelte?raw";
+import mandateSource from "./SupervisorMandateDialog.svelte?raw";
 
 describe("desktop modal dialog lifecycle", () => {
   it("uses native modal dialogs with shared focus lifecycle", () => {
-    for (const source of [commandSource, elicitationSource, settingsSource, searchSource, renameSource]) {
+    for (const source of [commandSource, elicitationSource, settingsSource, searchSource, renameSource, mandateSource]) {
       expect(source).toContain("<dialog");
       expect(source).toContain("activateModalDialog");
     }
@@ -21,6 +22,8 @@ describe("desktop modal dialog lifecycle", () => {
     expect(settingsSource).toContain('type="submit"');
     expect(renameSource).toContain("<form");
     expect(renameSource).toContain('type="submit"');
+    expect(mandateSource).toContain("<form");
+    expect(mandateSource).toContain('type="submit"');
     expect(renameSource).toContain("input?.select()");
     expect(renameSource).toContain("oncancel");
   });
