@@ -72,7 +72,8 @@
 <div class="my-3 w-full rounded-md border border-border/70" data-choice-actions>
   <div class="divide-y divide-border/70" role="group" aria-label={actions.submitLabel}>
     {#each actions.items as item, index}
-      {@const isSelected = state.selected.includes(index)}
+      <!-- An expired, unsubmitted block shows no checks: model defaults are not user choices. -->
+      {@const isSelected = (active || state.submitted) && state.selected.includes(index)}
       <button
         class={[
           "flex w-full items-start gap-2.5 px-2.5 py-2 text-left text-sm transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring",

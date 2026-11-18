@@ -23,6 +23,10 @@ describe("ChoiceActions quick-choice block", () => {
     expect(choiceSource).not.toMatch(/selected ·|type your own reply/);
   });
 
+  it("hides model-default checks on an expired block that was never submitted", () => {
+    expect(choiceSource).toContain("const isSelected = (active || state.submitted) && state.selected.includes(index)");
+  });
+
   it("dims only unselected inactive text while keeping all checkboxes inactive", () => {
     expect(choiceSource).toContain('!enabled && !isSelected && "opacity-60"');
     expect(choiceSource).not.toContain('!enabled && "cursor-default opacity-60"');

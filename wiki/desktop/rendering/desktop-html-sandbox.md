@@ -263,6 +263,11 @@ submission. This is a window-local, 512-block LRU cache, not durable session
 history: restarting Desktop or evicting an old entry resets it. In-flight
 submissions are not evicted.
 
+Once a newer message makes a checklist inactive without it being submitted,
+it shows every row unchecked: recommended defaults and unsent edits are not
+user choices and must not read as a past selection. A submitted block keeps
+showing what was sent.
+
 In user-message history, an exact generated quick-choice reply is displayed as
 a static checkbox receipt: all source options are shown, checked only if they
 were actually selected in the reply. These rows have no interactive controls or
@@ -391,7 +396,9 @@ user message bubbles and restored composer drafts.
 
 - Native Desktop regression: render a valid checklist, verify its checked
   defaults and formatting, confirm only the latest settled assistant message is
-  interactive, and verify malformed/incomplete fences remain code.
+  interactive, confirm an older unsubmitted checklist shows no checks while a
+  submitted one shows its sent selection, and verify malformed/incomplete fences
+  remain code.
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`
 - Native engine regression: run the guide's Phaser and Three.js examples offline,
