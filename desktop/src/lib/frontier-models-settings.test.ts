@@ -17,7 +17,7 @@ const defaults = frontierModelRows(settingsValue(parseSettingsSource(DEFAULT_PI_
 describe("frontier model settings rows", () => {
   it("reads the shipped default list with flags and preserved Advanced-only fields", () => {
     expect(defaults.map(({ model, expensive, enabled }) => ({ model, expensive, enabled }))).toEqual([
-      { model: "openai-codex/gpt-6-astra", expensive: true, enabled: true },
+      { model: "openai-codex/gpt-6.2-astra", expensive: true, enabled: true },
       { model: "zai/glm-5.3", expensive: false, enabled: true },
       { model: "anthropic/claude-opus-5-5", expensive: true, enabled: true },
     ]);
@@ -48,7 +48,7 @@ describe("frontier model settings rows", () => {
     rows = updateFrontierModelRow(rows, 1, { expensive: false, enabled: true });
     expect(serializeFrontierModelRows(rows)[1]).toEqual({ model: "zai/glm-5.3" });
 
-    expect(moveFrontierModelRow(defaults, 2, -1).map((row) => row.model)).toEqual(["openai-codex/gpt-6-astra", "anthropic/claude-opus-5-5", "zai/glm-5.3"]);
+    expect(moveFrontierModelRow(defaults, 2, -1).map((row) => row.model)).toEqual(["openai-codex/gpt-6.2-astra", "anthropic/claude-opus-5-5", "zai/glm-5.3"]);
     expect(moveFrontierModelRow(defaults, 0, -1).map((row) => row.model)).toEqual(defaults.map((row) => row.model));
     expect(moveFrontierModelRow(defaults, 2, 1).map((row) => row.model)).toEqual(defaults.map((row) => row.model));
 
@@ -80,7 +80,7 @@ describe("frontier model settings rows", () => {
     expect(next).toContain("// keep me");
     const parsed = parseSettingsSource(next).value;
     expect(parsed.economy).toBe(true);
-    expect(frontierModelRows(parsed.frontierModels).map((row) => row.model)).toEqual(["openai-codex/gpt-6-astra", "zai/glm-5.3"]);
+    expect(frontierModelRows(parsed.frontierModels).map((row) => row.model)).toEqual(["openai-codex/gpt-6.2-astra", "zai/glm-5.3"]);
   });
 
   it("summarizes Advanced-only fields", () => {
@@ -93,20 +93,20 @@ describe("frontier model settings rows", () => {
 describe("frontier oracle preview", () => {
   it("shows the runtime oracle chain for one frontier parent per vendor", () => {
     expect(frontierOraclePreview(defaults, false)).toEqual([
-      { parent: "gpt-6-astra", vendor: "openai", candidates: ["glm-5.3", "claude-opus-5-5"] },
-      { parent: "glm-5.3", vendor: "zai", candidates: ["gpt-6-astra", "claude-opus-5-5"] },
-      { parent: "claude-opus-5-5", vendor: "anthropic", candidates: ["gpt-6-astra", "glm-5.3"] },
+      { parent: "gpt-6.2-astra", vendor: "openai", candidates: ["glm-5.3", "claude-opus-5-5"] },
+      { parent: "glm-5.3", vendor: "zai", candidates: ["gpt-6.2-astra", "claude-opus-5-5"] },
+      { parent: "claude-opus-5-5", vendor: "anthropic", candidates: ["gpt-6.2-astra", "glm-5.3"] },
     ]);
   });
 
   it("reflects economy, disabled entries, and an empty chain", () => {
     expect(frontierOraclePreview(defaults, true)).toEqual([
-      { parent: "gpt-6-astra", vendor: "openai", candidates: ["glm-5.3"] },
+      { parent: "gpt-6.2-astra", vendor: "openai", candidates: ["glm-5.3"] },
       { parent: "glm-5.3", vendor: "zai", candidates: [] },
       { parent: "claude-opus-5-5", vendor: "anthropic", candidates: ["glm-5.3"] },
     ]);
     const withoutOpus = updateFrontierModelRow(defaults, 2, { enabled: false });
-    expect(frontierOraclePreview(withoutOpus, false)[1]).toEqual({ parent: "glm-5.3", vendor: "zai", candidates: ["gpt-6-astra"] });
+    expect(frontierOraclePreview(withoutOpus, false)[1]).toEqual({ parent: "glm-5.3", vendor: "zai", candidates: ["gpt-6.2-astra"] });
     expect(frontierOraclePreview([], false)).toEqual([]);
   });
 });

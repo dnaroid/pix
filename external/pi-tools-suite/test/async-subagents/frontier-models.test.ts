@@ -97,8 +97,8 @@ describe("model identity", () => {
 describe("oracle frontier selection", () => {
 	test("frontier GLM parent gets frontier GPT and Opus", () => {
 		const config = configWith();
-		expect(oracle(config, "zai/glm-5.3")).toEqual(["openai-codex/gpt-6-astra", "anthropic/claude-opus-5-5"]);
-		expect(oracle(config, "zai-coding/glm-5.3")).toEqual(["openai-codex/gpt-6-astra", "anthropic/claude-opus-5-5"]);
+		expect(oracle(config, "zai/glm-5.3")).toEqual(["openai-codex/gpt-6.2-astra", "anthropic/claude-opus-5-5"]);
+		expect(oracle(config, "zai-coding/glm-5.3")).toEqual(["openai-codex/gpt-6.2-astra", "anthropic/claude-opus-5-5"]);
 	});
 
 	test("an OpenAI parent is paired with Anthropic, whatever provider serves the parent", () => {
@@ -111,15 +111,15 @@ describe("oracle frontier selection", () => {
 		]) {
 			expect(oracle(config, parent)).toEqual(["anthropic/claude-opus-5-5"]);
 		}
-		expect(oracle(config, "pi-claude-code-provider/opus")).toEqual(["openai-codex/gpt-6-astra"]);
+		expect(oracle(config, "pi-claude-code-provider/opus")).toEqual(["openai-codex/gpt-6.2-astra"]);
 	});
 
 	test("non-frontier parent excludes its vendor from the entire chain", () => {
 		const config = configWith();
-		expect(oracle(config, "zai/glm-5.3-flash")).toEqual(["openai-codex/gpt-6-astra", "anthropic/claude-opus-5-5"]);
+		expect(oracle(config, "zai/glm-5.3-flash")).toEqual(["openai-codex/gpt-6.2-astra", "anthropic/claude-opus-5-5"]);
 		expect(oracle(config, "openai-codex/gpt-6-luna")).toEqual(["anthropic/claude-opus-5-5"]);
 		expect(oracle(config, "openai-codex/gpt-6.1-sol")).toEqual(["anthropic/claude-opus-5-5"]);
-		expect(oracle(config, "anthropic/claude-haiku-5")).toEqual(["openai-codex/gpt-6-astra"]);
+		expect(oracle(config, "anthropic/claude-haiku-5")).toEqual(["openai-codex/gpt-6.2-astra"]);
 	});
 
 	test("vendor pairing, not frontier list order, chooses the oracle vendor", () => {
@@ -263,14 +263,14 @@ describe("economy mode", () => {
 		const config = configWith({ economy: true });
 		expect(() => oracle(config, "openai-codex/gpt-6-luna")).toThrow(/economy mode excluded anthropic\/claude-opus-5-5/);
 		const core = resolveAgentTaskConfig({ id: "i", task: "x", subagentType: "implement-core" }, config);
-		expect([core.task.model, ...core.fallbackModels]).toEqual(["openai-codex/gpt-6.1-sol", "pi-claude-code-provider/sonnet"]);
+		expect([core.task.model, ...core.fallbackModels]).toEqual(["openai-codex/gpt-6.2-sol", "pi-claude-code-provider/sonnet"]);
 		const mechanical = resolveAgentTaskConfig({ id: "m", task: "x", subagentType: "mechanical" }, config);
 		expect([mechanical.task.model, ...mechanical.fallbackModels]).toEqual(["openai-codex/gpt-6-luna", "pi-claude-code-provider/haiku", "zai/glm-5.3"]);
 	});
 
 	test("reports economy as the reason when nothing remains, and hides the oracle", () => {
 		const config = configWith({ economy: true });
-		expect(() => oracle(config, "zai/glm-5.3")).toThrow(/economy mode excluded openai-codex\/gpt-6-astra, anthropic\/claude-opus-5-5/);
+		expect(() => oracle(config, "zai/glm-5.3")).toThrow(/economy mode excluded openai-codex\/gpt-6.2-astra, anthropic\/claude-opus-5-5/);
 		expect(buildSubagentCatalogPrompt(config, "zai/glm-5.3")).not.toContain("- oracle:");
 		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6.1-sol")).not.toContain("- oracle:");
 		expect(buildSubagentCatalogPrompt(configWith(), "openai-codex/gpt-6.1-sol")).toContain("- oracle:");
@@ -284,7 +284,7 @@ describe("economy mode", () => {
 	});
 
 	test("env toggle overrides the file and is read fresh on every load", () => {
-		expect(oracle(configWith({ economy: true }, { PI_TOOLS_SUITE_ECONOMY: "0" }), "zai/glm-5.3")).toEqual(["openai-codex/gpt-6-astra", "anthropic/claude-opus-5-5"]);
+		expect(oracle(configWith({ economy: true }, { PI_TOOLS_SUITE_ECONOMY: "0" }), "zai/glm-5.3")).toEqual(["openai-codex/gpt-6.2-astra", "anthropic/claude-opus-5-5"]);
 		const home = temp();
 		const cwd = temp();
 		const file = path.join(home, ".config", "pi", "pi-tools-suite.jsonc");

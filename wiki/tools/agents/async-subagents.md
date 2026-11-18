@@ -250,7 +250,10 @@ in memory; it exposes tool + slash-command interfaces. `[confirmed by code]`
    `mechanical` uses Luna, then Claude Haiku, then GLM-5.3.
    Other retained role candidate policies are unchanged. Project-local profiles
    with retired names remain valid; there are no aliases.
-   GPT-6 Sol is not an alias for GPT-6.1 Sol. Existing user/project model
+   Shipped defaults use `openai-codex/gpt-6.2-sol` and
+   `openai-codex/gpt-6.2-astra`. Earlier Sol releases are not aliases for
+   GPT-6.2 Sol; the Astra entry's `*gpt*astra*` alias still recognizes earlier
+   Astra refs as the same frontier entry. Existing user/project model
    lists still override defaults and are not rewritten by this rollover.
    `[confirmed by frontier-models.ts and agents/*.md]`
 8. **Role router / auto-ultrawork classifier**: the role router and the

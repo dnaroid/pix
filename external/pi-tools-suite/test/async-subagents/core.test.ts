@@ -459,7 +459,7 @@ Research only this project.
 		});
 		for (const [subagentType, model, fallbackModels] of [
 			["research", "openai-codex/gpt-6-luna", ["pi-claude-code-provider/haiku", "zai/glm-5.3-flash"]],
-			["implement-core", "openai-codex/gpt-6.1-sol", ["pi-claude-code-provider/sonnet"]],
+			["implement-core", "openai-codex/gpt-6.2-sol", ["pi-claude-code-provider/sonnet"]],
 			["verify", "openai-codex/gpt-6-luna", ["pi-claude-code-provider/haiku", "zai/glm-5.3-flash"]],
 		] as const) {
 			const role = resolveAgentTaskConfig({ id: subagentType, task: subagentType, subagentType }, config);

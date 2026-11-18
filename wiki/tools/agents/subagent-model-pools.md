@@ -101,7 +101,7 @@ usable candidate among the remaining vendors.
 
 ```jsonc
 "frontierModels": [
-  { "model": "openai-codex/gpt-6-astra", "expensive": true, "aliases": ["*gpt*astra*"], "roles": ["oracle"] },
+  { "model": "openai-codex/gpt-6.2-astra", "expensive": true, "aliases": ["*gpt*astra*"], "roles": ["oracle"] },
   { "model": "zai/glm-5.3" },
   { "model": "anthropic/claude-opus-5-5", "expensive": true, "aliases": ["*opus*"] }
 ],

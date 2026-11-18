@@ -21,7 +21,7 @@ test("uses the same first-launch default as the Pix TUI", () => {
 	const { home, cwd } = fixture();
 	assert.deepEqual(loadPixDefaultModel(cwd, home), {
 		provider: "openai-codex",
-		modelId: "gpt-6.1-sol",
+		modelId: "gpt-6.2-sol",
 		fallbackModels: [],
 		thinkingLevel: "medium",
 	});
@@ -59,7 +59,7 @@ test("desktop profile ignores TUI Pix config and reads only pix-desktop config",
 
 		assert.deepEqual(loadPixDefaultModel(cwd, home), {
 			provider: "openai-codex",
-			modelId: "gpt-6.1-sol",
+			modelId: "gpt-6.2-sol",
 			fallbackModels: [],
 			thinkingLevel: "medium",
 		});

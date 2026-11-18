@@ -6331,3 +6331,44 @@ test("project supervisor: one Desktop-only session per project gets the supervis
 		await other.adapter.dispose();
 	}
 });
+
+test("project supervisor: worker events wake the supervisor with one coalesced queued digest", async (t) => {
+	const agentDir = mkdtempSync(join(tmpdir(), "pix-acp-supervisor-wake-agent-"));
+	const cwd = mkdtempSync(join(tmpdir(), "pix-acp-supervisor-wake-"));
+	t.after(() => Promise.all([rm(agentDir, { recursive: true, force: true }), rm(cwd, { recursive: true, force: true })]).then(() => undefined));
+	const harness = createTestAdapter({
+		agentDir,
+		supervisorExtensionPath: "/opt/pix/supervisor.js",
+		supervisorWakeDebounceMs: 5,
+		loadDesktopQueues: async () => ({ auto: [], deferred: [] }),
+		saveDesktopQueues: async () => {},
+	});
+	try {
+		await connectAs(harness.adapter, "pix-desktop", async (cx) => {
+			await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientCapabilities: {}, clientInfo: { name: "pix-desktop", version: "test" } });
+			const supervisor = await cx.request("pix/supervisor/open", { cwd }) as { sessionId: string };
+			const worker = await cx.request("session/new", { cwd, mcpServers: [] }) as { sessionId: string };
+			const pi = harness.clients[1]!;
+			const runTurn = async (index: number) => {
+				const pending = cx.request("session/prompt", { sessionId: worker.sessionId, prompt: [{ type: "text", text: `turn ${index}` }] });
+				await waitFor(() => pi.promptCalls.length === index);
+				pi.emit({ type: "agent_start" });
+				pi.emit({ type: "agent_end", messages: [{ role: "assistant", content: [], stopReason: "stop" }], willRetry: false } as unknown as JsonAgentSessionEvent);
+				pi.emit({ type: "agent_settled" });
+				await pending;
+			};
+			const queue = () => harness.adapter.getSession(supervisor.sessionId)!.autoUserMessages;
+			await runTurn(1);
+			await waitFor(() => queue().length === 1);
+			assert.match(queue()[0]!.promptText, new RegExp(`${worker.sessionId}: turn settled \\(end_turn\\)`));
+			const firstId = queue()[0]!.id;
+			await runTurn(2);
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			assert.equal(queue().length, 1, "a still-queued digest is rewritten, not multiplied");
+			assert.equal(queue()[0]!.id, firstId);
+			assert.equal(harness.clients[0]!.promptCalls.length, 0, "ACP queues the wake; Desktop runs it");
+		});
+	} finally {
+		await harness.adapter.dispose();
+	}
+});

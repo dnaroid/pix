@@ -78,8 +78,9 @@ Zed (Agent Panel)  <--ACP JSON-RPC over stdio-->  pix-acp  <--JSONL RPC over std
   session of a Pix Desktop client loads the `supervisor` extension
   (`PIX_SUPERVISOR_BRIDGE=1`, `src/extensions/supervisor.ts`); its read-only
   `status` and `read` ops answer over the correlated bridge in
-  `src/pi/supervisor-host.js` (60 s timeout). Digests, wakes and mutating ops
-  are not implemented yet. See [project supervisor](../work-management/project-supervisor.md).
+  `src/pi/supervisor-host.js` (60 s timeout). Worker events wake it through debounced
+  digests queued in its auto queue (`src/acp/supervisor-wake.ts`); mutating
+  ops are not implemented yet. See [project supervisor](../work-management/project-supervisor.md).
 - Env config and stderr-only logging.
 
 **stdout is reserved for the protocol stream**; all diagnostics go to stderr.

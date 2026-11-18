@@ -67,6 +67,7 @@ import {
 } from "./supervisor-contract.js";
 import { forwardSupervisorRequest } from "./supervisor-bridge.js";
 import { createSupervisorService, type SupervisorService } from "./supervisor-service.js";
+import { createSupervisorWaker, type SupervisorWaker } from "./supervisor-wake.js";
 import { createSupervisorStore, type SupervisorStore } from "./supervisor-store.js";
 import {
 	createSessionEventMonitor,
@@ -592,6 +593,8 @@ export interface PixAcpAgentOptions {
 	readonly sessionEvents?: SessionEventMonitor;
 	/** Project supervisor state under `.pi/supervisor/` (overridable for hermetic tests). */
 	readonly supervisorStore?: SupervisorStore;
+	/** Debounce of supervisor wake digests (tests). */
+	readonly supervisorWakeDebounceMs?: number;
 	/** Shared model-usage query (overridable for deterministic concurrency tests). */
 	readonly queryModelUsage?: (state: PiSessionState, options?: { freshOnly?: boolean }) => Promise<ModelUsageRefreshResult>;
 	/**
@@ -706,6 +709,7 @@ export class PixAcpAgent {
 	private readonly supervisorStore: SupervisorStore;
 	private readonly supervisor: SupervisorService;
 	private readonly unsubscribeSupervisorEvents: () => void;
+	private readonly supervisorWaker: SupervisorWaker;
 	/** Serializes `pix/supervisor/open` per project so one click creates one session. */
 	private readonly supervisorOpening = new Map<string, Promise<SupervisorOpenResponse>>();
 	private disposed = false;
@@ -835,7 +839,18 @@ export class PixAcpAgent {
 			planFor: async (cwd, sessionId) => (await this.planLaunches.handle({ cwd, action: "list" })).launches[sessionId]?.path,
 			report: (message) => this.options.logger.warn(message, { module: "supervisor" }),
 		});
-		this.unsubscribeSupervisorEvents = this.sessionEvents.subscribe((event) => this.supervisor.record(event));
+		this.supervisorWaker = createSupervisorWaker({
+			debounceMs: options.supervisorWakeDebounceMs,
+			supervisorFor: (cwd) => this.supervisorSessionId(cwd),
+			paused: async (cwd) => (await this.supervisorStore.readMandate(cwd)).paused,
+			enqueue: (supervisorId, text, replace) => this.enqueueSupervisorDigest(supervisorId, text, replace),
+			report: (message) => this.options.logger.warn(message, { module: "supervisor" }),
+		});
+		this.unsubscribeSupervisorEvents = this.sessionEvents.subscribe((event) => {
+			this.supervisor.record(event);
+			const cwd = this.sessions.get(event.sessionId)?.cwd;
+			if (cwd && this.clientName === "pix-desktop") this.supervisorWaker.push(cwd, event);
+		});
 		this.completeAutocomplete = options.completeAutocomplete ?? createAutocompleteCompleter({
 			logger: options.logger,
 			loadConfig: this.loadAutocompleteConfig,
@@ -1135,6 +1150,7 @@ export class PixAcpAgent {
 		await Promise.allSettled([...this.sessionLifecycle.values()]);
 		await Promise.all([...this.sessions.values()].map((session) => this.teardownSession(session)));
 		this.unsubscribeSupervisorEvents();
+		this.supervisorWaker.dispose();
 		this.sessionEvents.dispose();
 		await Promise.all([...this.retiringForkQueues]);
 		await registryDisposed;
@@ -1855,6 +1871,30 @@ export class PixAcpAgent {
 			message: cloneQueuedUserMessage(message),
 		}));
 		return { sessionId: session.acpSessionId, items: [...steering, ...followUp, ...auto, ...deferred, ...session.forks.items()] };
+	}
+
+	/** Queue (or rewrite a still-queued) supervisor digest as an auto message. */
+	private async enqueueSupervisorDigest(
+		supervisorId: string,
+		text: string,
+		replace?: { readonly id: string; readonly text: string },
+	): Promise<{ itemId: string; replaced: boolean } | undefined> {
+		const session = this.sessions.get(supervisorId);
+		if (!session || this.disposed) return undefined;
+		await this.ensureDesktopQueuesLoaded(session);
+		if (this.disposed || this.sessions.get(supervisorId) !== session) return undefined;
+		// Decided after the await: Desktop may have taken the old item meanwhile.
+		const index = replace ? session.autoUserMessages.findIndex((item) => item.id === replace.id) : -1;
+		const replaced = index >= 0 && replace !== undefined;
+		const body = replaced ? replace.text : text;
+		const message: DesktopQueuedUserMessage = {
+			id: replaced ? replace.id : randomUUID(), promptText: body, displayText: body, images: [],
+		};
+		if (replaced) session.autoUserMessages[index] = message;
+		else session.autoUserMessages.push(message);
+		await this.persistDesktopQueues(session);
+		await this.notifyDesktopQueueState(session);
+		return { itemId: message.id, replaced };
 	}
 
 	private async notifyDesktopQueueState(session: AgentSessionState): Promise<void> {

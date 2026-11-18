@@ -86,7 +86,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   // selecting it, "aliases" (globs recognizing the same model under other
   // refs), and "roles" (limit the entry to listed roles).
   "frontierModels": [
-    { "model": "openai-codex/gpt-6-astra", "expensive": true, "aliases": ["*gpt*astra*"], "roles": ["oracle"] },
+    { "model": "openai-codex/gpt-6.2-astra", "expensive": true, "aliases": ["*gpt*astra*"], "roles": ["oracle"] },
     { "model": "zai/glm-5.3" },
     { "model": "anthropic/claude-opus-5-5", "expensive": true, "aliases": ["*opus*"] }
   ],
@@ -195,7 +195,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
           "messageMode": { "minContextPercent": 0.20 }
         }
       },
-      "openai-codex/gpt-6-astra": {
+      "openai-codex/gpt-6.2-astra": {
         "compress": {
           "minContextPercent": "26%",
           "maxContextPercent": "46%",

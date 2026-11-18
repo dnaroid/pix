@@ -50,7 +50,7 @@
   import { createDesktopWorkbenchGitServices } from "./app/desktop-workbench-git-services";
   import { createDesktopModelServices } from "./app/desktop-model-services";
   import { createDesktopCommandServices } from "./app/desktop-command-services";
-  import { createSupervisorSessionAction } from "./app/supervisor-session";
+  import { createSupervisorSessionAction, handleSupervisorMenu, listenSupervisorMenu } from "./app/supervisor-session";
   import { createDesktopInteractionServices } from "./app/desktop-interaction-services.svelte";
   import { createDesktopPresentationState } from "./app/desktop-presentation-state.svelte";
   import { createDesktopRootEffects } from "./app/desktop-root-effects.svelte";
@@ -1009,6 +1009,10 @@
     revealProjectEntry: async (path) => { await workspaceSidebar?.revealProjectEntry(path); },
   }));
   onMount(desktopLifecycle.start);
+  onMount(() => listenSupervisorMenu(
+    () => void handleSupervisorMenu(desktopCommands, (message) => toasts.info(message)).catch(reportError),
+    (error) => diagnosticLogger.warn("frontend:supervisor-menu", error),
+  ));
   onMount(diagnosticLogger.start);
   onMount(() => toasts.setReporter(diagnosticLogger.report));
   onMount(() => startThemePreference((error) => diagnosticLogger.warn("frontend:theme-preference", error)));

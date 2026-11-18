@@ -40,7 +40,7 @@ describe("role-owned model candidates", () => {
 	test("retains capability-driven core and substantial mechanical coding without a GLM fallback for semantic work", () => {
 		const config = loadSubagentConfig(temp(), {});
 		for (const [role, models] of [
-			["implement-core", ["openai-codex/gpt-6.1-sol", "pi-claude-code-provider/sonnet"]],
+			["implement-core", ["openai-codex/gpt-6.2-sol", "pi-claude-code-provider/sonnet"]],
 			["mechanical", ["openai-codex/gpt-6-luna", "pi-claude-code-provider/haiku", "zai/glm-5.3"]],
 		] as const) {
 			const resolved = resolveAgentTaskConfig(task(role), config, { parentModel: "openai-codex/gpt-6-luna" });
@@ -86,7 +86,7 @@ describe("role-owned model candidates", () => {
 		expect(fromLuna.fallbackModels).toEqual([]);
 
 		const fromTurbo = resolveAgentTaskConfig(task("oracle"), config, { parentModel: "zai/glm-5-turbo" });
-		expect(fromTurbo.task.model).toBe("openai-codex/gpt-6-astra");
+		expect(fromTurbo.task.model).toBe("openai-codex/gpt-6.2-astra");
 		expect(fromTurbo.fallbackModels).toEqual(["anthropic/claude-opus-5-5"]);
 		expect(() => resolveAgentTaskConfig(task("oracle"), config)).toThrow(/parent model/i);
 	});

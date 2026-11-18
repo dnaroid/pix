@@ -2,7 +2,7 @@ import { DEFAULT_HEADS_UP_CONFIG, DEFAULT_HEADS_UP_MODEL } from "../../../src/bu
 
 export const DEFAULT_DESKTOP_CONFIG_JSONC = String.raw`{
   "$schema": "https://unpkg.com/pi-ui-extend/schemas/pix-desktop.json",
-  "defaultModel": { "modelRef": "openai-codex/gpt-6.1-sol", "fallbackModels": [], "thinking": "medium" },
+  "defaultModel": { "modelRef": "openai-codex/gpt-6.2-sol", "fallbackModels": [], "thinking": "medium" },
   "modelRouting": {
     "enabled": false,
     "default": false,

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createSupervisorSessionAction } from "./supervisor-session";
+import { createSupervisorSessionAction, handleSupervisorMenu, SUPERVISOR_MENU_UNAVAILABLE } from "./supervisor-session";
 import { sessionIsSupervisor } from "../lib/session-tabs";
 import { COMMAND_PALETTE_IDS, desktopCommandDefinition } from "../lib/desktop-commands";
 
@@ -77,5 +77,19 @@ describe("project supervisor session action", () => {
     expect(sessionIsSupervisor({ sessionId: "b", cwd: "/p" })).toBe(false);
     expect(COMMAND_PALETTE_IDS).toContain("session.supervisor");
     expect(desktopCommandDefinition("session.supervisor").label).toBe("Open Project Supervisor");
+  });
+
+  it("app menu runs the palette command when available and otherwise explains instead of dropping the click", async () => {
+    let available = false;
+    const execute = vi.fn(async () => {});
+    const notices: string[] = [];
+    const commands = { enabled: () => available, execute };
+    await handleSupervisorMenu(commands, (message) => notices.push(message));
+    expect(execute).not.toHaveBeenCalled();
+    expect(notices).toEqual([SUPERVISOR_MENU_UNAVAILABLE]);
+    available = true;
+    await handleSupervisorMenu(commands, (message) => notices.push(message));
+    expect(execute).toHaveBeenCalledWith("session.supervisor");
+    expect(notices).toHaveLength(1);
   });
 });

@@ -204,7 +204,7 @@ rationale.
   subscribers (`PixAcpAgent.subscribeSessionEvents`). Session retirement emits
   nothing and disposes the observer's timer. Touched files are kept per session
   id across runtime replacement and dropped on session delete. The handover,
-  takeover and `conflict` events, debounce and digests are still phase 1–2 work.
+  takeover and `conflict` events are still phase 2–3 work.
 - The storage layer exists (phase 0, done): `acp/src/acp/supervisor-store.ts`
   keeps `.pi/supervisor/mandate.json`, `registry.json` (atomic temp+rename,
   serialized per project, bounded to 200 sessions) and append-only
@@ -231,8 +231,27 @@ rationale.
   sessions (excluding sub-agent viewers). Each entry includes the linked task,
   run state, last lifecycle event and plan progress. `read` returns a bounded
   digest built from the live runtime or the saved transcript's current branch
-  (`acp/src/acp/supervisor-service.ts`). Digests, debounced wakes and all
-  mutating ops are still to come.
+  (`acp/src/acp/supervisor-service.ts`). Mutating ops are still to come.
+- Debounced wakes exist (phase 1): `acp/src/acp/supervisor-wake.ts` coalesces
+  worker events per project for 5 s into one `[Supervisor digest]` text (one
+  line per session, newest event per type, at most 20 sessions; the
+  supervisor's own events are ignored). ACP puts it into the supervisor
+  session's Desktop auto queue, so an idle supervisor runs it as one wake turn
+  and a busy one after its current turn. While that item is still queued,
+  later digests rewrite it in place instead of adding items; the check runs
+  after the queue load, so an item Desktop has just taken is never rewritten.
+  Pause keeps events pending without waking. Events that arrive while the
+  supervisor runtime is not loaded stay pending until the next event. Only Pix
+  Desktop clients get wakes; adapter dispose clears the timers.
+- The macOS app menu (first submenu) has **Open Project Supervisor**, placed
+  after **Arrange windows**. It emits `pix-open-supervisor` to the focused Pix
+  window, or else the first visible one (`desktop/src-tauri/src/supervisor_menu.rs`).
+  That window's frontend (`desktop/src/app/supervisor-session.ts`,
+  `listenSupervisorMenu` and `handleSupervisorMenu` in `App.svelte`) runs the
+  palette command `session.supervisor` for its own workspace, with the same
+  availability rule. A click before the project is ready (startup, workspace
+  switch, running session mutation) shows an info notice instead of being
+  dropped silently.
 - On Desktop start, ACP reconciles the registry against saved tasks, plans and
   session state. Sessions interrupted by quitting become `interrupted`
   events. The supervisor may resume them through the existing Resume flow; this

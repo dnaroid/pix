@@ -11,7 +11,7 @@ import { parseJsonc } from "./jsonc.mjs";
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 export const DEFAULT_OUTPUT_DIR = ".pi/brainstorms";
 /** Mirror of DEFAULT_FRONTIER_MODELS in async-subagents/core/frontier-models.ts (parity-tested). */
-export const DEFAULT_FRONTIER_MODELS = Object.freeze(["openai-codex/gpt-6-astra", "zai/glm-5.3", "anthropic/claude-opus-5-5"]);
+export const DEFAULT_FRONTIER_MODELS = Object.freeze(["openai-codex/gpt-6.2-astra", "zai/glm-5.3", "anthropic/claude-opus-5-5"]);
 /** Mirror of the generated default brainstorm.thinkingOverrides. */
 export const DEFAULT_THINKING_OVERRIDES = Object.freeze({ "zai/glm-5.3": "max" });
 const defaultFrontier = () => DEFAULT_FRONTIER_MODELS.map((model) => ({ model, enabled: true }));

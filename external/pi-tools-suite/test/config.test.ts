@@ -269,7 +269,7 @@ describe("pi-tools-suite config", () => {
 		expect(parsed.$schema).toBe(PI_TOOLS_SUITE_SCHEMA_URL);
 		expect(parsed.lsp?.servers?.map((server) => server.id)).toEqual(["typescript"]);
 		expect(parsed.resourceRegistry).toEqual({ branch: "main" });
-		expect(parsed.dcp?.modelOverrides?.["openai-codex/gpt-6-astra"]?.compress).toEqual({
+		expect(parsed.dcp?.modelOverrides?.["openai-codex/gpt-6.2-astra"]?.compress).toEqual({
 			minContextPercent: "26%",
 			maxContextPercent: "46%",
 			autoCandidates: { minContextPercent: 0.26 },

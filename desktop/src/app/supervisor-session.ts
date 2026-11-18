@@ -1,3 +1,9 @@
+import { isTauri } from "@tauri-apps/api/core";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+
+/** Matches `supervisor_menu::EVENT` in desktop/src-tauri/src/supervisor_menu.rs. */
+export const SUPERVISOR_MENU_EVENT = "pix-open-supervisor";
+
 /**
  * Desktop action for the project supervisor (decision 0077, phase 1): ask ACP
  * for the project's single supervisor session and show it as a tab. ACP owns
@@ -44,4 +50,39 @@ export function createSupervisorSessionAction<C extends SupervisorClient>(option
   }
 
   return { open };
+}
+
+type SupervisorMenuCommands = {
+  enabled(id: "session.supervisor"): boolean;
+  execute(id: "session.supervisor"): Promise<void>;
+};
+
+export const SUPERVISOR_MENU_UNAVAILABLE = "Open Project Supervisor is available once the project has finished loading.";
+
+/**
+ * The app-menu item runs the same command as the palette, with the same
+ * availability rule. A click that arrives before Pix is ready (startup,
+ * workspace switch, running session mutation) shows a notice instead of
+ * being dropped silently.
+ */
+export async function handleSupervisorMenu(commands: SupervisorMenuCommands, notify: (message: string) => void): Promise<void> {
+  if (!commands.enabled("session.supervisor")) {
+    notify(SUPERVISOR_MENU_UNAVAILABLE);
+    return;
+  }
+  await commands.execute("session.supervisor");
+}
+
+/**
+ * Subscribe this window to the app-menu "Open Project Supervisor" item.
+ * Returns the cleanup; a listener that resolves after teardown is released.
+ */
+export function listenSupervisorMenu(onOpen: () => void, report: (error: unknown) => void): () => void {
+  if (!isTauri()) return () => {};
+  let disposed = false;
+  let unlisten: (() => void) | undefined;
+  getCurrentWebviewWindow().listen(SUPERVISOR_MENU_EVENT, () => { if (!disposed) onOpen(); })
+    .then((stop) => { if (disposed) stop(); else unlisten = stop; })
+    .catch(report);
+  return () => { disposed = true; unlisten?.(); };
 }

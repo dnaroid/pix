@@ -101,6 +101,7 @@ mod subagent_retention;
 mod window_geometry;
 mod window_restore;
 mod window_tiling;
+mod supervisor_menu;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(40);
 const MAX_ATTACHMENT_COUNT: usize = 10;
@@ -8613,6 +8614,7 @@ pub fn run() {
             let restored_windows = window_restore::setup(app)?;
             desktop_tray::setup(app.handle());
             window_tiling::setup(app)?;
+            supervisor_menu::setup(app)?;
             app.manage(AttachmentPathState::new(app.handle()));
             #[cfg(feature = "bundled-runtime")]
             release_smoke::start_if_requested(app).map_err(std::io::Error::other)?;
