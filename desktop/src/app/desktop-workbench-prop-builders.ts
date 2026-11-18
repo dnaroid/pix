@@ -56,6 +56,7 @@ export type WorkbenchShellBuilderOptions = {
   errors: ReturnType<typeof createErrorState>;
   sessionStartOpen: () => boolean;
   sessionStartCandidates: () => SessionStartProps["sessions"];
+  openSupervisor?: () => void;
   searchClient: () => AcpClient | null;
   sessionTabs: ReturnType<typeof createSessionTabController>;
 };
@@ -175,6 +176,7 @@ export function buildWorkbenchShellProps(
       sessions: options.sessionStartCandidates(),
       searchClient: options.searchClient(),
       onSelect: (selectedSessionId) => void options.sessionTabs.selectSessionFromDraft(selectedSessionId),
+      ...(options.openSupervisor ? { onOpenSupervisor: options.openSupervisor } : {}),
     } : null,
   };
 }

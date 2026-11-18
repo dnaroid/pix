@@ -112,6 +112,9 @@ authentication. The user completes the terminal/browser flow, returns to the
 conversation and retries the request. A provider disabled by startup preflight
 still needs a reload/restart after sign-in; recovery does not re-register it.
 
+The first-run dialog's Claude Code row runs the same login command after its
+own setup completes; see [desktop first-run bootstrap](../configuration/desktop-first-run-bootstrap.md).
+
 Pix Desktop's ACP bridge delivers startup and background extension `warning`
 and `error` notifications as visible system rows (`pix-system:` message ids),
 without requiring an active prompt. Slash-command feedback still delivers all

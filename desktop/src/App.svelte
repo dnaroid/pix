@@ -50,7 +50,7 @@
   import { createDesktopWorkbenchGitServices } from "./app/desktop-workbench-git-services";
   import { createDesktopModelServices } from "./app/desktop-model-services";
   import { createDesktopCommandServices } from "./app/desktop-command-services";
-  import { createSupervisorSessionAction, handleSupervisorMenu, listenSupervisorMenu } from "./app/supervisor-session";
+  import { createSupervisorHandover, createSupervisorSessionAction, handleSupervisorMenu, listenSupervisorMenu } from "./app/supervisor-session";
   import { createDesktopInteractionServices } from "./app/desktop-interaction-services.svelte";
   import { createDesktopPresentationState } from "./app/desktop-presentation-state.svelte";
   import { createDesktopRootEffects } from "./app/desktop-root-effects.svelte";
@@ -951,6 +951,7 @@
     changingConfig: () => changingConfig,
     displayedConfigOptions: () => displayedConfigOptions,
     reconnect,
+    openSupervisor: () => void handleSupervisorMenu(desktopCommands, (message) => toasts.info(message)).catch(reportError),
     state: activeSessionState,
     errors,
     sessions: sessionServices,
@@ -997,6 +998,13 @@
     reportError,
   });
   $effect(() => sessionRename.reconcile());
+  const supervisorHandover = createSupervisorHandover({
+    client: () => client,
+    workspace: () => workspace,
+    sessions: () => sessionCatalog.sessions,
+    refreshSessions: sessionCatalog.refresh,
+    reportError,
+  });
   onDestroy(sessionRename.cancel);
 
   const selectionAssist = createSelectionAssistStore({ client: () => client, workspace: () => workspace, report: (error, label) => diagnosticLogger.warn(label ?? "frontend:selection-assist", error) });
@@ -1005,7 +1013,12 @@
   onMount(() => installDesktopContextMenu({
     reportError, workspace: () => workspace,
     selectionAssist: (target) => void selectionAssist.run(target),
-    sessionActions: sessionRename,
+    sessionActions: {
+      canRename: sessionRename.canRename,
+      open: sessionRename.open,
+      supervision: supervisorHandover.supervision,
+      setSupervised: supervisorHandover.setSupervised,
+    },
     revealProjectEntry: async (path) => { await workspaceSidebar?.revealProjectEntry(path); },
   }));
   onMount(desktopLifecycle.start);
@@ -1097,7 +1110,11 @@
       void workspaceSidebar?.openSettingsField("desktop-assistant", "rag-answer-model").catch(reportError);
     }} />
 {/if}
-<DesktopBootstrapDialog onCredentialsChanged={reconnect} />
+<DesktopBootstrapDialog
+  onCredentialsChanged={reconnect}
+  onOpenClaudeLoginTerminal={workspace ? openInteractiveTerminal : undefined}
+  onError={reportError}
+/>
 <DeleteConfirmationHost />
 {#if sessionRename.request}
   <SessionRenameDialog title={sessionRename.request.title} saving={sessionRename.saving}

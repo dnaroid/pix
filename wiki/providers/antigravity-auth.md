@@ -83,6 +83,7 @@ capacity limits. `[confirmed by code: src/antigravity-auth/index.ts]`
 ### Import from opencode — `importOpencodeAntigravityAccount`
 - Reads opencode `antigravity-accounts.json` (path from `OPENCODE_CONFIG_DIR` / `XDG_CONFIG_HOME` / `~/.config/opencode`), selects by index/email or active index, and writes into pi auth. `[confirmed by code: auth-store.ts]`
 - Refuses to overwrite an existing, different credential unless `overwrite` is set (returns reason `auth-exists-use-force`). Returns `already-imported` when refresh matches. `[confirmed by code: auth-store.ts]`
+- Desktop's first-run dialog only reports whether provider `antigravity` exists in Pi `auth.json` (no in-dialog OAuth); when not connected it points to the OpenCode import or `/antigravity-add-account`. See [desktop first-run bootstrap](../configuration/desktop-first-run-bootstrap.md). `[confirmed by code: DesktopBootstrapDialog.svelte]`
 
 ## Public contracts / inputs / outputs
 

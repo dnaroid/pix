@@ -1,3 +1,5 @@
+import { announceModalOpened } from "./top-layer";
+
 /**
  * Open a native modal dialog and restore focus when it unmounts (invoker by default).
  * Native <dialog> owns focus containment; callers only choose the initial target.
@@ -10,7 +12,10 @@ export function activateModalDialog(
   const previousFocus = document.activeElement instanceof HTMLElement
     ? document.activeElement
     : undefined;
-  if (!dialog.open) dialog.showModal();
+  if (!dialog.open) {
+    dialog.showModal();
+    announceModalOpened();
+  }
   const frame = requestAnimationFrame(() => initialFocus?.()?.focus({ preventScroll: true }));
 
   return () => {

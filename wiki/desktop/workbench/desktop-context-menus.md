@@ -43,6 +43,7 @@ browser preview retains browser behavior; this policy belongs to the Tauri host.
   session metadata. Drafts, read-only sub-agent viewers and running sessions
   disable the action. Closing the tab, changing
   workspace/connection, or cancellation invalidates pending rename preparation.
+- Session tabs offer **Hand Over to Supervisor** or **Take Back from Supervisor**, depending on the tab's current supervised state (`desktop.session.supervise`, `desktop/src/lib/native-context-menu.ts`). The action calls ACP `pix/supervisor/handover` with `{cwd, sessionId, supervised}` (Desktop-only). Handover is refused for sub-agent sessions, for the supervisor session itself, and when no project supervisor is open; take-back is always allowed. The request is idempotent: a repeated call changes nothing and writes no ledger entry. Drafts and sessions that cannot be supervised disable the action.
 - Editable text inputs, textareas and contenteditable editors offer native Undo,
   Redo, Cut, Copy, Paste and Select All. Read-only text inputs offer Copy and
   Select All. Password fields never expose Cut or Copy; read-only passwords have

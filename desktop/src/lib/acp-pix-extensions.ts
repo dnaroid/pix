@@ -19,8 +19,11 @@ import {
   type PlanLaunchesRequest,
 } from "../../../acp/src/acp/plan-launches-contract";
 import {
+  PIX_SUPERVISOR_HANDOVER_METHOD,
   PIX_SUPERVISOR_OPEN_METHOD,
+  parseSupervisorHandoverResponse,
   parseSupervisorOpenResponse,
+  type SupervisorHandoverResponse,
   type SupervisorOpenResponse,
 } from "../../../acp/src/acp/supervisor-contract";
 import {
@@ -508,6 +511,11 @@ export class AcpPixExtensions {
   /** Open (or create on first use) the project's single supervisor session (0077). */
   async openSupervisor(cwd: string): Promise<SupervisorOpenResponse> {
     return parseSupervisorOpenResponse(await this.request<unknown>(PIX_SUPERVISOR_OPEN_METHOD, { cwd }, 120_000));
+  }
+
+  /** Hand a session over to the project supervisor (`manual` mode) or take it back. */
+  async supervisorHandover(cwd: string, sessionId: string, supervised: boolean): Promise<SupervisorHandoverResponse> {
+    return parseSupervisorHandoverResponse(await this.request<unknown>(PIX_SUPERVISOR_HANDOVER_METHOD, { cwd, sessionId, supervised }));
   }
 
   async queueState(sessionId: string): Promise<QueueState> {

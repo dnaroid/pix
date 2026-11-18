@@ -40,6 +40,13 @@ fn run_bootstrap_action(app: &AppHandle, action: &str) -> Result<Value, String> 
         .map_err(|error| format!("failed to resolve Pix resources: {error}"))?;
     let runtime = BackendRuntime::resolve(&resource_dir)?;
     let mut command = runtime.bootstrap_command(action)?;
+    if action == "inspect" {
+        // GUI launches inherit a minimal PATH; Claude Code detection needs the
+        // user's login-shell PATH without changing the bundled runtime PATH.
+        if let Some(path) = super::login_shell_path() {
+            command.env("PIX_USER_PATH", path);
+        }
+    }
     let output = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

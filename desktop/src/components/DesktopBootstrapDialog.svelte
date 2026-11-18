@@ -4,7 +4,9 @@
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import { onMount } from "svelte";
+  import { claudeLoginCommand } from "../lib/claude-login-recovery";
   import {
+    ANTIGRAVITY_PROVIDER_ID,
     importedOpenCodeProviders,
     importCodexApiKey,
     importOpenCodeCredentials,
@@ -16,8 +18,13 @@
 
   let {
     onCredentialsChanged,
+    onOpenClaudeLoginTerminal,
+    onError,
   }: {
     onCredentialsChanged: () => void | Promise<void>;
+    /** Opens the project terminal with a command; unavailable without an open project. */
+    onOpenClaudeLoginTerminal?: (command: string) => Promise<void>;
+    onError?: (error: unknown) => void;
   } = $props();
 
   let dialogElement = $state<HTMLDialogElement | null>(null);
@@ -32,6 +39,9 @@
 
   const piReady = $derived(snapshot?.runtime.ready === true);
   const opencodeDetected = $derived(Boolean(snapshot?.opencode.authDetected || snapshot?.opencode.antigravityDetected));
+  const claudeStatus = $derived(snapshot?.claudeCode?.status);
+  const claudeCanSignIn = $derived(claudeStatus === "logged-out" || claudeStatus === "unknown");
+  const antigravityConnected = $derived(snapshot?.pi.providers.includes(ANTIGRAVITY_PROVIDER_ID) === true);
 
   $effect(() => {
     if (!visible || !dialogElement) return;
@@ -100,17 +110,34 @@
     }
   }
 
-  async function finish(): Promise<void> {
-    if (saving || busy) return;
+  async function finish(): Promise<boolean> {
+    if (saving || busy) return false;
     saving = true;
     error = null;
     try {
       await completeDesktopOnboarding();
       visible = false;
+      return true;
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);
+      return false;
     } finally {
       saving = false;
+    }
+  }
+
+  /**
+   * The terminal lives in the workbench behind this modal, so sign-in first
+   * completes setup, then runs Claude's own login there. Claude CLI owns the
+   * browser flow and credential storage.
+   */
+  async function signInToClaude(): Promise<void> {
+    const openTerminal = onOpenClaudeLoginTerminal;
+    if (!openTerminal || !(await finish())) return;
+    try {
+      await openTerminal(claudeLoginCommand());
+    } catch (cause) {
+      onError?.(cause);
     }
   }
 
@@ -190,13 +217,13 @@
         <section class="rounded-md border border-border bg-background p-3">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
-              <div class="text-sm font-medium">Codex</div>
+              <div class="text-sm font-medium">Codex API key (OPENAI_API_KEY)</div>
               {#if snapshot?.codex.apiKeyDetected}
                 <p class="mt-0.5 text-xs leading-4 text-muted-foreground">A static OPENAI_API_KEY is available and can be copied into Pi without replacing existing Pi auth.</p>
               {:else if snapshot?.codex.oauthDetected}
                 <p class="mt-0.5 text-xs leading-4 text-muted-foreground">ChatGPT/Codex OAuth was detected. Pix does not copy rotating OAuth refresh tokens between auth stores; authenticate Pi separately for this provider.</p>
               {:else}
-                <p class="mt-0.5 text-xs leading-4 text-muted-foreground">No Codex file credential suitable for safe import was detected.</p>
+                <p class="mt-0.5 text-xs leading-4 text-muted-foreground">No static OPENAI_API_KEY was found in Codex auth.json. Only that key can be imported, into the Pi openai provider.</p>
               {/if}
             </div>
             <button
@@ -208,6 +235,58 @@
               {#if busy === "codex"}<RotateCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />{/if}
               Import key
             </button>
+          </div>
+        </section>
+
+        <section class="rounded-md border border-border bg-background p-3" data-bootstrap-claude-code>
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="text-sm font-medium">Claude Code</div>
+              <p class="mt-0.5 text-xs leading-4 text-muted-foreground">
+                {#if !snapshot}
+                  {loading ? "Checking the Claude Code CLI…" : "Claude Code status is unavailable."}
+                {:else if claudeStatus === "ready"}
+                  Claude Code CLI is installed and signed in. Its models are available through your subscription.
+                {:else if claudeStatus === "logged-out"}
+                  Claude Code CLI is installed but not signed in. Sign-in runs Claude's own login; Pix never reads its tokens.
+                {:else if claudeStatus === "missing"}
+                  Claude Code CLI was not found on PATH. Install it (or set PI_CLAUDE_CODE_PROVIDER_PATH) to use Claude models.
+                {:else}
+                  Claude Code CLI was found, but its login state could not be determined.
+                {/if}
+              </p>
+              {#if claudeCanSignIn && !onOpenClaudeLoginTerminal}
+                <p class="mt-1 text-xs text-muted-foreground">Open a project to sign in from its terminal, or run <code class="font-mono">claude auth login</code>.</p>
+              {/if}
+            </div>
+            {#if claudeStatus === "ready"}
+              <CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0 text-tool-success" aria-label="Ready" />
+            {:else}
+              <button
+                class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 text-xs font-medium hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+                type="button"
+                disabled={!claudeCanSignIn || !onOpenClaudeLoginTerminal || busy !== null || saving}
+                onclick={() => void signInToClaude()}
+              >Sign in</button>
+            {/if}
+          </div>
+        </section>
+
+        <section class="rounded-md border border-border bg-background p-3" data-bootstrap-antigravity>
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="text-sm font-medium">Antigravity</div>
+              <p class="mt-0.5 text-xs leading-4 text-muted-foreground">
+                {#if antigravityConnected}
+                  An Antigravity account is connected in Pi.
+                {:else}
+                  Not connected. Import it from OpenCode above, or run <code class="font-mono">/antigravity-add-account</code> in a session.
+                {/if}
+              </p>
+            </div>
+            {#if antigravityConnected}
+              <CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0 text-tool-success" aria-label="Connected" />
+            {/if}
           </div>
         </section>
 

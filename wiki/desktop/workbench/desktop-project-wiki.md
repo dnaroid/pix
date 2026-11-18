@@ -771,12 +771,14 @@ An empty folder or settings alone do not initialize the Wiki. Configuration and
 index paths must resolve inside the project; invalid settings or a missing index
 omit the hint. The hook creates no files and reads no Wiki document contents.
 
-The hint identifies the Wiki as the project's knowledge base and directs agents
-to save and maintain durable project knowledge, documentation and
-specifications in the actual Wiki folder. It names the index, asks agents to
-follow the existing Wiki structure and keep documentation and index links
-current. Explicit user destinations and required fixed-path files take
-precedence; disposable task output retains its existing artifact policy.
+The hint is a single short paragraph. It names the actual Wiki folder and index
+as the home of durable knowledge, docs and specs, asks agents to follow the
+existing structure and keep pages and index links current, and to describe only
+the present: rewrite changed facts in place and delete superseded text and
+unused media, since git keeps history. Durable decisions go to a decisions log
+only when the Wiki already has one; the hint does not require creating it.
+Explicit user destinations and required fixed-path files take precedence;
+disposable task output retains its existing artifact policy.
 Settings and index existence are checked asynchronously before every agent run,
 including within an existing session. The hook updates/removes its own section
 without duplicating guidance or retaining another project's path. Earlier opaque

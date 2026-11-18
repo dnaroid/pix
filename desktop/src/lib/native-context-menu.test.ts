@@ -112,6 +112,28 @@ describe("native desktop context menu commands", () => {
     expect(nativeContextMenuItems(context({ kind: "session", sessionId: "draft" }), false, reportError, () => true,
       undefined, undefined, { canRename, open })[0]).toMatchObject({ enabled: false });
   });
+  it("hands a session over to the supervisor only while the shown state still holds", async () => {
+    let state = { supervised: false, enabled: true };
+    const setSupervised = vi.fn(async () => {});
+    const actions = { canRename: () => true, open: vi.fn(), supervision: vi.fn(() => state), setSupervised };
+    const target = context({ kind: "session", sessionId: "w" });
+    const commands = nativeContextMenuItems(target, false, reportError, () => true, undefined, undefined, actions);
+    const item = commands.find((entry) => "id" in entry && entry.id === "desktop.session.supervise");
+    expect(item).toMatchObject({ text: "Hand Over to Supervisor", enabled: true });
+    if (item && "action" in item) item.action?.("ignored");
+    await Promise.resolve();
+    expect(setSupervised).toHaveBeenCalledExactlyOnceWith("w", true);
+    state = { supervised: true, enabled: true };
+    if (item && "action" in item) item.action?.("ignored");
+    await Promise.resolve();
+    expect(setSupervised).toHaveBeenCalledOnce();
+    const back = nativeContextMenuItems(target, false, reportError, () => true, undefined, undefined, actions)
+      .find((entry) => "id" in entry && entry.id === "desktop.session.supervise");
+    expect(back).toMatchObject({ text: "Take Back from Supervisor" });
+    actions.supervision.mockReturnValue(undefined as never);
+    expect(nativeContextMenuItems(target, false, reportError, () => true, undefined, undefined, actions)
+      .some((entry) => "id" in entry && entry.id === "desktop.session.supervise")).toBe(false);
+  });
   it("does not copy missing session paths or run stale or detached tab callbacks", async () => {
     expect(items({ kind: "session", sessionId: "id-without-file" })[0]).toMatchObject({ enabled: false });
     for (const commands of [

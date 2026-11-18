@@ -278,7 +278,9 @@ Do not create large empty whitespace solely to make the UI look "premium".
 Show one-shot action results (success, information, warning, or error) through
 the shared Desktop toast/notification center rather than temporary inline panel
 status. Keep form validation and persistent state beside the control that owns
-them.
+them. Handled errors that should not show a toast go to the diagnostic reporter
+through `toasts.report(error)`. Toasts render above native modal dialogs
+(see [modal dialogs](workbench/desktop-modal-dialogs.md)).
 
 ## 8. Application layout
 

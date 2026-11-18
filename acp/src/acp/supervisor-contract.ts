@@ -14,6 +14,14 @@ export const SUPERVISOR_TOOL = "supervisor";
 export const SUPERVISOR_SESSION_TITLE = "Project supervisor";
 /** Session-list `_meta` key marking the project's supervisor session. */
 export const PIX_SUPERVISOR_META_KEY = "pix.supervisor";
+/**
+ * `pix/supervisor/handover`: the user hands a session to the supervisor or
+ * takes it back. Handed-over sessions are registered as `manual`.
+ */
+export const PIX_SUPERVISOR_HANDOVER_METHOD = "pix/supervisor/handover";
+/** Session-list `_meta` key carrying the registry mode of a supervised session. */
+export const PIX_SUPERVISOR_MANAGED_META_KEY = "pix.supervisorManaged";
+export type SupervisedMode = "managed" | "manual";
 export const SUPERVISOR_OPS = ["status", "read"] as const;
 export type SupervisorOp = typeof SUPERVISOR_OPS[number];
 
@@ -23,6 +31,16 @@ export interface SupervisorOpenRequest {
 export interface SupervisorOpenResponse {
 	sessionId: string;
 	created: boolean;
+}
+
+export interface SupervisorHandoverRequest {
+	cwd: string;
+	sessionId: string;
+	/** true = hand over, false = take back. */
+	supervised: boolean;
+}
+export interface SupervisorHandoverResponse {
+	supervised: boolean;
 }
 
 export type SupervisorToolRequest =
@@ -48,6 +66,22 @@ export function parseSupervisorOpenResponse(value: unknown): SupervisorOpenRespo
 	if (typeof row.sessionId !== "string" || !row.sessionId || row.sessionId.length > MAX_SESSION_ID
 		|| typeof row.created !== "boolean") throw new Error("Invalid supervisor open response");
 	return { sessionId: row.sessionId, created: row.created };
+}
+
+export function parseSupervisorHandoverRequest(value: unknown): SupervisorHandoverRequest {
+	const row = record(value, "Invalid supervisor handover request");
+	const { cwd } = parseSupervisorOpenRequest({ cwd: row.cwd });
+	if (typeof row.sessionId !== "string" || !row.sessionId || row.sessionId.length > MAX_SESSION_ID) {
+		throw new Error("Invalid supervisor handover session");
+	}
+	if (typeof row.supervised !== "boolean") throw new Error("Invalid supervisor handover flag");
+	return { cwd, sessionId: row.sessionId, supervised: row.supervised };
+}
+
+export function parseSupervisorHandoverResponse(value: unknown): SupervisorHandoverResponse {
+	const row = record(value, "Invalid supervisor handover response");
+	if (typeof row.supervised !== "boolean") throw new Error("Invalid supervisor handover response");
+	return { supervised: row.supervised };
 }
 
 export function parseSupervisorToolRequest(value: unknown): SupervisorToolRequest {

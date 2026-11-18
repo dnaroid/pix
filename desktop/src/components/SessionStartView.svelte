@@ -1,6 +1,7 @@
 <script lang="ts">
   import { emptyStateClass } from "../lib/status-text";
   import Search from "@lucide/svelte/icons/search";
+  import Radar from "@lucide/svelte/icons/radar";
   import { onMount } from "svelte";
   import type { SessionInfo } from "@agentclientprotocol/sdk";
   import { previewInlineSearch, queryInlineSearch, type InlineSearchClient } from "../lib/inline-search";
@@ -22,11 +23,14 @@
     workspace,
     searchClient = null,
     onSelect,
+    onOpenSupervisor,
   }: {
     sessions: readonly SessionInfo[];
     workspace: string;
     searchClient?: InlineSearchClient | null;
     onSelect: (sessionId: string) => void;
+    /** Opens or activates the project supervisor (decision 0077). */
+    onOpenSupervisor?: () => void;
   } = $props();
 
   let query = $state("");
@@ -201,6 +205,16 @@
           </label>
         {/if}
       </div>
+      {#if onOpenSupervisor}
+        <button type="button" data-open-supervisor onclick={onOpenSupervisor}
+          class="mt-2 flex w-full items-center gap-2.5 rounded-md border border-primary/30 bg-primary/5 px-2.5 py-2 text-left hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-ring">
+          <Radar class="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+          <span class="min-w-0 flex-1">
+            <span class="block text-xs font-medium text-foreground">Project supervisor</span>
+            <span class="block truncate text-xs text-muted-foreground">Oversees this project's sessions, tasks and plans. Opens the existing one if it is running.</span>
+          </span>
+        </button>
+      {/if}
       {#if searching}<p role="status" class="mt-1 text-xs text-muted-foreground">Searching…</p>{:else if searchNotice}<p role="status" class="mt-1 text-xs text-muted-foreground">{searchNotice}</p>{/if}
     </header>
 

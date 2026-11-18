@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { confirmRunningTabClose } from "../lib/close-confirmation";
+import { confirmRunningTabClose, confirmSupervisorTabClose } from "../lib/close-confirmation";
 import { confirmDesktopDeletion } from "../lib/confirm-deletion";
 import { createSessionActionTracker, createSessionTabClosure } from "./session-tab-closure";
 import type { SessionTabControllerOptions } from "./session-tab-controller-options";
 
-vi.mock("../lib/close-confirmation", () => ({ confirmRunningTabClose: vi.fn() }));
+vi.mock("../lib/close-confirmation", () => ({ confirmRunningTabClose: vi.fn(), confirmSupervisorTabClose: vi.fn() }));
 vi.mock("../lib/confirm-deletion", () => ({ confirmDesktopDeletion: vi.fn() }));
 beforeEach(() => {
   vi.mocked(confirmRunningTabClose).mockReset().mockResolvedValue(true);
+  vi.mocked(confirmSupervisorTabClose).mockReset().mockResolvedValue(true);
   vi.mocked(confirmDesktopDeletion).mockReset().mockResolvedValue(true);
 });
 
@@ -97,6 +98,19 @@ function createHarness(
 }
 
 describe("session tab closure", () => {
+  it("asks before closing an idle supervisor tab and keeps it on cancel", async () => {
+    const h = createHarness("active", ["active", "background"], async () => ({}));
+    (h.options.catalog.sessions[0] as { _meta?: Record<string, unknown> })._meta = { "pix.supervisor": true };
+    vi.mocked(confirmSupervisorTabClose).mockResolvedValueOnce(false);
+    await expect(h.closure.closeSessionTab("active")).resolves.toBe(false);
+    expect(confirmSupervisorTabClose).toHaveBeenCalledWith(false);
+    expect(confirmRunningTabClose).not.toHaveBeenCalled();
+    expect(h.client.closeSession).not.toHaveBeenCalled();
+    await expect(h.closure.closeSessionTab("active")).resolves.toBe(true);
+    expect(h.client.closeSession).toHaveBeenCalledOnce();
+    expect(h.client.deleteSession).not.toHaveBeenCalled();
+  });
+
   it.each(["active", "background"])("cancelling running %s close preserves the tab and runtime", async (id) => {
     const h = createHarness("active", ["active", "background"], async () => ({}));
     const onClosing = vi.fn();

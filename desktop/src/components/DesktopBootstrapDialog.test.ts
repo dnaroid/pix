@@ -11,4 +11,14 @@ describe("DesktopBootstrapDialog", () => {
     expect(bootstrapSource).toContain("disabled={busy !== null || saving}");
     expect(bootstrapSource).not.toContain("localStorage");
   });
+
+  it("shows Claude Code and Antigravity status and labels the Codex import as the static API key", () => {
+    expect(bootstrapSource).toContain("data-bootstrap-claude-code");
+    expect(bootstrapSource).toContain("data-bootstrap-antigravity");
+    expect(bootstrapSource).toContain("openTerminal(claudeLoginCommand())");
+    expect(bootstrapSource).toContain("/antigravity-add-account");
+    expect(bootstrapSource).toContain("Codex API key (OPENAI_API_KEY)");
+    // Sign-in completes setup first so the modal does not cover the terminal.
+    expect(bootstrapSource).toMatch(/if \(!openTerminal \|\| !\(await finish\(\)\)\) return;/u);
+  });
 });

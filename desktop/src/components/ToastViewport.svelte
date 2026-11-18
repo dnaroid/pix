@@ -2,11 +2,20 @@
   import X from "@lucide/svelte/icons/x";
   import { toasts as defaultStore, type ToastStore } from "../app/toasts.svelte";
   import ToastLevelIcon from "./ToastLevelIcon.svelte";
+  import { keepAboveModals } from "../lib/top-layer";
 
   let { store = defaultStore, maxVisible = 3 }: { store?: ToastStore; maxVisible?: number } = $props();
 
   const visible = $derived(store.active.slice(-maxVisible));
   const hiddenCount = $derived(Math.max(0, store.active.length - visible.length));
+
+  let viewport = $state<HTMLElement | null>(null);
+  // Notifications stay visible above native modal dialogs (top layer).
+  $effect(() => {
+    const element = viewport;
+    if (!element) return;
+    return keepAboveModals(element, store.report);
+  });
 
   function focusout(event: FocusEvent): void {
     const container = event.currentTarget as HTMLElement;
@@ -14,10 +23,12 @@
   }
 </script>
 
-<!-- Bottom-right stack above the status bar; empty space never blocks the workbench. -->
+<!-- Bottom-right stack above the status bar and above modal dialogs; empty space never blocks the workbench. -->
 {#if store.active.length}
   <section
-    class="pointer-events-none fixed right-3 bottom-9 z-50 flex w-[360px] max-w-[calc(100vw-24px)] flex-col items-stretch gap-2"
+    bind:this={viewport}
+    popover="manual"
+    class="pointer-events-none fixed top-auto left-auto right-3 bottom-9 z-50 m-0 overflow-visible border-0 bg-transparent p-0 text-foreground flex w-[360px] max-w-[calc(100vw-24px)] flex-col items-stretch gap-2"
     aria-label="Notifications"
     data-toast-viewport
   >

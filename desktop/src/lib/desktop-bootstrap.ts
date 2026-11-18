@@ -26,7 +26,15 @@ export interface DesktopBootstrapSnapshot {
     readonly oauthDetected: boolean;
     readonly authMode?: string;
   };
+  /** Claude Code CLI presence/login state only; absent from older bootstrap scripts. */
+  readonly claudeCode?: {
+    readonly status: ClaudeCodeBootstrapStatus;
+  };
 }
+
+export type ClaudeCodeBootstrapStatus = "missing" | "logged-out" | "ready" | "unknown";
+
+export const ANTIGRAVITY_PROVIDER_ID = "antigravity";
 
 export interface OpenCodeImportResult {
   readonly sourcePath: string;

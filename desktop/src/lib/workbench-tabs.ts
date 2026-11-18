@@ -19,6 +19,10 @@ export interface WorkbenchSessionTab extends WorkbenchTabBase {
   readonly running: boolean;
   readonly draft: boolean;
   readonly fork: boolean;
+  /** The project supervisor conversation: pinned first, radar icon, confirmed close. */
+  readonly supervisor?: boolean;
+  /** Handed over to (or started by) the project supervisor. */
+  readonly supervised?: boolean;
   /** Undefined for regular sessions; neutral agent icon when profile data is unavailable. */
   readonly subagentIcon?: string;
   readonly statusKind: SessionTabStatusKind;

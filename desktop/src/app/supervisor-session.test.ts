@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createSupervisorSessionAction, handleSupervisorMenu, SUPERVISOR_MENU_UNAVAILABLE } from "./supervisor-session";
+import { createSupervisorHandover, createSupervisorSessionAction, handleSupervisorMenu, SUPERVISOR_MENU_UNAVAILABLE } from "./supervisor-session";
 import { sessionIsSupervisor } from "../lib/session-tabs";
 import { COMMAND_PALETTE_IDS, desktopCommandDefinition } from "../lib/desktop-commands";
 
@@ -91,5 +91,53 @@ describe("project supervisor session action", () => {
     await handleSupervisorMenu(commands, (message) => notices.push(message));
     expect(execute).toHaveBeenCalledWith("session.supervisor");
     expect(notices).toHaveLength(1);
+  });
+});
+
+describe("manual supervisor handover", () => {
+  function handover(sessions: Array<{ sessionId: string; _meta?: Record<string, unknown> }>) {
+    const client = { supervisorHandover: vi.fn(async (_cwd: string, _id: string, supervised: boolean) => ({ supervised })) };
+    let current: typeof client | null = client;
+    const errors: unknown[] = [];
+    const refresh = vi.fn(async () => {});
+    const action = createSupervisorHandover({
+      client: () => current,
+      workspace: () => "/p",
+      sessions: () => sessions.map((session) => ({ cwd: "/p", ...session })),
+      refreshSessions: refresh,
+      reportError: (error) => errors.push(error),
+    });
+    return { client, action, errors, refresh, setClient: (next: typeof client | null) => { current = next; } };
+  }
+  const supervisor = { sessionId: "sup", _meta: { "pix.supervisor": true } };
+
+  it("offers handover only for ordinary sessions while a supervisor exists", () => {
+    const h = handover([supervisor, { sessionId: "w" }, { sessionId: "m", _meta: { "pix.supervisorManaged": "manual" } }]);
+    expect(h.action.supervision("w")).toEqual({ supervised: false, enabled: true });
+    expect(h.action.supervision("m")).toEqual({ supervised: true, enabled: true });
+    expect(h.action.supervision("sup")).toBeUndefined();
+    expect(h.action.supervision("missing")).toBeUndefined();
+    const none = handover([{ sessionId: "w" }, { sessionId: "m", _meta: { "pix.supervisorManaged": "manual" } }]);
+    expect(none.action.supervision("w")).toEqual({ supervised: false, enabled: false });
+    expect(none.action.supervision("m")).toEqual({ supervised: true, enabled: true });
+  });
+
+  it("calls ACP once per pending change, refreshes, and drops stale results", async () => {
+    const h = handover([supervisor, { sessionId: "w" }]);
+    let release!: () => void;
+    h.client.supervisorHandover.mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve({ supervised: true }); }));
+    const first = h.action.setSupervised("w", true);
+    expect(h.action.supervision("w")?.enabled).toBe(false);
+    await h.action.setSupervised("w", true);
+    expect(h.client.supervisorHandover).toHaveBeenCalledOnce();
+    release();
+    await first;
+    expect(h.refresh).toHaveBeenCalledOnce();
+    h.client.supervisorHandover.mockRejectedValueOnce(new Error("no supervisor"));
+    await h.action.setSupervised("w", true);
+    expect(h.errors).toHaveLength(1);
+    h.client.supervisorHandover.mockImplementationOnce(async () => { h.setClient(null); throw new Error("late"); });
+    await h.action.setSupervised("w", false);
+    expect(h.errors).toHaveLength(1);
   });
 });

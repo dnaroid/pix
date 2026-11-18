@@ -114,6 +114,33 @@ test("OpenCode bootstrap uses the suite importer and never overwrites Pi auth im
   }
 });
 
+async function fakeClaude(dir, stdout, exitCode) {
+  const path = join(dir, "claude");
+  await writeFile(path, `#!/bin/sh\nprintf '%s\\n' '${stdout}'\nexit ${exitCode}\n`, { mode: 0o755 });
+  return path;
+}
+
+test("bootstrap inspect reports Claude Code CLI login state without identity fields", { skip: process.platform === "win32" }, async () => {
+  const { paths, env, cleanup } = await fixture();
+  try {
+    const bin = join(paths.home, "bin");
+    await mkdir(bin, { recursive: true });
+    const isolated = { ...env, PATH: "/usr/bin:/bin", PIX_USER_PATH: "" };
+    delete isolated.PI_CLAUDE_CODE_PROVIDER_PATH;
+    assert.deepEqual(run("inspect", isolated).json.claudeCode, { status: "missing" });
+
+    await fakeClaude(bin, '{"loggedIn":false}', 1);
+    assert.deepEqual(run("inspect", { ...isolated, PIX_USER_PATH: bin }).json.claudeCode, { status: "logged-out" });
+
+    const ready = await fakeClaude(bin, '{"loggedIn":true,"email":"fixture-person@example.com"}', 0);
+    const result = run("inspect", { ...isolated, PI_CLAUDE_CODE_PROVIDER_PATH: ready });
+    assert.deepEqual(result.json.claudeCode, { status: "ready" });
+    assert.equal(result.stdout.includes("fixture-person"), false);
+  } finally {
+    await cleanup();
+  }
+});
+
 test("bootstrap inspect omits IDX state and no longer accepts IDX installation", async () => {
   const { env, cleanup } = await fixture();
   try {

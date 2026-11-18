@@ -18,6 +18,9 @@ export interface NativeContextMenu {
 export interface SessionContextActions {
   canRename(sessionId: string): boolean;
   open(sessionId: string): void;
+  /** Project-supervisor handover state; undefined hides the item. */
+  supervision?(sessionId: string): { readonly supervised: boolean; readonly enabled: boolean } | undefined;
+  setSupervised?(sessionId: string, supervised: boolean): Promise<void>;
 }
 
 type EditCommand = "Undo" | "Redo" | "Cut" | "Copy" | "Paste" | "SelectAll";
@@ -109,6 +112,20 @@ export function nativeContextMenuItems(
       enabled: sessionActions.canRename(sessionId),
       action: run(async () => { if (sessionActions.canRename(sessionId)) sessionActions.open(sessionId); }),
     });
+    const supervision = sessionId ? sessionActions?.supervision?.(sessionId) : undefined;
+    if (sessionActions?.setSupervised && sessionId && supervision) {
+      const setSupervised = sessionActions.setSupervised;
+      items.push({
+        id: "desktop.session.supervise",
+        text: supervision.supervised ? "Take Back from Supervisor" : "Hand Over to Supervisor",
+        enabled: supervision.enabled,
+        action: run(async () => {
+          const current = sessionActions.supervision?.(sessionId);
+          // Act only if the state the user saw still holds.
+          if (current?.enabled && current.supervised === supervision.supervised) await setSupervised(sessionId, !supervision.supervised);
+        }),
+      });
+    }
     const sessionFile = context.sessionFile;
     items.push({
       id: "desktop.session.copy-path",

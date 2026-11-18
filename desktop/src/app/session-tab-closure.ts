@@ -1,5 +1,6 @@
 import { DRAFT_SESSION_TAB_ID } from "./draft-session.svelte";
-import { confirmRunningTabClose } from "../lib/close-confirmation";
+import { confirmRunningTabClose, confirmSupervisorTabClose } from "../lib/close-confirmation";
+import { sessionIsSupervisor } from "../lib/session-tabs";
 import { confirmDesktopDeletion } from "../lib/confirm-deletion";
 import type { SessionLoader, SessionTabControllerOptions } from "./session-tab-controller-options";
 
@@ -85,13 +86,16 @@ export function createSessionTabClosure(
       return true;
     }
 
-    if (options.promptRunning(sessionId)) {
-      const title = options.catalog.sessions.find((session) => session.sessionId === sessionId)?.title || "Untitled conversation";
+    const closingSession = options.catalog.sessions.find((session) => session.sessionId === sessionId);
+    const supervisor = closingSession ? sessionIsSupervisor(closingSession) : false;
+    if (supervisor || options.promptRunning(sessionId)) {
+      const running = options.promptRunning(sessionId);
+      const title = closingSession?.title || "Untitled conversation";
       const confirmationClient = options.client();
       const confirmationWorkspace = options.workspace();
       if (!sessionActions.begin(sessionId)) return false;
       try {
-        if (!await confirmRunningTabClose(title)) return false;
+        if (!await (supervisor ? confirmSupervisorTabClose(running) : confirmRunningTabClose(title))) return false;
         if (confirmationClient !== options.client()
           || confirmationWorkspace !== options.workspace()
           || options.sessionMutationRunning()

@@ -13,6 +13,13 @@ export function orderedWorkbenchTabs(tabs: readonly WorkbenchTab[], order: reado
   return ids.map((id) => byId.get(id)!);
 }
 
+/** The project supervisor tab always stays first, whatever the custom order. */
+export function pinSupervisorFirst(tabs: readonly WorkbenchTab[]): WorkbenchTab[] {
+  const index = tabs.findIndex((tab) => tab.kind === "session" && tab.supervisor === true);
+  if (index <= 0) return [...tabs];
+  return [tabs[index]!, ...tabs.slice(0, index), ...tabs.slice(index + 1)];
+}
+
 export function moveWorkbenchTab(tabs: readonly WorkbenchTab[], id: WorkbenchTabId, beforeId: WorkbenchTabId | null): WorkbenchTabId[] {
   const ids = tabs.map((tab) => tab.id);
   if (!ids.includes(id) || id === beforeId || (beforeId !== null && !ids.includes(beforeId))) return ids;

@@ -5,10 +5,12 @@ status: proposal
 
 # Project supervisor (planned)
 
-**Status: proposal — not implemented.** This page is the target contract for
+**Status: partially implemented.** This page is the target contract for
 the project supervisor accepted in
-[0077](../decisions/0077-project-supervisor-session.md). Nothing below exists
-in the product yet. The staged rollout is tracked in the project plan
+[0077](../decisions/0077-project-supervisor-session.md). Implemented so far:
+phase 0, the supervisor session with read-only `status`/`read`, debounced wakes,
+the pinned supervisor tab and manual handover (`pix/supervisor/handover`);
+the autopilot (mutating supervisor ops) is not. See *State and lifetime*. The staged rollout is tracked in the project plan
 `.pi/plans/project-supervisor.md`.
 
 [Work management](index.md)

@@ -1,8 +1,9 @@
 // @ts-nocheck
-import { existsSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { accessSync, constants, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -39,7 +40,57 @@ function codexAuthPath() {
   return join(process.env.CODEX_HOME?.trim() || join(home, ".codex"), "auth.json");
 }
 
+function resolveClaudeExecutable() {
+  const configured = process.env.PI_CLAUDE_CODE_PROVIDER_PATH?.trim();
+  const runnable = (candidate) => {
+    try {
+      accessSync(candidate, constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (configured) {
+    const explicitPath = isAbsolute(configured) || configured.includes("/") || configured.includes("\\");
+    if (explicitPath) return runnable(configured) ? configured : undefined;
+  }
+  const name = configured || "claude";
+  const searchPath = [process.env.PIX_USER_PATH, process.env.PATH].filter(Boolean).join(delimiter);
+  for (const directory of searchPath.split(delimiter)) {
+    if (!directory) continue;
+    const candidate = join(directory, name);
+    if (runnable(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Claude Code owns its login. Only the structured `loggedIn` flag of
+ * `claude auth status` is used; identity fields and tokens are never returned.
+ */
+async function inspectClaudeCode() {
+  const executable = resolveClaudeExecutable();
+  if (!executable) return { status: "missing" };
+  const stdout = await new Promise((resolveStatus) => {
+    const env = { ...process.env };
+    if (process.env.PIX_USER_PATH) env.PATH = [process.env.PIX_USER_PATH, process.env.PATH].filter(Boolean).join(delimiter);
+    execFile(executable, ["auth", "status"], { timeout: 10_000, env }, (error, out) => {
+      // Claude exits 1 for loggedIn:false but still prints the structured status.
+      if (error && (error.killed || error.signal || typeof error.code !== "number")) resolveStatus("");
+      else resolveStatus(typeof out === "string" ? out : "");
+    });
+  });
+  let loggedIn;
+  try {
+    loggedIn = JSON.parse(stdout)?.loggedIn;
+  } catch {
+    loggedIn = undefined;
+  }
+  return { status: loggedIn === true ? "ready" : loggedIn === false ? "logged-out" : "unknown" };
+}
+
 async function inspect() {
+  const claudeCode = inspectClaudeCode();
   const piAuthPath = join(agentDir, "auth.json");
   const piAuth = await readJson(piAuthPath);
   const { authPath: opencodeAuthPath, antigravityPath } = opencodePaths();
@@ -80,6 +131,7 @@ async function inspect() {
       ),
       authMode: typeof codexAuth?.auth_mode === "string" ? codexAuth.auth_mode : undefined,
     },
+    claudeCode: await claudeCode,
   };
 }
 

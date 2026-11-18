@@ -135,8 +135,9 @@ describe("WorkbenchTabs desktop interaction", () => {
     expect(workbenchControllerSource).toContain("pane ? await pane.requestClose() : (options.closePreview(), true)");
     expect(workbenchControllerSource).toContain("options.closeGitDiff();");
     expect(workbenchControllerSource).toContain("options.closeTerminal();");
-    expect(sessionTabClosureSource).toContain("if (options.promptRunning(sessionId))");
-    expect(sessionTabClosureSource).toContain("await confirmRunningTabClose(title)");
+    expect(sessionTabClosureSource).toContain("if (supervisor || options.promptRunning(sessionId))");
+    expect(sessionTabClosureSource).toContain("supervisor ? confirmSupervisorTabClose(running) : confirmRunningTabClose(title)");
+    expect(closeConfirmationSource).toContain("Close the project supervisor tab?");
     expect(closeConfirmationSource).toContain("Closing this tab will stop the active run.");
   });
 

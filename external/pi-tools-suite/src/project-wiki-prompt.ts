@@ -44,7 +44,7 @@ function quotedPath(path: string): string {
 }
 
 function guidance(config: ProjectWikiConfig): string {
-	return `The Wiki is this project's knowledge base. Save and maintain durable project knowledge, documentation and specifications in ${quotedPath(config.path + "/")} (index: ${quotedPath(config.indexPath)}). Follow the existing Wiki structure and keep documentation and index links current. Honor explicit user-requested locations and required fixed-path files.`;
+	return `Project Wiki: ${quotedPath(config.path + "/")} (index ${quotedPath(config.indexPath)}) holds durable knowledge, docs and specs. Follow its structure; keep pages and index links current. Describe only the present: rewrite changed facts in place and delete superseded text and unused media (git keeps history). If the Wiki has a decisions log, record durable decisions there. User-requested and fixed-path locations take precedence.`;
 }
 
 /** Re-evaluate the current project on every run, including an already-open session. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { moveWorkbenchTab, orderedWorkbenchTabs } from "./workbench-tab-order";
+import { moveWorkbenchTab, orderedWorkbenchTabs, pinSupervisorFirst } from "./workbench-tab-order";
 import type { WorkbenchTab, WorkbenchTabId } from "./workbench-tabs";
 
 const tabs = (...ids: WorkbenchTabId[]) => ids.map((id) => ({ id })) as WorkbenchTab[];
@@ -32,5 +32,14 @@ describe("window-local workbench tab order", () => {
       expect(moveWorkbenchTab(original, source, before)).toEqual(ids(original));
     }
     expect(ids(orderedWorkbenchTabs(original, []))).toEqual(ids(original));
+  });
+
+  it("keeps the supervisor tab first whatever the custom order", () => {
+    const supervisor = { id: "session:s", kind: "session", supervisor: true } as unknown as WorkbenchTab;
+    const list = [...tabs("session:a", "preview"), supervisor];
+    expect(ids(pinSupervisorFirst(list))).toEqual(["session:s", "session:a", "preview"]);
+    const order = moveWorkbenchTab(pinSupervisorFirst(list), "session:a", "session:s");
+    expect(ids(pinSupervisorFirst(orderedWorkbenchTabs(list, order)))[0]).toBe("session:s");
+    expect(ids(pinSupervisorFirst(tabs("session:a", "preview")))).toEqual(["session:a", "preview"]);
   });
 });

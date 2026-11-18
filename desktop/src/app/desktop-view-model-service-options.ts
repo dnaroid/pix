@@ -50,6 +50,8 @@ export type DesktopViewModelServicesOptions = {
   changingConfig: () => string | null;
   displayedConfigOptions: () => SessionConfigOption[];
   reconnect: () => void | Promise<void>;
+  /** Open (or activate) the project supervisor from the session start screen. */
+  openSupervisor?: () => void;
   focusComposer: () => void | Promise<void>;
   state: ActiveSessionState;
   errors: ErrorState;

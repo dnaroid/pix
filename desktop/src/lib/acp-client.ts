@@ -348,6 +348,10 @@ export class AcpClient {
     return this.pix.openSupervisor(cwd);
   }
 
+  supervisorHandover(cwd: string, sessionId: string, supervised: boolean): Promise<{ supervised: boolean }> {
+    return this.pix.supervisorHandover(cwd, sessionId, supervised);
+  }
+
   queueMessage(
     sessionId: string,
     prompt: readonly ContentBlock[],

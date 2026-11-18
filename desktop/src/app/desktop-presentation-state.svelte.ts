@@ -1,7 +1,7 @@
 import type { SessionInfo } from "@agentclientprotocol/sdk";
 import { agentControlShowsPausedTab } from "../lib/agent-control";
 import { subagentSessionLink } from "../lib/session-subagent-link";
-import { moveWorkbenchTab, orderedWorkbenchTabs } from "../lib/workbench-tab-order";
+import { moveWorkbenchTab, orderedWorkbenchTabs, pinSupervisorFirst } from "../lib/workbench-tab-order";
 import {
   DESKTOP_SLASH_COMMANDS,
   mergeSlashCommands,
@@ -151,10 +151,10 @@ export function createDesktopPresentationState(options: DesktopPresentationState
       openedOrder: options.workbenchWikiConflicts.openedOrder,
     } : null,
   }));
-  const workbenchTabs = $derived(orderedWorkbenchTabs(
+  const workbenchTabs = $derived(pinSupervisorFirst(orderedWorkbenchTabs(
     canonicalWorkbenchTabs,
     customTabOrder?.workspace === options.workspace() ? customTabOrder.ids : [],
-  ));
+  )));
   $effect(() => {
     if (!customTabOrder) return;
     if (customTabOrder.workspace !== options.workspace()) { customTabOrder = null; return; }

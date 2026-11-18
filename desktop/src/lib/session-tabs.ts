@@ -6,10 +6,18 @@ const PIX_IS_FORK_META_KEY = "pix.isFork";
 const PIX_PARENT_SESSION_ID_META_KEY = "pix.parentSessionId";
 /** Mirrors PIX_SUPERVISOR_META_KEY in acp/src/acp/supervisor-contract.ts. */
 const PIX_SUPERVISOR_META_KEY = "pix.supervisor";
+/** Mirrors PIX_SUPERVISOR_MANAGED_META_KEY in acp/src/acp/supervisor-contract.ts. */
+const PIX_SUPERVISOR_MANAGED_META_KEY = "pix.supervisorManaged";
 
 /** The project's supervisor conversation (decision 0077). */
 export function sessionIsSupervisor(session: SessionInfo): boolean {
   return session._meta?.[PIX_SUPERVISOR_META_KEY] === true;
+}
+
+/** Registry mode of a session under the project supervisor, if any. */
+export function sessionSupervisedMode(session: SessionInfo): "managed" | "manual" | undefined {
+  const mode = session._meta?.[PIX_SUPERVISOR_MANAGED_META_KEY];
+  return mode === "managed" || mode === "manual" ? mode : undefined;
 }
 
 /** Pix session-list metadata mirrors Pi's parent-session fork marker without exposing the parent path. */

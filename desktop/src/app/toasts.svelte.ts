@@ -212,6 +212,11 @@ export function createToastStore(timers: TimerApi = defaultTimers) {
     history = history.filter((entry) => visible.has(entry.id));
   }
 
+  /** Send a handled UI error to the diagnostic reporter without showing a toast. */
+  function report(error: unknown): void {
+    try { reporter?.(error); } catch { /* Logging never changes UI behavior. */ }
+  }
+
   function setReporter(next: ((error: unknown) => void) | undefined): () => void {
     reporter = next;
     return () => { if (reporter === next) reporter = undefined; };
@@ -247,6 +252,7 @@ export function createToastStore(timers: TimerApi = defaultTimers) {
     markAllRead,
     clearHistory,
     setReporter,
+    report,
     dispose,
   };
 }

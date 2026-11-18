@@ -17,7 +17,7 @@ import {
   type WorkbenchTerminalTab,
   type WorkbenchWikiConflictsTab,
 } from "../lib/workbench-tabs";
-import { sessionIsFork } from "../lib/session-tabs";
+import { sessionIsFork, sessionIsSupervisor, sessionSupervisedMode } from "../lib/session-tabs";
 import { subagentSessionLink } from "../lib/session-subagent-link";
 import type { SessionSubagentSnapshot } from "../lib/session-subagents";
 
@@ -84,6 +84,8 @@ export function buildSessionWorkbenchTabs(options: {
       running,
       draft,
       fork: sessionIsFork(session),
+      ...(sessionIsSupervisor(session) ? { supervisor: true } : {}),
+      ...(sessionSupervisedMode(session) ? { supervised: true } : {}),
       subagentIcon,
       statusKind,
     };

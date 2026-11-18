@@ -58,8 +58,13 @@ import { forwardTaskRun } from "./task-run-bridge.js";
 import { PIX_PLAN_LAUNCHES_METHOD, parsePlanLaunchesRequest, type PlanLaunchesRequest } from "./plan-launches-contract.js";
 import { createPlanLaunchesStore, type PlanLaunchesStore } from "./plan-launches-store.js";
 import {
+	PIX_SUPERVISOR_HANDOVER_METHOD,
+	PIX_SUPERVISOR_MANAGED_META_KEY,
 	PIX_SUPERVISOR_META_KEY,
 	PIX_SUPERVISOR_OPEN_METHOD,
+	parseSupervisorHandoverRequest,
+	type SupervisorHandoverRequest,
+	type SupervisorHandoverResponse,
 	SUPERVISOR_SESSION_TITLE,
 	parseSupervisorOpenRequest,
 	type SupervisorOpenRequest,
@@ -68,7 +73,7 @@ import {
 import { forwardSupervisorRequest } from "./supervisor-bridge.js";
 import { createSupervisorService, type SupervisorService } from "./supervisor-service.js";
 import { createSupervisorWaker, type SupervisorWaker } from "./supervisor-wake.js";
-import { createSupervisorStore, type SupervisorStore } from "./supervisor-store.js";
+import { createSupervisorStore, type SupervisorRegistry, type SupervisorStore } from "./supervisor-store.js";
 import {
 	createSessionEventMonitor,
 	type SessionEventListener,
@@ -1092,6 +1097,8 @@ export class PixAcpAgent {
 			.onRequest(PIX_PLAN_LAUNCHES_METHOD, parsePlanLaunchesParams, (ctx) => this.withRequestLogging(PIX_PLAN_LAUNCHES_METHOD, ctx.params, ctx.signal, () => this.planLaunches.handle(ctx.params)),
 			)
 			.onRequest(PIX_SUPERVISOR_OPEN_METHOD, parseSupervisorOpenParams, (ctx) => this.withRequestLogging(PIX_SUPERVISOR_OPEN_METHOD, ctx.params, ctx.signal, () => this.openSupervisor(ctx.params, ctx.client)),
+			)
+			.onRequest(PIX_SUPERVISOR_HANDOVER_METHOD, parseSupervisorHandoverParams, (ctx) => this.withRequestLogging(PIX_SUPERVISOR_HANDOVER_METHOD, ctx.params, ctx.signal, () => this.handOverToSupervisor(ctx.params)),
 			)
 			.onRequest(PIX_TAKE_AUTO_MESSAGE_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_TAKE_AUTO_MESSAGE_METHOD, ctx.params, ctx.signal, () => this.desktopTakeAutoMessage(ctx.params)),
 			)
@@ -2461,13 +2468,16 @@ export class PixAcpAgent {
 		}
 
 		const records = await this.sessionMap.list(params.cwd ?? undefined);
-		const supervisorSessionId = params.cwd ? await this.supervisorSessionId(params.cwd) : undefined;
+		const supervisorRegistry = params.cwd ? await this.supervisorRegistry(params.cwd) : undefined;
+		const supervisorSessionId = supervisorRegistry?.supervisorSessionId;
 		const sessionIdByPath = new Map(records
 			.map((record) => [resolve(record.piSessionPath), record.sessionId]));
 		const sessions: SessionInfo[] = records.map((record) => {
 			const info: SessionInfo = { sessionId: record.sessionId, cwd: record.cwd, updatedAt: record.updatedAt,
 				_meta: { "pix.sessionFile": resolve(record.piSessionPath),
-					...(record.sessionId === supervisorSessionId ? { [PIX_SUPERVISOR_META_KEY]: true } : {}) } };
+					...(record.sessionId === supervisorSessionId ? { [PIX_SUPERVISOR_META_KEY]: true } : {}),
+					...(supervisorRegistry?.sessions[record.sessionId]
+						? { [PIX_SUPERVISOR_MANAGED_META_KEY]: supervisorRegistry.sessions[record.sessionId]!.mode } : {}) } };
 			if (record.title !== undefined) info.title = record.title;
 			if (record.subagent) info._meta = { ...info._meta, [PIX_SUBAGENT_META_KEY]: record.subagent };
 			if (record.parentSessionPath !== undefined) {
@@ -2538,12 +2548,52 @@ export class PixAcpAgent {
 
 	/** Registered supervisor session id; a broken store only hides the marker. */
 	private async supervisorSessionId(cwd: string): Promise<string | undefined> {
+		return (await this.supervisorRegistry(cwd))?.supervisorSessionId;
+	}
+
+	private async supervisorRegistry(cwd: string): Promise<SupervisorRegistry | undefined> {
 		try {
-			return (await this.supervisorStore.readRegistry(cwd)).supervisorSessionId;
+			return await this.supervisorStore.readRegistry(cwd);
 		} catch (error) {
 			this.options.logger.warn(`supervisor registry read failed: ${stringifyUnknown(error)}`, { module: "supervisor" });
 			return undefined;
 		}
+	}
+
+	/**
+	 * The user hands an ordinary project session to the supervisor (registered
+	 * as `manual`: the supervisor watches it but never sends there) or takes it
+	 * back. Idempotent; the supervisor itself and sub-agent viewers are refused.
+	 */
+	private async handOverToSupervisor(params: SupervisorHandoverRequest): Promise<SupervisorHandoverResponse> {
+		if (this.clientName !== "pix-desktop") {
+			throw new RequestError(ERROR_SERVER, "the project supervisor requires Pix Desktop");
+		}
+		const { cwd, sessionId, supervised } = params;
+		const record = await this.sessionMap.get(sessionId);
+		if (!record || resolve(record.cwd) !== resolve(cwd)) throw new RequestError(ERROR_SERVER, `session ${sessionId} not found in this project`);
+		if (record.subagent) throw new RequestError(ERROR_SERVER, "sub-agent sessions cannot be handed to the supervisor");
+		let changed = false;
+		await this.supervisorStore.updateRegistry(cwd, (current) => {
+			if (supervised && !current.supervisorSessionId) throw new RequestError(ERROR_SERVER, "open the project supervisor first");
+			if (current.supervisorSessionId === sessionId) throw new RequestError(ERROR_SERVER, "the supervisor cannot supervise itself");
+			const existing = current.sessions[sessionId];
+			if (supervised) {
+				if (existing) return current;
+				changed = true;
+				return { ...current, sessions: { ...current.sessions,
+					[sessionId]: { item: { kind: "prompt" }, mode: "manual", registeredAt: Date.now(), reworkRounds: 0 } } };
+			}
+			if (!existing) return current;
+			changed = true;
+			const { [sessionId]: _removed, ...sessions } = current.sessions;
+			return { ...current, sessions };
+		});
+		if (changed) {
+			await this.supervisorStore.appendLedger(cwd, { kind: supervised ? "handed_over" : "released", sessionId })
+				.catch((error: unknown) => this.options.logger.warn(`supervisor ledger append failed: ${stringifyUnknown(error)}`, { module: "supervisor" }));
+		}
+		return { supervised };
 	}
 
 	/**
@@ -5281,6 +5331,14 @@ function commandPathArgument(value: string | undefined): string | undefined {
 
 
 /** Validate the registry extension's structured diff payload into ACP files. */
+function parseSupervisorHandoverParams(value: unknown): SupervisorHandoverRequest {
+	try {
+		return parseSupervisorHandoverRequest(value);
+	} catch (error) {
+		throw new RequestError(ERROR_INVALID_PARAMS, error instanceof Error ? error.message : String(error));
+	}
+}
+
 /** Contract validation errors surface as JSON-RPC invalid params. */
 function parseSupervisorOpenParams(value: unknown): SupervisorOpenRequest {
 	try {

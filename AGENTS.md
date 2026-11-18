@@ -1,10 +1,5 @@
 # Engineering guardrails
 
-- Start with `wiki/index.md` for project documentation. New durable guides,
-  requirements and specifications belong in `wiki/`, beside their subject;
-  link them from the relevant section index. Follow `wiki/maintenance/index.md`.
-  Keep tool-loaded instructions, package entry points and legal/provenance files
-  at their required paths; do not create parallel `docs/` or `specs/` trees.
 - Run full local `npm run check:ci` only for release preparation or explicit
   "запушить всё"; otherwise use focused tests and relevant typechecks/builds,
   never all gate stages separately. Preflight does not authorize a full run.

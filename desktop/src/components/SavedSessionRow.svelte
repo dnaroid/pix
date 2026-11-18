@@ -4,7 +4,8 @@
   import Check from "@lucide/svelte/icons/check";
   import Bot from "@lucide/svelte/icons/bot";
   import Radar from "@lucide/svelte/icons/radar";
-  import { sessionIsFork, sessionIsSupervisor, type SessionTreeRow } from "../lib/session-tabs";
+  import ScanEye from "@lucide/svelte/icons/scan-eye";
+  import { sessionIsFork, sessionIsSupervisor, sessionSupervisedMode, type SessionTreeRow } from "../lib/session-tabs";
   import { subagentSessionLink } from "../lib/session-subagent-link";
 
   let { row, collapsed = false, related = false, selected = false, disabled = false,
@@ -60,6 +61,8 @@
           <Bot class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
         {:else if sessionIsSupervisor(row.session)}
           <Radar class="h-3 w-3 shrink-0 text-primary" aria-label="Project supervisor" role="img" />
+        {:else if sessionSupervisedMode(row.session)}
+          <ScanEye class="h-3 w-3 shrink-0 text-primary" aria-label="Supervised by the project supervisor" role="img" />
         {:else if row.depth === 0 && sessionIsFork(row.session)}<GitFork class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />{/if}
         <span class="min-w-0 truncate">{title}</span>
       </strong>

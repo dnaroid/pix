@@ -70,6 +70,10 @@ The first-run dialog verifies the bundled runtime and can optionally:
 - import supported OpenCode credentials without overwriting existing Pi
   credentials by default;
 - import a static Codex `OPENAI_API_KEY` when Pi has no OpenAI credential;
+- show Claude Code CLI status (not installed / not signed in / ready / unknown) and run
+  Claude's own `auth login` in the project terminal via **Sign in**;
+- show whether an Antigravity account is connected, pointing to OpenCode import
+  or `/antigravity-add-account` otherwise;
 - configure optional native repository semantic search.
 
 ChatGPT/Codex OAuth refresh tokens are deliberately not copied between auth

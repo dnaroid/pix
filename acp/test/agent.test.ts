@@ -6295,6 +6295,20 @@ test("project supervisor: one Desktop-only session per project gets the supervis
 			const marked = listed.sessions.filter((session) => session._meta?.["pix.supervisor"] === true).map((session) => session.sessionId);
 			assert.deepEqual(marked, [first.sessionId]);
 
+			const managedMode = async () => {
+				const rows = await cx.request("session/list", { cwd }) as { sessions: Array<{ sessionId: string; _meta?: Record<string, unknown> }> };
+				return rows.sessions.find((session) => session.sessionId === worker.sessionId)?._meta?.["pix.supervisorManaged"];
+			};
+			assert.deepEqual(await cx.request("pix/supervisor/handover", { cwd, sessionId: worker.sessionId, supervised: true }), { supervised: true });
+			await cx.request("pix/supervisor/handover", { cwd, sessionId: worker.sessionId, supervised: true });
+			assert.equal(await managedMode(), "manual");
+			await assert.rejects(cx.request("pix/supervisor/handover", { cwd, sessionId: first.sessionId, supervised: true }), /cannot supervise itself/);
+			assert.deepEqual(await cx.request("pix/supervisor/handover", { cwd, sessionId: worker.sessionId, supervised: false }), { supervised: false });
+			assert.equal(await managedMode(), undefined);
+			const handoverLedger = await readFile(join(cwd, ".pi/supervisor/ledger.jsonl"), "utf8");
+			assert.equal(handoverLedger.match(/"kind":"handed_over"/g)?.length, 1, "repeated handover is idempotent");
+			assert.match(handoverLedger, /"kind":"released"/);
+
 			const replies: Array<[string, { result?: any; error?: string }]> = [];
 			for (const pi of harness.clients) {
 				(pi as unknown as { respondToSupervisor: unknown }).respondToSupervisor = async (requestId: string, response: { result?: unknown; error?: string }) => {

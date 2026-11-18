@@ -421,7 +421,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 200,
-          "description": "Project-relative directory for council protocols; default .pi/brainstorms (outside the knowledge base)."
+          "description": "Project-relative directory for council protocols; default .pi/brainstorms (outside the Wiki)."
         },
         "quorum": {
           "anyOf": [

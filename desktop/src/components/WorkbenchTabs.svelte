@@ -5,6 +5,8 @@
   import GitFork from "@lucide/svelte/icons/git-fork";
   import CodeXml from "@lucide/svelte/icons/code-xml";
   import Plus from "@lucide/svelte/icons/plus";
+  import Radar from "@lucide/svelte/icons/radar";
+  import ScanEye from "@lucide/svelte/icons/scan-eye";
   import SquareTerminal from "@lucide/svelte/icons/square-terminal";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import X from "@lucide/svelte/icons/x";
@@ -151,7 +153,9 @@
               ? "bg-background"
               : "border-b border-b-border hover:bg-chrome-hover",
             moving?.id === tab.id && "ring-1 ring-inset ring-primary opacity-60",
+            tab.kind === "session" && tab.supervisor && "bg-primary/5",
           ]}
+          data-supervisor-tab={tab.kind === "session" && tab.supervisor ? "" : undefined}
           role="presentation"
           onmousedown={(event) => handleTabMouseDown(event, tab)}
         >
@@ -160,12 +164,14 @@
           {:else if moving && moving.beforeId === null && index === tabs.length - 1}
             <span class="pointer-events-none absolute inset-y-0 right-0 z-20 w-0.5 bg-primary" aria-hidden="true"></span>
           {/if}
-          {#if active}
+          {#if tab.kind === "session" && tab.supervisor}
+            <span class="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-primary" aria-hidden="true"></span>
+          {:else if active}
             <span class="pointer-events-none absolute inset-x-0 top-0 h-px bg-primary" aria-hidden="true"></span>
           {/if}
           <button
             use:titlebarDrag
-            use:workbenchTabMove={tabs.length > 1 && !tab.disabled ? () => startMove(tab.id) : undefined}
+            use:workbenchTabMove={tabs.length > 1 && !tab.disabled && !(tab.kind === "session" && tab.supervisor) ? () => startMove(tab.id) : undefined}
             class={[
               "flex h-full w-full items-center gap-2 bg-transparent pl-3 text-left text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
               tab.closable ? "pr-8" : "pr-3",
@@ -189,6 +195,11 @@
           >
             {#if tab.kind === "session"}
               <SessionTabStatusIcon kind={tab.statusKind} {active} />
+              {#if tab.supervisor}
+                <Radar class="h-3.5 w-3.5 shrink-0 text-primary" aria-label="Project supervisor" role="img" />
+              {:else if tab.supervised}
+                <ScanEye class="h-3.5 w-3.5 shrink-0 text-primary" aria-label="Supervised by the project supervisor" role="img" data-supervised-tab />
+              {/if}
               {#if tab.subagentIcon}
                 {@const AgentIcon = agentIcon(tab.subagentIcon)}
                 <AgentIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
