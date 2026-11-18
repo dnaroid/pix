@@ -162,6 +162,8 @@ const PROJECT_PI_CANONICAL_FILES: &[&str] = &[
     "pi-tools-suite.jsonc",
     "pix-desktop.jsonc",
     "pix.jsonc",
+    // ACP-owned plan-launch records (decision 0077).
+    "plan-launches.json",
     // Project logo (see project_icon::PROJECT_ICON_FILE_NAMES).
     "project-icon.gif",
     "project-icon.jpg",
@@ -7824,6 +7826,7 @@ fn is_pix_project_temp_name(name: &str) -> bool {
             || name.starts_with(".tasks.jsonc.initialize.")
             || name.starts_with(".workspace.jsonc.")
             || name.starts_with(".registry.jsonc.")
+            || name.starts_with(".plan-launches.json.")
             || name.starts_with(".markdown.")
             || name.starts_with(project_icon::PROJECT_ICON_TEMP_PREFIX))
 }
@@ -11836,6 +11839,7 @@ mod tests {
             "pi-tools-suite.jsonc",
             "pix-desktop.jsonc",
             "pix.jsonc",
+            "plan-launches.json",
             "project-icon.png",
             "registry.json",
             "registry.jsonc",
@@ -11926,6 +11930,7 @@ mod tests {
             "pi-tools-suite.jsonc",
             "pix-desktop.jsonc",
             "pix.jsonc",
+            "plan-launches.json",
             "project-icon.png",
             "registry.json",
             "registry.jsonc",

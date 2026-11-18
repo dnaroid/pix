@@ -101,9 +101,10 @@ follows decision 0048.
   is saved-file checklist progress distinct from live session Steps, and offers
   **Open plan** to open Preview. While mounted it refreshes project documents
   every three seconds in the foreground. Deleted or renamed plans no longer show
-  the chip. Launch association is workspace-scoped in localStorage under
-  `pix.desktop.planLaunches:<workspace>`, retaining at most 50 newest canonical
-  `.pi/plans` launches; stale/reset launches are not recorded.
+  the chip. Launch association is ACP-owned project state in
+  `.pi/plan-launches.json` (see [Work plans](../../work-management/registry/desktop-registry-plans.md)),
+  retaining at most 50 newest canonical `.pi/plans` launches; stale/reset
+  launches are not recorded.
 - If the executing plan is linked to a project task, the chip's popover includes
   **Task › Plan › This session** breadcrumbs, with the Task segment omitted when
   unlinked. The Steps popup's **Executing plan** block also shows

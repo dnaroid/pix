@@ -173,7 +173,10 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
     notify: (message) => { toasts.success({ message, source: "Git", key: `git:${message}` }); },
   });
 
-  const planLaunches = createPlanLaunchesStore();
+  const planLaunches = createPlanLaunchesStore({
+    client: options.client,
+    report: (label, error) => backgroundDiagnostics.warn(label, error),
+  });
 
   return {
     tasks,

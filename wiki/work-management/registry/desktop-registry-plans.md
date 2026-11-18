@@ -61,10 +61,17 @@
   workspace's active session has finished (restoration may replace the active
   session, so an earlier click would be lost). The launch action repeats the
   same guard. Browsing and deletion remain available offline.
-- A successful plan launch records `sessionId → plan path` per workspace in
-  `localStorage` under `pix.desktop.planLaunches:<workspace>`. Only canonical
-  `.pi/plans` paths are retained, with at most the 50 newest launches. Stale or
-  reset launches are not recorded.
+- A successful plan launch records `sessionId → plan path` (and the latest
+  prompt outcome) in the ACP-owned project file `.pi/plan-launches.json`
+  through `pix/plans/launches` (actions `list`, `record`, `settle`,
+  `import`; every response is the full bounded snapshot). ACP serializes
+  writes per project and writes atomically; Desktop updates its cache
+  optimistically and only the newest issued response replaces it. Only
+  canonical `.pi/plans` paths are retained, with at most the 50 newest
+  launches. Stale or reset launches are not recorded. Legacy
+  `localStorage` records (`pix.desktop.planLaunches:<workspace>`) are
+  imported once on workspace load (existing ACP entries win) and removed only
+  after ACP acknowledges the import. Project cleanup preserves the file.
 - Delete confirms the full plan path and warns that deletion and loss of unsaved
   edits cannot be undone. Cancellation leaves the file untouched. Successful
   deletion refreshes the list, closes Preview only if it is showing that plan,

@@ -41,7 +41,8 @@ an explicit user request for every action.
   for busy sessions (`pix/session/queue_message`).
 - Verified: plan-run status (Running/Failed/Interrupted/Done) is kept only in
   Desktop `localStorage` (`pix.desktop.planLaunches:<workspace>`), so an agent
-  cannot read it.
+  cannot read it. (2026-11-17, phase 0: moved to ACP-owned
+  `.pi/plan-launches.json`, see [Work plans](../work-management/registry/desktop-registry-plans.md).)
 - Verified: the council's ACP host and loopback capability (0019) were deleted
   by 0071; no generic agent-to-session control channel exists today.
 - The SDK extension context cannot create native Pix sessions; ACP owns their

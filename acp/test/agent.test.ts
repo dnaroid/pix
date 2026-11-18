@@ -6227,3 +6227,40 @@ async function waitFor(condition: () => boolean, timeoutMs = 1000): Promise<void
 		await new Promise((resolve) => setTimeout(resolve, 5));
 	}
 }
+
+test("session lifecycle events reach in-process subscribers and stop at teardown", async () => {
+	const harness = createTestAdapter();
+	const events: Array<{ type: string; sessionId: string; stopReason?: string; touchedFiles?: readonly string[] }> = [];
+	const unsubscribe = harness.adapter.subscribeSessionEvents((event) => events.push(event));
+	try {
+		await connect(harness.adapter, async (cx) => {
+			const { sessionId } = await cx.request("session/new", { cwd: "/tmp/session-events", mcpServers: [] }) as { sessionId: string };
+			const pi = harness.clients[0]!;
+			const pending = cx.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "edit a file" }] });
+			pi.emit({ type: "agent_start" });
+			pi.emit({ type: "tool_execution_start", toolCallId: "w1", toolName: "Write", args: { file_path: "src/a.ts" } } as unknown as PiEvent);
+			pi.emit({ type: "tool_execution_end", toolCallId: "w1", toolName: "Write", result: { content: [] }, isError: false } as unknown as PiEvent);
+			pi.emit({
+				type: "agent_end",
+				messages: [{ role: "assistant", content: [], stopReason: "stop" }],
+				willRetry: false,
+			} as unknown as JsonAgentSessionEvent);
+			pi.emit({ type: "agent_settled" });
+			const result = await pending as { stopReason: string };
+			assert.equal(result.stopReason, "end_turn");
+			assert.deepEqual(events.map(({ type, stopReason, touchedFiles }) => ({ type, stopReason, touchedFiles })),
+				[{ type: "settled", stopReason: "end_turn", touchedFiles: ["src/a.ts"] }]);
+			assert.equal(events[0]?.sessionId, sessionId);
+			assert.deepEqual(harness.adapter.sessionTouchedFiles(sessionId), ["src/a.ts"]);
+
+			await cx.request("session/close", { sessionId });
+			// A retired runtime's late events never reach subscribers.
+			pi.emit({ type: "agent_start" });
+			pi.emit({ type: "agent_settled" });
+			assert.equal(events.length, 1);
+		});
+	} finally {
+		unsubscribe();
+		await harness.adapter.dispose();
+	}
+});

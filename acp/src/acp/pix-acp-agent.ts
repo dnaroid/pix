@@ -55,6 +55,14 @@ import { fileURLToPath } from "node:url";
 import { setText as copyTextToClipboard } from "@mariozechner/clipboard";
 import { TASK_RUN_METHOD, TASK_RUN_CANCEL_METHOD, type TaskRunRequest, type TaskRunResponse } from "./task-run-contract.js";
 import { forwardTaskRun } from "./task-run-bridge.js";
+import { PIX_PLAN_LAUNCHES_METHOD, parsePlanLaunchesRequest, type PlanLaunchesRequest } from "./plan-launches-contract.js";
+import { createPlanLaunchesStore, type PlanLaunchesStore } from "./plan-launches-store.js";
+import {
+	createSessionEventMonitor,
+	type SessionEventListener,
+	type SessionEventMonitor,
+	type SessionEventObserver,
+} from "./session-events.js";
 import {
 	PROTOCOL_VERSION,
 	RequestError,
@@ -464,6 +472,8 @@ interface AgentSessionState {
 	/** Dialog extension UI requests awaiting an ACP elicitation answer. */
 	readonly pendingDialogIds: Set<string>;
 	readonly pendingQuestionIds: Set<string>;
+	/** Deterministic lifecycle events for the project supervisor (0077). */
+	readonly events: SessionEventObserver;
 	readonly workspaceUndoResults: Map<string, WorkspaceUndoBridgeResult>;
 	contextInventory: ContextInventoryState | undefined;
 	contextInventoryNoticeReason: "reload" | "model_select" | undefined;
@@ -563,6 +573,10 @@ export interface PixAcpAgentOptions {
 	readonly fileAnnotator?: FileAnnotator;
 	/** Direct workspace Registry backend (overridable for transport tests). */
 	readonly registryService?: Pick<DesktopRegistryService, "action" | "diff"> & Partial<Pick<DesktopRegistryService, "dispose">>;
+	/** ACP-owned plan-launch records (overridable for hermetic tests). */
+	readonly planLaunches?: PlanLaunchesStore;
+	/** Session lifecycle event monitor (overridable for deterministic timer tests). */
+	readonly sessionEvents?: SessionEventMonitor;
 	/** Shared model-usage query (overridable for deterministic concurrency tests). */
 	readonly queryModelUsage?: (state: PiSessionState, options?: { freshOnly?: boolean }) => Promise<ModelUsageRefreshResult>;
 	/**
@@ -672,6 +686,8 @@ export class PixAcpAgent {
 	private readonly saveDesktopQueues: (cwd: string, sessionPath: string | undefined, queues: PersistedDesktopQueues) => Promise<void>;
 	private readonly copyText: (text: string) => Promise<void>;
 	private readonly registryService: Pick<DesktopRegistryService, "action" | "diff"> & Partial<Pick<DesktopRegistryService, "dispose">>;
+	private readonly planLaunches: PlanLaunchesStore;
+	private readonly sessionEvents: SessionEventMonitor;
 	private disposed = false;
 	private readonly fileMentionIndex = new FileMentionIndex();
 	private readonly retiringForkQueues = new Set<Promise<void>>();
@@ -776,6 +792,11 @@ export class PixAcpAgent {
 		this.saveDesktopQueues = options.saveDesktopQueues ?? ((cwd, sessionPath, queues) => saveDesktopQueues(cwd, sessionPath, queues));
 		this.copyText = options.copyText ?? copyTextToClipboard;
 		this.registryService = options.registryService ?? new DesktopRegistryService();
+		this.planLaunches = options.planLaunches ?? createPlanLaunchesStore();
+		this.sessionEvents = options.sessionEvents ?? createSessionEventMonitor({
+			planFor: async (cwd, sessionId) => (await this.planLaunches.handle({ cwd, action: "list" })).launches[sessionId]?.path,
+			report: (message) => this.options.logger.warn(message, { module: "session.events" }),
+		});
 		this.completeAutocomplete = options.completeAutocomplete ?? createAutocompleteCompleter({
 			logger: options.logger,
 			loadConfig: this.loadAutocompleteConfig,
@@ -1014,6 +1035,8 @@ export class PixAcpAgent {
 			)
 			.onRequest(PIX_REGISTRY_DIFF_METHOD, parseDesktopRegistryDiffRequest, (ctx) => this.withRequestLogging(PIX_REGISTRY_DIFF_METHOD, ctx.params, ctx.signal, () => this.desktopRegistryDiff(ctx.params, ctx.signal)),
 			)
+			.onRequest(PIX_PLAN_LAUNCHES_METHOD, parsePlanLaunchesParams, (ctx) => this.withRequestLogging(PIX_PLAN_LAUNCHES_METHOD, ctx.params, ctx.signal, () => this.planLaunches.handle(ctx.params)),
+			)
 			.onRequest(PIX_TAKE_AUTO_MESSAGE_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_TAKE_AUTO_MESSAGE_METHOD, ctx.params, ctx.signal, () => this.desktopTakeAutoMessage(ctx.params)),
 			)
 			.onRequest(PIX_RELOAD_SESSION_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_RELOAD_SESSION_METHOD, ctx.params, ctx.signal, () => this.withSessionLifecycle(ctx.params.sessionId, () => this.reloadSession(ctx.params, ctx.client))),
@@ -1070,12 +1093,23 @@ export class PixAcpAgent {
 		await Promise.allSettled([...this.pendingSpawns]);
 		await Promise.allSettled([...this.sessionLifecycle.values()]);
 		await Promise.all([...this.sessions.values()].map((session) => this.teardownSession(session)));
+		this.sessionEvents.dispose();
 		await Promise.all([...this.retiringForkQueues]);
 		await registryDisposed;
 	}
 
 	getSession(sessionId: string): AgentSessionState | undefined {
 		return this.sessions.get(sessionId);
+	}
+
+	/** In-process lifecycle events of all sessions (project supervisor, 0077). */
+	subscribeSessionEvents(listener: SessionEventListener): () => void {
+		return this.sessionEvents.subscribe(listener);
+	}
+
+	/** Files a session changed through successful write/edit tool calls. */
+	sessionTouchedFiles(sessionId: string): readonly string[] {
+		return this.sessionEvents.touchedFiles(sessionId);
 	}
 
 	/** Number of registered sessions (used by tests). */
@@ -2411,6 +2445,7 @@ export class PixAcpAgent {
 			if (parentPiSessionId) await this.removeChildSubagentSessions(record.cwd, parentPiSessionId);
 		}
 		await this.sessionMap.delete(sessionId);
+		this.sessionEvents.forget(sessionId);
 		if (record) this.searchService.changed(record.cwd);
 		this.options.logger.info(`session/delete: ${sessionId}`);
 	}
@@ -2592,6 +2627,7 @@ export class PixAcpAgent {
 			sdkQueueRestoreAfterInterrupt: undefined,
 			pendingDialogIds: new Set(),
 			pendingQuestionIds: new Set(),
+			events: this.sessionEvents.observe(acpSessionId, cwd),
 			workspaceUndoResults: new Map(),
 			contextInventory: undefined,
 			contextInventoryNoticeReason: undefined,
@@ -3011,6 +3047,8 @@ export class PixAcpAgent {
 		this.desktopDeferredImages.delete(session.acpSessionId);
 		this.unsubscribeSessionEvents(session);
 		this.options.logger.warn(`session ${session.acpSessionId}: ${error.message}`);
+		session.events.failed("process", error.message);
+		session.events.dispose();
 		this.rejectActiveRun(session, error);
 		session.pendingDialogIds.clear();
 		session.pendingQuestionIds.clear();
@@ -3109,7 +3147,10 @@ export class PixAcpAgent {
 
 		session.pendingDialogIds.add(request.id);
 		const isQuestion = elicitation.mode === PIX_QUESTION_ELICITATION_MODE;
-		if (isQuestion) session.pendingQuestionIds.add(request.id);
+		if (isQuestion) {
+			session.pendingQuestionIds.add(request.id);
+			session.events.questionPending(request.id);
+		}
 		let interrupted = false;
 		try {
 			const answer = await session.client.request("elicitation/create", elicitation);
@@ -3135,6 +3176,7 @@ export class PixAcpAgent {
 		} finally {
 			session.pendingDialogIds.delete(request.id);
 			if (!interrupted) session.pendingQuestionIds.delete(request.id);
+			if (isQuestion && !interrupted) session.events.questionResolved(request.id);
 		}
 	}
 
@@ -3198,6 +3240,7 @@ export class PixAcpAgent {
 	}
 
 	private dispatchSessionEvent(session: AgentSessionState, event: JsonAgentSessionEvent): void {
+		session.events.event(event);
 		if (event.type === "agent_start" || event.type === "agent_settled" || event.type === "message_end") {
 			const running = event.type !== "agent_settled" && (event.type === "agent_start" || Boolean(session.activeRun));
 			void this.searchActivity.update(session.acpSessionId, running).catch(() => {
@@ -4393,6 +4436,8 @@ export class PixAcpAgent {
 	}
 
 	private async teardownSession(session: AgentSessionState): Promise<void> {
+		// Retirement is not a run outcome: emit no settled/cancelled for it.
+		session.events.dispose();
 		this.sessionRefreshes.forget(session);
 		this.resetBtw(session);
 		this.retireForkQueue(session);
@@ -4450,6 +4495,7 @@ export class PixAcpAgent {
 		session.updates.flush();
 		session.activeRun = undefined;
 		run.resolve(stopReason);
+		session.events.settled(stopReason);
 		return true;
 	}
 
@@ -4459,6 +4505,7 @@ export class PixAcpAgent {
 		session.updates.flush();
 		session.activeRun = undefined;
 		run.reject(error);
+		session.events.failed("run", error.message);
 		return true;
 	}
 
@@ -5059,6 +5106,15 @@ function commandPathArgument(value: string | undefined): string | undefined {
 
 
 /** Validate the registry extension's structured diff payload into ACP files. */
+/** Contract validation errors surface as JSON-RPC invalid params. */
+function parsePlanLaunchesParams(value: unknown): PlanLaunchesRequest {
+	try {
+		return parsePlanLaunchesRequest(value);
+	} catch (error) {
+		throw new RequestError(ERROR_INVALID_PARAMS, error instanceof Error ? error.message : String(error));
+	}
+}
+
 function desktopRegistryDiffFiles(payload: unknown): DesktopRegistryDiffFile[] {
 	if (!isRecord(payload) || payload.version !== 1) {
 		throw new RequestError(ERROR_SERVER, "resource registry published an invalid diff payload");

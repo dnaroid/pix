@@ -13,6 +13,12 @@ import {
 import { PIX_USAGE_STATS_METHOD, type UsageSourceId, type UsageStatsResponse } from "../../../acp/src/acp/usage-stats-contract";
 import { parseUsageStatsResponse } from "./usage-stats-parser";
 import {
+  PIX_PLAN_LAUNCHES_METHOD,
+  parsePlanLaunchesResponse,
+  type PlanLaunches,
+  type PlanLaunchesRequest,
+} from "../../../acp/src/acp/plan-launches-contract";
+import {
   PIX_SUBAGENT_FORK_SESSION_METHOD,
   PIX_SUBAGENT_OPEN_SESSION_METHOD,
   PIX_SUBAGENT_SESSION_STATE_METHOD,
@@ -487,6 +493,11 @@ export class AcpPixExtensions {
       throw new Error("pix/request-history returned an invalid response");
     }
     return response.entries as string[];
+  }
+
+  /** ACP-owned plan-launch records; every response is the full project snapshot. */
+  async planLaunches(request: PlanLaunchesRequest): Promise<PlanLaunches> {
+    return parsePlanLaunchesResponse(await this.request<unknown>(PIX_PLAN_LAUNCHES_METHOD, request));
   }
 
   async queueState(sessionId: string): Promise<QueueState> {

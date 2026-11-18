@@ -22,6 +22,7 @@ import {
   parseSessionStateNotification,
 } from "./session-state";
 import type { RegistryActionRequest, RegistryDiff, RegistryResourceType, RegistrySnapshot } from "./registry";
+import type { PlanLaunches, PlanLaunchesRequest } from "../../../acp/src/acp/plan-launches-contract";
 import type { AgentControlAction } from "./agent-control";
 import { isRecord, parseQueueState, parseQueuedUserMessage } from "./acp-response-parsers";
 import { AcpIncomingRequestError, AcpJsonRpcConnection } from "./acp-json-rpc";
@@ -337,6 +338,10 @@ export class AcpClient {
 
   registryDiff(cwd: string, type: Exclude<RegistryResourceType, "project">, name: string): Promise<RegistryDiff> {
     return this.pix.registryDiff(cwd, type, name);
+  }
+
+  planLaunches(request: PlanLaunchesRequest): Promise<PlanLaunches> {
+    return this.pix.planLaunches(request);
   }
 
   queueMessage(

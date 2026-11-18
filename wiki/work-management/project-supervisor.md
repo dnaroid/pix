@@ -51,22 +51,38 @@ decision outside its mandate.
   - run saved tasks and plans, and start prompt sessions;
   - send follow-ups, rework and answers to managed sessions;
   - cancel managed turns;
-  - set `done`/`failed` on tasks behind managed sessions.
-- This is a scoped exception to the per-action confirmation rule in
-  [project tasks](tasks/project-tasks-agent-tool.md). Worker sessions never
-  inherit it, and it never authorizes creating or deleting saved tasks, editing
-  other tasks, commits, or actions on unmanaged sessions.
+  - set `done`/`failed` on tasks behind managed sessions, only through
+    `supervisor close`.
+- The [project tasks](tasks/project-tasks-agent-tool.md) confirmation rule
+  gets no exception. Status changes of managed tasks happen only through
+  `supervisor close`, whose guards and ledger entry are enforced in ACP code,
+  not by prompt wording. The `project_tasks` description gains one sentence:
+  "Task status changes made by the supervisor tool under a saved mandate are
+  not project_tasks updates; inside the supervisor session use supervisor
+  close, never project_tasks update, for managed tasks." Worker sessions never
+  get the mandate, and it never authorizes creating or deleting saved tasks,
+  editing other tasks, commits, or actions on unmanaged sessions.
 - Mandate fields, with defaults:
   - `maxConcurrent`: 5 managed sessions with a turn in flight;
   - `maxReworkRounds`: 5 follow-ups per item after its first completed turn;
-  - `budget`: optional token/cost ceiling per day; when absent, no budget
+  - `budget`: optional ceiling in tokens over a rolling 24 hours, counting
+    the supervisor and its managed sessions; provider cost is shown for
+    reference where reported but is never the limit. When absent, no budget
     check runs and the UI says so;
+  - `stalledAfterMinutes`: 15 by default, allowed 5–60 (see `stalled`);
   - `workerModelRef`: optional default for prompt sessions (tasks keep their
     saved `modelRef`);
   - free-text `policy`: what to escalate, priorities, areas not to touch.
 - Reaching a limit escalates; it never triggers a silent retry. Changing the
   mandate takes effect on the supervisor's next action; actions already started
   are not undone.
+
+## Mandate UI
+
+- A compact block in the supervisor session header shows state (active or
+  paused), a one-click **Pause**/**Resume**, counters (running sessions,
+  rework rounds used, budget used) and **Edit mandate**, which opens the
+  mandate form. The mandate is stored in `.pi/supervisor/`.
 
 ## Pause
 
@@ -123,7 +139,10 @@ involved.
 - `settled` — turn finished, with stop reason;
 - `question` — a worker is waiting on `question`;
 - `error` — prompt or runtime error;
-- `stalled` — no activity during a turn for a configurable period;
+- `stalled` — no session activity during a turn for `stalledAfterMinutes`
+  (default 15). Time inside a running tool call does not count; the tool's own
+  timeout bounds it. Waiting for the user is `question`, not `stalled`.
+  `stalled` only notifies the supervisor; it never cancels the turn;
 - `checklist` — the linked plan's saved progress changed;
 - `conflict` — another managed session edited the same file (below);
 - `manual_takeover` / `released` / `handed_over` / `closed_by_user`.
@@ -175,10 +194,9 @@ rationale.
 - The managed-session registry, mandate, pause state and ledger are ACP-owned
   durable project state under `.pi/supervisor/`. Registry/project cleanup must
   preserve that directory as canonical state.
-- Plan-run records (today Desktop `localStorage`
-  `pix.desktop.planLaunches:<workspace>`, see
-  [Work plans](registry/desktop-registry-plans.md)) move into ACP-owned state
-  so the supervisor and Desktop read the same outcomes.
+- Plan-run records live in ACP-owned `.pi/plan-launches.json`
+  (`pix/plans/launches`, see [Work plans](registry/desktop-registry-plans.md)),
+  so the supervisor and Desktop read the same outcomes (phase 0, done).
 - On Desktop start, ACP reconciles the registry against saved tasks, plans and
   session state. Sessions interrupted by quitting become `interrupted`
   events. The supervisor may resume them through the existing Resume flow; this
@@ -208,9 +226,10 @@ session.
   duplicate session.
 - Worker sessions do not expose the `supervisor` tool or mandate text.
 
-## Open questions
+## Resolved questions (2026-11-17)
 
-- Mandate UI: a supervisor-session panel or the settings page.
-- Whether the budget is measured in tokens or provider cost, given uneven
-  provider usage reporting.
-- `stalled` threshold default.
+- Status authority: only `supervisor close`, no `project_tasks` exception.
+- Mandate UI: header block in the supervisor session.
+- Budget unit: tokens over a rolling 24 hours.
+- `stalled`: 15 minutes of inactivity excluding tool-call time, configurable
+  5–60 minutes, notify-only.

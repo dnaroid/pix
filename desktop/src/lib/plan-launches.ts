@@ -1,48 +1,50 @@
 import type { StopReason } from "@agentclientprotocol/sdk";
-import { isCanonicalProjectPlanPath, type PlanProgress } from "./project-documents";
+import type { PlanProgress } from "./project-documents";
+import { isCanonicalProjectPlanPath } from "./project-documents";
+import {
+  boundPlanLaunches,
+  parsePlanLaunches,
+  PLAN_LAUNCH_LIMIT,
+  type PlanLaunch,
+  type PlanLaunches,
+  type PlanLaunchOutcome,
+} from "../../../acp/src/acp/plan-launches-contract";
 
-/** How the last prompt of a plan-launched session ended. */
-export type PlanLaunchOutcome = "completed" | "cancelled" | "failed";
-/** Which saved plan a Desktop session was launched from (presentation metadata only). */
-export type PlanLaunch = { path: string; launchedAt: number; outcome?: PlanLaunchOutcome; settledAt?: number };
-export type PlanLaunches = Readonly<Record<string, PlanLaunch>>;
+export { PLAN_LAUNCH_LIMIT };
+export type { PlanLaunch, PlanLaunches, PlanLaunchOutcome };
 /** User-facing status of one plan run. */
 export type PlanRunStatus = "running" | "done" | "failed" | "interrupted";
 
+/** Legacy pre-ACP storage; read once for migration, then removed. */
 export interface PlanLaunchStorage {
   getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
 }
-
-export const PLAN_LAUNCH_LIMIT = 50;
-const OUTCOMES: readonly PlanLaunchOutcome[] = ["completed", "cancelled", "failed"];
 
 export function planLaunchesKey(workspace: string): string {
   return `pix.desktop.planLaunches:${workspace}`;
 }
 
-export function loadPlanLaunches(workspace: string, storage?: PlanLaunchStorage): PlanLaunches {
-  if (!workspace) return {};
+/**
+ * Legacy localStorage launches of one workspace, or undefined when there is
+ * nothing to migrate. Invalid entries are dropped.
+ */
+export function readLegacyPlanLaunches(workspace: string, storage?: PlanLaunchStorage): PlanLaunches | undefined {
+  if (!workspace) return undefined;
   try {
-    const parsed: unknown = JSON.parse((storage ?? localStorage).getItem(planLaunchesKey(workspace)) ?? "null");
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const launches: Record<string, PlanLaunch> = {};
-    for (const [sessionId, value] of Object.entries(parsed as Record<string, unknown>)) {
-      if (!sessionId || !value || typeof value !== "object") continue;
-      const { path, launchedAt, outcome, settledAt } = value as Record<string, unknown>;
-      if (typeof path !== "string" || !isCanonicalProjectPlanPath(path)) continue;
-      if (typeof launchedAt !== "number" || !Number.isFinite(launchedAt)) continue;
-      const launch: PlanLaunch = { path, launchedAt };
-      // A malformed outcome only loses the status, never the launch itself.
-      if (OUTCOMES.includes(outcome as PlanLaunchOutcome) && typeof settledAt === "number" && Number.isFinite(settledAt)) {
-        launch.outcome = outcome as PlanLaunchOutcome;
-        launch.settledAt = settledAt;
-      }
-      launches[sessionId] = launch;
-    }
-    return boundPlanLaunches(launches);
+    const raw = (storage ?? localStorage).getItem(planLaunchesKey(workspace));
+    if (raw === null) return undefined;
+    return parsePlanLaunches(JSON.parse(raw), isCanonicalProjectPlanPath);
   } catch {
     return {};
+  }
+}
+
+export function forgetLegacyPlanLaunches(workspace: string, storage?: PlanLaunchStorage): void {
+  try {
+    (storage ?? localStorage).removeItem(planLaunchesKey(workspace));
+  } catch {
+    // A leftover key is re-imported idempotently on the next load.
   }
 }
 
@@ -88,19 +90,4 @@ export function planRunStatus(
 
 export function planRunResumable(status: PlanRunStatus): boolean {
   return status === "failed" || status === "interrupted";
-}
-
-function boundPlanLaunches(launches: Record<string, PlanLaunch>): PlanLaunches {
-  const entries = Object.entries(launches);
-  if (entries.length <= PLAN_LAUNCH_LIMIT) return launches;
-  return Object.fromEntries(entries.sort((a, b) => b[1].launchedAt - a[1].launchedAt).slice(0, PLAN_LAUNCH_LIMIT));
-}
-
-export function savePlanLaunches(workspace: string, launches: PlanLaunches, storage?: PlanLaunchStorage): void {
-  if (!workspace) return;
-  try {
-    (storage ?? localStorage).setItem(planLaunchesKey(workspace), JSON.stringify(launches));
-  } catch {
-    // Presentation metadata is best-effort; the session itself is unaffected.
-  }
 }

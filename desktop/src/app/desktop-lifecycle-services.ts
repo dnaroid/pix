@@ -49,6 +49,7 @@ export function createDesktopLifecycleServices(options: DesktopLifecycleServices
       options.projectServices.wikiConflictsRecheck.dispose();
       options.projectServices.wikiConsistency.dispose();
       options.projectServices.documents.dispose();
+      options.projectServices.planLaunches.dispose();
     },
     restoreProjects: () => {
       const restored = options.projectServices.workspace.restore();
@@ -62,6 +63,7 @@ export function createDesktopLifecycleServices(options: DesktopLifecycleServices
     loadWorkspaceData: (workspace) => {
       void options.projectServices.tasks.load(workspace);
       void options.projectServices.loadDocuments(workspace);
+      void options.projectServices.planLaunches.load(workspace);
       void options.projectServices.workspace.loadPreferences(workspace);
       void options.projectServices.registry.refreshProjectInitialization();
       void options.projectServices.registry.autoCleanProject(workspace);

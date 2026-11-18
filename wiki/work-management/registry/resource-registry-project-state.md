@@ -358,7 +358,7 @@ JSONC/task overlay import or fallback.
   and is removed recursively. Top-level regular files are allowlist-based too:
   `AGENTS.md` (untracked personal rules for Pix context),
   `pi-tools-suite.jsonc`, `pix-desktop.jsonc`, `pix.jsonc`,
-  `qa_auth.jsonc`, `registry.json`, `registry.jsonc`, `tasks.sqlite`, `tasks.sqlite-wal`,
+  `qa_auth.jsonc`, `plan-launches.json`, `registry.json`, `registry.jsonc`, `tasks.sqlite`, `tasks.sqlite-wal`,
   `tasks.sqlite-shm`, `tasks.sqlite-journal`, `todo-plan.json`,
   and `workspace.jsonc` are preserved; other ordinary top-level files
   (for example temporary receipt JSONs and unsupported legacy `tasks.jsonc`)
