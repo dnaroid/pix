@@ -29,6 +29,7 @@ export type PendingQuestionElicitation = {
   kind: "question";
   sessionId: string | null;
   requestId: number;
+  elicitationId?: string;
   message: string;
   questions: DesktopQuestion[];
   state: QuestionnaireState;
@@ -113,6 +114,7 @@ export function createElicitationStore(options: ElicitationStoreOptions) {
             kind: "question",
             sessionId: ownerSessionId,
             requestId: ++sequence,
+            ...("elicitationId" in request && typeof request.elicitationId === "string" ? { elicitationId: request.elicitationId } : {}),
             message: question.message,
             questions: question.questions,
             state: createQuestionnaireState(question.questions),
@@ -189,6 +191,15 @@ export function createElicitationStore(options: ElicitationStoreOptions) {
     pending.resolve(interruptedResponse(pending));
   }
 
+  function resolveSupervisorQuestion(sessionId: string, questionId: string): void {
+    const pending = pendingBySession.get(sessionId);
+    if (pending?.kind !== "question" || pending.elicitationId !== questionId) return;
+    remove(pending);
+    options.cancelQuestionImageOperation(pending.requestId);
+    // ACP already sent the worker's answer; this only completes the Desktop RPC.
+    pending.resolve({ action: "cancel" });
+  }
+
   function interruptedResponse(pending: PendingElicitation): CreateElicitationResponse {
     return pending.kind === "question"
       ? { action: "cancel", _meta: { "_pix/question-interrupted": true } }
@@ -225,6 +236,7 @@ export function createElicitationStore(options: ElicitationStoreOptions) {
     answerQuestion,
     cancel,
     cancelForSession,
+    resolveSupervisorQuestion,
     requestLocalTextInput,
   };
 }

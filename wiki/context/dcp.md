@@ -34,11 +34,15 @@ sidecar importer, legacy state reader, dual-write mode, `decompress`, or
 
 1. A confirmed new persistent session receives one `dcp-journal` `init` custom
    entry before DCP publishes provider-visible addressing/rewrite decisions.
-   Ephemeral sessions use the same contract in memory for their lifetime.
+   A `new`, `startup`, or `resume` session whose verified active branch holds
+   no `message`, `custom_message`, `compaction`, or `branch_summary` entries
+   (metadata-only entries qualify) also initializes once. Fork sessions never
+   initialize from an empty branch; fork policy is unchanged. Ephemeral
+   sessions use the same contract in memory for their lifetime.
 2. `session_start` resets transient runtime state and replays the complete
-   journal on the active branch. A non-empty persisted session without a valid
-   journal is deliberately unsupported rather than adopted as a new DCP
-   session. Unknown versions, broken predecessor chains, or conflicting
+   journal on the active branch. An existing journal is always replayed. A
+   non-empty persisted session without a valid journal is deliberately
+   unsupported rather than adopted as a new DCP session. Unknown versions, broken predecessor chains, or conflicting
    operation IDs fail closed.
 3. `tool_call`/`tool_result` maintain transient tool records. Exact args/output
    needed by current policy can be reconstructed from the raw branch. Large raw

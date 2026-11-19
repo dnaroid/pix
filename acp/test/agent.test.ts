@@ -85,7 +85,7 @@ import type {
 	AutocompleteResponse,
 } from "../src/acp/autocomplete.js";
 import { SessionMapStore } from "../src/acp/session-map.js";
-import { parseSupervisorMandateResponse, SUPERVISOR_WORKER_PREAMBLE } from "../src/acp/supervisor-contract.js";
+import { parseSupervisorMandateResponse, SUPERVISOR_QUESTION_RESOLVED_CHANNEL, SUPERVISOR_WORKER_PREAMBLE } from "../src/acp/supervisor-contract.js";
 import { PIX_SESSION_CATALOG_CHANGED_METHOD } from "../src/acp/session-catalog-contract.js";
 import type { PersistedDesktopQueues } from "../src/acp/queue-store.js";
 import type { DesktopForkSnapshot, DesktopForkChild } from "../src/acp/desktop-fork-snapshot.js";
@@ -6364,8 +6364,8 @@ test("project supervisor: worker events wake the supervisor with one coalesced q
 			const supervisor = await cx.request("pix/supervisor/open", { cwd }) as { sessionId: string };
 			const worker = await cx.request("session/new", { cwd, mcpServers: [] }) as { sessionId: string };
 			const pi = harness.clients[1]!;
-			const runTurn = async (index: number) => {
-				const pending = cx.request("session/prompt", { sessionId: worker.sessionId, prompt: [{ type: "text", text: `turn ${index}` }] });
+			const runTurn = async (index: number, text: string) => {
+				const pending = cx.request("session/prompt", { sessionId: worker.sessionId, prompt: [{ type: "text", text }] });
 				await waitFor(() => pi.promptCalls.length === index);
 				pi.emit({ type: "agent_start" });
 				pi.emit({ type: "agent_end", messages: [{ role: "assistant", content: [], stopReason: "stop" }], willRetry: false } as unknown as JsonAgentSessionEvent);
@@ -6373,11 +6373,15 @@ test("project supervisor: worker events wake the supervisor with one coalesced q
 				await pending;
 			};
 			const queue = () => harness.adapter.getSession(supervisor.sessionId)!.autoUserMessages;
-			await runTurn(1);
+			await runTurn(1, "ordinary user turn");
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			assert.equal(queue().length, 0, "unregistered sessions do not wake the supervisor");
+			await cx.request("pix/supervisor/handover", { cwd, sessionId: worker.sessionId, supervised: true });
+			await runTurn(2, `${SUPERVISOR_WORKER_PREAMBLE}\n\nworker turn`);
 			await waitFor(() => queue().length === 1);
 			assert.match(queue()[0]!.promptText, new RegExp(`${worker.sessionId}: turn settled \\(end_turn\\)`));
 			const firstId = queue()[0]!.id;
-			await runTurn(2);
+			await runTurn(3, `${SUPERVISOR_WORKER_PREAMBLE}\n\nanother worker turn`);
 			await new Promise((resolve) => setTimeout(resolve, 50));
 			assert.equal(queue().length, 1, "a still-queued digest is rewritten, not multiplied");
 			assert.equal(queue()[0]!.id, firstId);
@@ -6471,6 +6475,97 @@ test("project supervisor: Desktop mandate gates sends, and a user message takes 
 		});
 	} finally {
 		await other.adapter.dispose();
+	}
+});
+
+test("project supervisor: answers the live Pi questionnaire once and relays a question-specific user decision", async (t) => {
+	const agentDir = mkdtempSync(join(tmpdir(), "pix-acp-supervisor-answer-agent-"));
+	const cwd = mkdtempSync(join(tmpdir(), "pix-acp-supervisor-answer-"));
+	t.after(() => Promise.all([rm(agentDir, { recursive: true, force: true }), rm(cwd, { recursive: true, force: true })]).then(() => undefined));
+	const { adapter, clients } = createTestAdapter({ agentDir, supervisorExtensionPath: "/opt/pix/supervisor.js" });
+	const dialogs: { id: string; resolve: (response: CreateElicitationResponse) => void }[] = [];
+	const dismissals: unknown[] = [];
+	try {
+		await connectAs(adapter, "pix-desktop", async (cx) => {
+			await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, ...ELICITATION_CAPS, clientInfo: { name: "pix-desktop", version: "test" } });
+			const supervisor = await cx.request("pix/supervisor/open", { cwd }) as { sessionId: string };
+			const { sessionId } = await cx.buildSession(cwd).start();
+			await cx.request("pix/supervisor/handover", { cwd, sessionId, supervised: true });
+			await cx.request("pix/supervisor/mandate", { cwd, patch: { enabled: true } });
+			const [boss, worker] = clients as [FakePiClient, FakePiClient];
+			const replies: { result?: Record<string, unknown>; error?: string }[] = [];
+			(boss as unknown as { respondToSupervisor: unknown }).respondToSupervisor = async (_id: string, response: typeof replies[number]) => { replies.push(response); };
+			const ask = async (op: string, data: Record<string, unknown> = {}) => {
+				const index = replies.length;
+				boss.emit({ type: "pix_supervisor_request", requestId: `r${index}`, request: { op, sessionId, ...data } } as PiEvent);
+				await waitFor(() => replies.length > index);
+				return replies[index]!;
+			};
+			const emitQuestion = async (id: string) => {
+				const index = dialogs.length;
+				worker.emit({ type: "extension_ui_request", id, method: "editor", title: PIX_QUESTION_EDITOR_TITLE,
+					prefill: JSON.stringify({ version: 1, questions: [{ id: "scope", label: "Scope", prompt: "Which scope?",
+						choices: [{ value: "small", label: "Small" }, { value: "large", label: "Large" }] }] }) });
+				await waitFor(() => dialogs.length > index);
+				return dialogs[index]!;
+			};
+			const state = adapter.getSession(sessionId)!;
+			const desktop = await emitQuestion("desktop-question");
+			desktop.resolve({ action: "cancel" });
+			await waitFor(() => worker.uiResponses.length === 1);
+			const current = await emitQuestion("supervisor-question");
+			const digest = await ask("read");
+			assert.deepEqual(digest.result?.questions, [{ questionId: current.id, questions: [{ id: "scope", label: "Scope", prompt: "Which scope?",
+				choices: [{ value: "small", label: "Small" }, { value: "large", label: "Large" }] }] }]);
+			const selection = { id: "scope", choiceValue: "small" };
+			const answer = { questionId: current.id, authority: "mandate", rationale: "Routine local change", selections: [selection] };
+			assert.match((await ask("answer", { ...answer, questionId: desktop.id })).error ?? "", /stale/);
+			assert.equal((await ask("escalate", { questionId: current.id, text: "Confirm the product scope" })).result?.escalated, true);
+			assert.match((await ask("answer", answer)).error ?? "", /was escalated/);
+			const relay = { ...answer, authority: "user", rationale: "The user chose the small scope" };
+			assert.match((await ask("answer", relay)).error ?? "", /subsequent user prompt/);
+			const prompt = (text: string) => cx.request("session/prompt", { sessionId: supervisor.sessionId, prompt: [{ type: "text", text }] });
+			const finish = async (run: Promise<unknown>) => {
+				boss.emit({ type: "agent_end", messages: [{ role: "assistant", content: [], stopReason: "stop" }], willRetry: false } as unknown as JsonAgentSessionEvent);
+				boss.emit({ type: "agent_settled" });
+				await run;
+			};
+			const wake = prompt("[Supervisor digest] Worker session events since the last digest:");
+			await waitFor(() => boss.promptCalls.length === 1);
+			boss.emit({ type: "agent_start" });
+			assert.match((await ask("answer", relay)).error ?? "", /subsequent user prompt/);
+			await finish(wake);
+			const user = prompt("Use the small scope for this worker.");
+			await waitFor(() => boss.promptCalls.length === 2);
+			boss.emit({ type: "agent_start" });
+			assert.deepEqual((await ask("answer", relay)).result, { answered: true, questionId: current.id });
+			await finish(user);
+			assert.deepEqual(worker.uiResponses[1], { type: "extension_ui_response", id: "supervisor-question", value: JSON.stringify({ version: 1, selections: [selection] }) });
+			await waitFor(() => dismissals.length === 1);
+			assert.deepEqual(dismissals, [{ sessionId, channel: SUPERVISOR_QUESTION_RESOLVED_CHANNEL, data: { questionId: current.id } }]);
+			current.resolve({ action: "cancel" }); // a late Desktop result must not go to Pi
+			assert.match((await ask("answer", relay)).error ?? "", /stale/);
+			assert.equal(state.pendingQuestionIds.size, 0);
+			assert.equal(worker.uiResponses.length, 2);
+			assert.deepEqual(worker.steerCalls, []);
+			assert.deepEqual(state.autoUserMessages, []);
+
+			const interrupted = await emitQuestion("interrupted-question");
+			interrupted.resolve({ action: "cancel", _meta: { "_pix/question-interrupted": true } });
+			await waitFor(() => state.pendingDialogIds.size === 0);
+			assert.match((await ask("answer", { ...answer, questionId: interrupted.id })).error ?? "", /stale/);
+			assert.equal(worker.uiResponses.length, 2);
+		}, (app) => {
+			app.onRequest("elicitation/create", (ctx) => new Promise<CreateElicitationResponse>((resolve) => {
+				dialogs.push({ id: (ctx.params as unknown as { elicitationId: string }).elicitationId, resolve });
+			}));
+			(app as unknown as { onNotification: (method: string, parse: (value: unknown) => unknown,
+				handle: (ctx: { params: unknown }) => void) => void }).onNotification(PIX_SESSION_STATE_METHOD, (value) => value, ({ params }) => {
+				if ((params as { channel?: string }).channel === SUPERVISOR_QUESTION_RESOLVED_CHANNEL) dismissals.push(params);
+			});
+		});
+	} finally {
+		await adapter.dispose();
 	}
 });
 

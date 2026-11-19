@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { completionGuardFailures, createSupervisorActions, runningManagedSessions } from "../src/acp/supervisor-actions.js";
 import { SUPERVISOR_WORKER_PREAMBLE, type SupervisorMutation, type SupervisorStartItem } from "../src/acp/supervisor-contract.js";
-import type { SupervisorDigest, SupervisorLiveSession } from "../src/acp/supervisor-service.js";
+import type { SupervisorDigest, SupervisorLiveSession, SupervisorPendingQuestion } from "../src/acp/supervisor-service.js";
 import { createSupervisorStore, type ManagedSession, type SupervisorMandate } from "../src/acp/supervisor-store.js";
 
 const SUPERVISOR = "sup";
@@ -51,6 +51,9 @@ async function setup(
 	const digests = new Map<string, SupervisorDigest>();
 	const stops = new Map<string, string>();
 	const delivered: { sessionId: string; text: string }[] = [];
+	const questions = new Map<string, SupervisorPendingQuestion>();
+	const answers: unknown[] = [];
+	let userPromptAt: number | undefined;
 	const cancelled: string[] = [];
 	const taskWrites: { taskId: string; status: string }[] = [];
 	const released: string[] = [];
@@ -67,6 +70,12 @@ async function setup(
 				delivered.push({ sessionId, text });
 				return live.get(sessionId)?.running ? "steering" : "queued";
 			},
+			question: (sessionId, questionId) => questions.get(sessionId)?.questionId === questionId ? questions.get(sessionId) : undefined,
+			answerQuestion: (sessionId, questionId, value) => {
+				answers.push({ sessionId, questionId, value: JSON.parse(value) });
+				questions.delete(sessionId);
+			},
+			userPromptAt: () => userPromptAt,
 			cancel: (sessionId) => { cancelled.push(sessionId); },
 			launch: async (_cwd, caller, item, modelRef) => {
 				launches.push({ item, modelRef, caller });
@@ -84,9 +93,10 @@ async function setup(
 		lastStopReason: (sessionId) => stops.get(sessionId),
 		sessionExists: async (_cwd, sessionId) => !gone.has(sessionId),
 	});
-	const handle = (request: SupervisorMutation, caller = SUPERVISOR) => actions.handle(cwd, caller, request);
+	const handle = (request: SupervisorMutation, caller = SUPERVISOR, current?: () => boolean) => actions.handle(cwd, caller, request, current);
 	const ledger = async () => (await store.readLedger(cwd)).map((entry) => entry.kind);
 	return { cwd, store, live, digests, stops, delivered, cancelled, taskWrites, released, gone, exclusive, handle, ledger, launches,
+		questions, answers, setUserPromptAt: (at: number) => { userPromptAt = at; },
 		gate: (gate: Promise<void>) => { launchGate = gate; }, failLaunch: (error: Error | undefined) => { launchError = error; } };
 }
 
@@ -132,10 +142,83 @@ test("supervisor send labels the message, counts rework and clears the escalatio
 	assert.equal(registry.sessions.w1?.reworkRounds, 1);
 	assert.equal(registry.sessions.w1?.escalation, undefined);
 	await assert.rejects(s.handle(send("again", "rework")), /Rework limit reached \(1\/1\)/);
-	// Notes and answers do not consume rework rounds.
+	// Notes do not consume rework rounds.
 	await s.handle(send("fyi"));
 	assert.equal(s.delivered.at(-1)?.text, "[Supervisor] fyi");
 	assert.deepEqual(await s.ledger(), ["sent", "sent"]);
+});
+
+const questionnaire: SupervisorPendingQuestion = { questionId: "q1", questions: [
+	{ id: "scope", label: "Scope", prompt: "Which scope?", choices: [{ value: "small", label: "Small" }, { value: "all", label: "All" }] },
+	{ id: "checks", label: "Checks", prompt: "Which checks?", multiple: true, minSelections: 2, maxSelections: 2,
+		choices: [{ value: "unit", label: "Unit" }, { value: "types", label: "Types" }] },
+] };
+const answer = { op: "answer", sessionId: "w1", questionId: "q1", authority: "mandate", rationale: "Routine test coverage",
+	selections: [{ id: "checks", choiceValues: ["unit"], customText: "Smoke check" }, { id: "scope", choiceValue: "small" }] } satisfies SupervisorMutation;
+
+test("supervisor answers are gated by the mandate, managed mode and caller runtime", async (t) => {
+	for (const [options, error] of [
+		[{ mandate: { enabled: false } }, /not enabled/],
+		[{ mandate: { paused: true } }, /paused/],
+		[{ sessions: { w1: managed({ mode: "manual" }) } }, /manual/],
+		[{ sessions: {} }, /not managed/],
+	] as const) {
+		const s = await setup(t, options);
+		s.questions.set("w1", questionnaire);
+		await assert.rejects(s.handle(answer), error);
+		assert.deepEqual(s.answers, []);
+		assert.deepEqual(await s.ledger(), []);
+	}
+	const s = await setup(t);
+	s.questions.set("w1", questionnaire);
+	await assert.rejects(s.handle(answer, SUPERVISOR, () => false), /no longer the project supervisor/);
+	assert.deepEqual(s.answers, []);
+});
+
+test("supervisor answer validates selections and rejects stale and duplicate submissions without sending a message", async (t) => {
+	const s = await setup(t, { mandate: { maxConcurrent: 1, maxReworkRounds: 0 } });
+	s.live.set("w1", liveSession(true, 1));
+	s.questions.set("w1", questionnaire);
+	await assert.rejects(s.handle(send("small", "answer")), /op=answer/);
+	await assert.rejects(s.handle({ ...answer, questionId: "old" }), /stale/);
+	await assert.rejects(s.handle({ ...answer, selections: [{ id: "scope", choiceValue: "small" }] }), /exactly one/);
+	for (const selections of [
+		[{ id: "scope", choiceValue: "Small" }, answer.selections[0]!],
+		[{ id: "scope", customText: "Custom scope" }, { id: "checks", choiceValues: ["unit"] }],
+		[{ id: "scope", customText: "Custom scope" }, { id: "checks", choiceValues: ["unit", "unit"] }],
+	]) await assert.rejects(s.handle({ ...answer, selections }), /Invalid selection/);
+	assert.deepEqual(s.answers, []);
+	assert.deepEqual(await s.handle(answer), { answered: true, questionId: "q1" });
+	assert.deepEqual(s.answers, [{ sessionId: "w1", questionId: "q1", value: { version: 1, selections: [...answer.selections].reverse() } }]);
+	await assert.rejects(s.handle(answer), /stale/);
+	assert.deepEqual(s.delivered, []);
+	assert.equal((await s.store.readRegistry(s.cwd)).sessions.w1?.reworkRounds, 0);
+	const [entry] = await s.store.readLedger(s.cwd);
+	assert.equal(entry?.kind, "answered");
+	assert.deepEqual(entry?.detail, { questionId: "q1", authority: answer.authority, rationale: answer.rationale, selections: answer.selections });
+});
+
+test("a question escalation survives send and requires a later user prompt for the same live question", async (t) => {
+	const s = await setup(t, { mandate: { paused: true } });
+	s.questions.set("w1", questionnaire);
+	const escalate = { op: "escalate", sessionId: "w1", questionId: "q1", text: "Need a product decision" } as const;
+	await assert.rejects(s.handle({ ...escalate, questionId: "old" }), /stale/);
+	await s.handle(escalate);
+	const escalation = (await s.store.readRegistry(s.cwd)).sessions.w1?.escalation;
+	assert.equal(escalation?.questionId, "q1");
+	await s.store.updateMandate(s.cwd, { paused: false });
+	const relay = { ...answer, authority: "user" } as const;
+	await assert.rejects(s.handle(answer), /was escalated/);
+	await assert.rejects(s.handle(relay), /subsequent user prompt/);
+	await assert.rejects(s.handle({ op: "escalate", sessionId: "w1", text: "generic" }), /already pending/);
+	await s.handle(send("status update"));
+	assert.deepEqual((await s.store.readRegistry(s.cwd)).sessions.w1?.escalation, escalation);
+	s.setUserPromptAt(escalation!.at - 1);
+	await assert.rejects(s.handle(relay), /subsequent user prompt/);
+	s.setUserPromptAt(escalation!.at + 1);
+	await s.handle(relay);
+	assert.equal((await s.store.readRegistry(s.cwd)).sessions.w1?.escalation, undefined);
+	assert.deepEqual(await s.ledger(), ["escalated", "sent", "answered"]);
 });
 
 test("supervisor send enforces maxConcurrent only when it would start a new turn", async (t) => {

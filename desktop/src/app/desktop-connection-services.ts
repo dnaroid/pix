@@ -40,6 +40,7 @@ type DesktopConnectionServicesOptions = {
   workspaceSessionStartup: () => WorkspaceSessionStartupBridge;
   onForkReady?: (notification: ForkReadyNotification) => void;
   requestElicitation: (request: CreateElicitationRequest) => Promise<CreateElicitationResponse>;
+  onSessionState?: (notification: SessionStateNotification) => boolean;
   setErrorMessage: (message: string | null) => void;
   reportError: (error: unknown) => void;
   recordDiagnostic?: (event: DesktopDiagnosticEvent) => void;
@@ -52,7 +53,9 @@ export function createDesktopConnectionServices(options: DesktopConnectionServic
     workspace: options.workspace,
     onSessionCatalogChanged: options.onSessionCatalogChanged,
     onSessionUpdate: (notification) => options.sessionCoordinator().handleUpdate(notification),
-    onSessionState: (notification) => options.sessionCoordinator().handleState(notification),
+    onSessionState: (notification) => {
+      if (!options.onSessionState?.(notification)) options.sessionCoordinator().handleState(notification);
+    },
     onOpenActivity: (sessionId) => options.sessionCoordinator().openActivity(sessionId),
     onBeginActivityRequest: (owner) => options.sessionCoordinator().beginActivityRequest(owner),
     onCompleteActivityRequest: (owner, sessionId) => options.sessionCoordinator().completeActivityRequest(owner, sessionId),

@@ -62,6 +62,19 @@ test("supervisor start takes exactly one item and a safe plan path", () => {
 	assert.throws(() => parseSupervisorStartResponse(null), /check status/);
 });
 
+test("supervisor answer contract requires an exact target, authority, rationale and text-only selections", () => {
+	const request = { op: "answer", sessionId: "w1", questionId: "q1", authority: "mandate", rationale: "Routine choice",
+		selections: [{ id: "scope", customText: "This file only" }, { id: "checks", choiceValues: [], customText: "Smoke check" }] };
+	assert.deepEqual(parseSupervisorToolRequest(request), request);
+	for (const bad of [
+		{ questionId: "" }, { authority: "worker" }, { rationale: " " }, { selections: [] },
+		{ selections: [{ id: "scope", choiceValue: "small", customText: "Both" }] },
+		{ selections: [{ id: "scope", customText: "text", images: [] }] },
+		{ selections: [{ id: "scope", choiceValues: [null] }] },
+	]) assert.throws(() => parseSupervisorToolRequest({ ...request, ...bad }));
+	assert.throws(() => parseSupervisorToolRequest({ op: "escalate", text: "Need a decision", questionId: "q1" }), /sessionId/);
+});
+
 test("supervisor service answers only the registered supervisor and reports sessions read-only", async (t) => {
 	const cwd = await project(t);
 	const store = createSupervisorStore();

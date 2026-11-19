@@ -54,6 +54,7 @@
   import { createDesktopModelServices } from "./app/desktop-model-services";
   import { createDesktopCommandServices } from "./app/desktop-command-services";
   import { createSupervisorHandover, createSupervisorSessionAction, handleSupervisorMenu, listenSupervisorMenu } from "./app/supervisor-session";
+  import { SUPERVISOR_QUESTION_RESOLVED_CHANNEL } from "../../acp/src/acp/supervisor-contract";
   import { createDesktopInteractionServices } from "./app/desktop-interaction-services.svelte";
   import { createDesktopPresentationState } from "./app/desktop-presentation-state.svelte";
   import { createDesktopRootEffects } from "./app/desktop-root-effects.svelte";
@@ -164,6 +165,13 @@
     workspaceSessionStartup: () => workspaceSessionStartup,
     onForkReady: (notification) => { void backgroundFork.handleReady(notification); },
     requestElicitation: (request) => requestElicitation(request),
+    onSessionState: ({ sessionId, channel, data }) => {
+      if (channel !== SUPERVISOR_QUESTION_RESOLVED_CHANNEL) return false;
+      if (data && typeof data === "object" && "questionId" in data && typeof data.questionId === "string") {
+        elicitationStore.resolveSupervisorQuestion(sessionId, data.questionId);
+      }
+      return true;
+    },
     setErrorMessage: errors.set,
     reportError,
     recordDiagnostic: diagnosticLogger.record,

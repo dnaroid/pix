@@ -11,8 +11,8 @@ the project supervisor accepted in
 phase 0, the supervisor session with read-only `status`/`read`, debounced wakes,
 the pinned supervisor tab, manual handover (`pix/supervisor/handover`), the
 mandate header block (`pix/supervisor/mandate`), the mutating ops `start`,
-`send`, `cancel`, `close` (with completion guards), `reopen` and `escalate`, the worker preamble, startup reconciliation, and user takeover.
-Not yet: `answer`, the token budget and `conflict` events. See *State and lifetime*. The staged rollout is tracked in the project plan
+`send`, `answer`, `cancel`, `close` (with completion guards), `reopen` and `escalate`, the worker preamble, startup reconciliation, and user takeover.
+Not yet: the token budget and `conflict` events. See *State and lifetime*. The staged rollout is tracked in the project plan
 `.pi/plans/project-supervisor.md`.
 
 [Work management](index.md)
@@ -121,10 +121,10 @@ hosts. It calls ACP through a correlated request bridge modelled on
 | op | effect |
 |---|---|
 | `status` | Mandate, pause state, limits used, managed sessions with item, mode, run state, last stop reason, plan progress and rework count. |
-| `read` | A bounded digest of one managed session: last user/assistant turns, final report, pending question, tool errors, touched files. Never a full transcript. |
+| `read` | A bounded digest of one managed session: last user/assistant turns, final report, pending questionnaires, tool errors, touched files. For managed sessions only, pending questionnaires expose each live `questionId` with its questions and choice values. Never a full transcript. |
 | `start` | Exactly one of `{taskId}` / `{planPath}` / `{text}`, plus optional `modelRef`. Desktop launches it in the window showing that project, through the same Tasks Run / Plan run path (prompts get a new session), with the worker rules prepended; ACP then registers the session `managed`. Model: explicit `modelRef`, else the task's saved model, else `workerModelRef` for plans and prompts. Enforces `maxConcurrent`; a task or plan that is already registered is refused, and Desktop refuses a task already linked to a session. |
-| `send` | `{sessionId, text, kind: rework or answer or note}`. Uses the normal ACP queue: steering while busy, a new turn while idle. `rework` counts against `maxReworkRounds`. |
-| `answer` | Answers a pending `question` in a managed session with the chosen option(s) or custom text. |
+| `send` | `{sessionId, text, kind: rework or note}`. Uses the normal ACP queue: steering while busy, a new turn while idle. `rework` counts against `maxReworkRounds`. `kind=answer` is refused; use `answer`. |
+| `answer` | `{sessionId, questionId, authority: mandate or user, rationale, selections}`. Answers a live questionnaire of a managed session; see *Worker questions*. |
 | `cancel` | Cancels the managed session's current turn. |
 | `close` | `{sessionId, outcome: done or failed, summary}`. Runs the completion guards, sets the task status, journals the evidence and unregisters the session. |
 | `reopen` | Restores a closed item to `in-progress` and re-registers its session. Refused if that session was deleted; run the item again with `start`. |
@@ -156,6 +156,14 @@ gets one wake turn with one digest. A busy supervisor gets the digest as a
 single queued follow-up that later events update rather than multiply. Pause
 holds wakes but keeps the digest current. A wake that would exceed the budget
 escalates instead.
+
+The digest is filtered against the project registry whenever it is composed or
+rewritten, including queued digests that are being replaced. Only sessions in
+`managed` mode are kept. The supervisor's own events and sessions that are no
+longer registered are dropped. A session in `manual` mode keeps only its
+`manual_takeover` line, and only while it stays registered. The 20-session limit
+applies after this filtering. The filter affects wake digests only; the general
+event monitor and the ledger are unchanged.
 
 ## Completion guards
 
@@ -192,6 +200,25 @@ The supervisor answers technical questions that fit the mandate policy. It
 escalates product, risky, destructive or out-of-mandate questions to the user
 and replies with the user's decision. The ledger records each answer and its
 rationale.
+
+- `read` lists the live questionnaires of managed workers with their
+  `questionId`, questions and choice values.
+- `answer` requires the mandate enabled and not paused, a `managed` session and
+  a `questionId` that is still pending. Stale or repeated ids are rejected.
+  `selections` need exactly one entry per question, with choice values (not
+  labels) and the selection limits from `read`. ACP writes the encoded answer
+  to the worker's pending editor request, not to the queue. It then dismisses
+  the matching Desktop dialog.
+- `authority=mandate` is the supervisor's own classification that the question
+  is routine and within the saved policy. The tool instructions guide that
+  judgement; ACP does not verify it. A question that was escalated cannot be
+  answered with `mandate`.
+- Out-of-mandate questions are escalated with `escalate` and the `questionId`,
+  and the worker keeps waiting. `authority=user` is accepted only for that
+  escalated question, and only after a user message in the supervisor session
+  that arrived after the escalation. The `rationale` states the user's decision.
+- Each answer is journaled as `answered` with its authority, rationale and
+  selections. A legacy `send kind=answer` is refused.
 
 ## State and lifetime
 
@@ -237,12 +264,12 @@ rationale.
   digest built from the live runtime or the saved transcript's current branch
   (`acp/src/acp/supervisor-service.ts`).
 - Mutating ops exist (phase 2, partial): `acp/src/acp/supervisor-actions.ts`
-  runs `send`, `cancel`, `close` and `escalate` under the per-project
+  runs `send`, `answer`, `cancel`, `close` and `escalate` under the per-project
   supervisor lock that takeover, handover and mandate changes share, and
   re-checks inside it that the caller is still the registered supervisor.
   Everything except `escalate` needs the mandate enabled (default off) and not
   paused, a registry entry in `managed` mode and an open session. `send`
-  (`rework`/`answer`/`note`) steers a streaming session or queues a turn in its
+  (`rework`/`note`) steers a streaming session or queues a turn in its
   Desktop auto queue as `[Supervisor <kind>] text`; `rework` counts against
   `maxReworkRounds`, and a send that would start a turn counts against
   `maxConcurrent`. `close done` is refused (ledger `close_refused`) unless no
@@ -295,7 +322,8 @@ rationale.
 - Debounced wakes exist (phase 1): `acp/src/acp/supervisor-wake.ts` coalesces
   worker events per project for 5 s into one `[Supervisor digest]` text (one
   line per session, newest event per type, at most 20 sessions; the
-  supervisor's own events are ignored). ACP puts it into the supervisor
+  supervisor's own events and non-managed sessions are filtered out, see
+  Events and digests). ACP puts it into the supervisor
   session's Desktop auto queue, so an idle supervisor runs it as one wake turn
   and a busy one after its current turn. While that item is still queued,
   later digests rewrite it in place instead of adding items; the check runs

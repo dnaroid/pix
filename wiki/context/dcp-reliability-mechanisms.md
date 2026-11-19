@@ -50,6 +50,10 @@ Active implemented contract.
   schema version 1) inside the session itself — no sidecar file. Replay of
   init + delta operations reconstructs the block state. `[confirmed by code,
   journal.ts:12-13,58]`
+- Init is allowed for `new`, `startup`, and `resume` sessions whose verified
+  active branch has no `message`, `custom_message`, `compaction`, or
+  `branch_summary` entries; metadata-only sessions qualify. Forks never
+  initialize from an empty branch. `[confirmed by code, index.ts:243-263]`
 - A pre-journal conversation is deliberately unsupported (clean break, no
   migration of legacy sessions): operations fail with "DCP is disabled for
   this pre-journal session. Start a new session to use the current DCP

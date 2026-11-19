@@ -12,6 +12,7 @@
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import type { ModelUsageLimitWindow, RuntimeStatus, SessionUsageReport } from "../lib/acp-client";
   import { parseDcpContextMap } from "../lib/dcp-context-map";
+  import { fitRuntimePopover } from "../lib/runtime-popover-position";
   import {
     dcpContextMap,
     type DcpContextMapCellKind,
@@ -81,6 +82,8 @@
   let root = $state<HTMLDivElement | null>(null);
   let contextOpen = $state(false);
   let usageOpen = $state(false);
+  const fitContext = fitRuntimePopover("left");
+  const fitUsage = fitRuntimePopover("right");
   let usageSort = $state<SessionUsageSort>("totalTokens");
   const usageColumns: readonly { key: SessionUsageSort; label: string }[] = [
     { key: "totalTokens", label: "Tokens" },
@@ -427,12 +430,13 @@
         {#if contextOpen}
           <div
             id="runtime-context-popover"
-            class="absolute bottom-full left-0 z-50 max-h-[max(0px,calc(100dvh-70px))] w-max max-w-[min(360px,calc(100vw-16px))] overflow-y-auto overscroll-contain"
+            {@attach fitContext}
+            class="absolute bottom-full left-0 z-50 max-h-[max(0px,calc(100dvh-70px))] w-max max-w-[360px] overflow-y-auto overscroll-contain"
             role="dialog"
             aria-label="Context usage details"
             tabindex="0"
           >
-            <div class="w-72 rounded-md border border-border bg-popover px-3 py-2.5 text-popover-foreground shadow-md">
+            <div class="w-72 max-w-full rounded-md border border-border bg-popover px-3 py-2.5 text-popover-foreground shadow-md">
               <div class="font-mono text-xs text-muted-foreground">{contextTitle(false)}</div>
               {#if status?.dcpTokensSaved !== undefined}
                 <DcpSavingsSummary tokensSaved={status.dcpTokensSaved} />
@@ -509,7 +513,8 @@
         {#if usageOpen}
           <div
             id="runtime-usage-popover"
-            class="absolute right-0 bottom-full z-50 w-[min(360px,calc(100vw-16px))]"
+            {@attach fitUsage}
+            class="absolute bottom-full left-0 z-50 w-[360px]"
             role="dialog"
             aria-label="Session usage and cost"
           >

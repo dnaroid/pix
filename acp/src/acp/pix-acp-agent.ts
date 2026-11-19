@@ -76,12 +76,13 @@ import {
 	type SupervisorHandoverRequest,
 	type SupervisorHandoverResponse,
 	SUPERVISOR_SESSION_TITLE,
+	SUPERVISOR_QUESTION_RESOLVED_CHANNEL,
 	parseSupervisorOpenRequest,
 	type SupervisorOpenRequest,
 	type SupervisorOpenResponse,
 } from "./supervisor-contract.js";
 import { forwardSupervisorRequest } from "./supervisor-bridge.js";
-import { createSupervisorService, readSessionBranchMessages, type SupervisorService } from "./supervisor-service.js";
+import { createSupervisorService, readSessionBranchMessages, type SupervisorPendingQuestion, type SupervisorService } from "./supervisor-service.js";
 import { createSupervisorActions, type SupervisorActions } from "./supervisor-actions.js";
 import { writeTaskStatus } from "./supervisor-tasks.js";
 import { reconcileSupervisor } from "./supervisor-reconcile.js";
@@ -387,7 +388,7 @@ import {
 	type DeferredToolResult,
 } from "./session-replay.js";
 import { loadTuiTabSnapshot, type TuiTabSnapshot } from "./tui-tabs.js";
-import { cancelledResponse, fromElicitationResponse, toElicitationRequest, PIX_QUESTION_ELICITATION_MODE } from "./ui-request-bridge.js";
+import { cancelledResponse, fromElicitationResponse, isQuestionElicitation, toElicitationRequest } from "./ui-request-bridge.js";
 import {
 	PIX_CONTEXT_USAGE_CHANNEL,
 	PIX_DCP_CONTEXT_MAP_CHANNEL,
@@ -446,6 +447,8 @@ type WorkspaceUndoBridgeResult = {
 };
 
 interface ActiveRun {
+	/** No timestamp for synthetic supervisor wakes or non-user runs. */
+	readonly userPromptAt?: number;
 	/** Whether the client requested cancellation before pi reported its reason. */
 	cancelled: boolean;
 	/** Extension slash commands report their result through ctx.ui.notify. */
@@ -507,6 +510,7 @@ interface AgentSessionState {
 	/** Dialog extension UI requests awaiting an ACP elicitation answer. */
 	readonly pendingDialogIds: Set<string>;
 	readonly pendingQuestionIds: Set<string>;
+	readonly liveQuestions: Map<string, SupervisorPendingQuestion & { rpcId: string; run: ActiveRun | undefined }>;
 	/** Deterministic lifecycle events for the project supervisor (0077). */
 	readonly events: SessionEventObserver;
 	readonly workspaceUndoResults: Map<string, WorkspaceUndoBridgeResult>;
@@ -866,8 +870,12 @@ export class PixAcpAgent {
 				};
 			},
 			touchedFiles: (sessionId) => this.sessionEvents.touchedFiles(sessionId),
+			questions: (sessionId) => {
+				const session = this.sessions.get(sessionId);
+				return session ? [...session.liveQuestions.values()].filter((question) => this.isLiveQuestion(session, question)) : [];
+			},
 			planFor: async (cwd, sessionId) => (await this.planLaunches.handle({ cwd, action: "list" })).launches[sessionId]?.path,
-			mutate: (cwd, caller, request) => this.supervisorActions.handle(cwd, caller, request),
+			mutate: (cwd, caller, request, current) => this.supervisorActions.handle(cwd, caller, request, current),
 			report: (message) => this.options.logger.warn(message, { module: "supervisor" }),
 		});
 		this.supervisorActions = createSupervisorActions({
@@ -890,6 +898,13 @@ export class PixAcpAgent {
 			runtime: {
 				exclusive: (cwd, operation) => this.supervisorExclusive(cwd, operation),
 				deliver: (sessionId, text) => this.deliverSupervisorMessage(sessionId, text),
+				question: (sessionId, questionId) => {
+					const session = this.sessions.get(sessionId);
+					const question = session?.liveQuestions.get(questionId);
+					return session && question && this.isLiveQuestion(session, question) ? question : undefined;
+				},
+				answerQuestion: (sessionId, questionId, value) => this.answerSupervisorQuestion(sessionId, questionId, value),
+				userPromptAt: (sessionId) => this.sessions.get(sessionId)?.activeRun?.userPromptAt,
 				cancel: (sessionId) => this.cancel(sessionId),
 				launch: (cwd, caller, item, modelRef) => this.launchSupervisorItem(cwd, caller, item, modelRef),
 				writeTaskStatus,
@@ -897,7 +912,7 @@ export class PixAcpAgent {
 		});
 		this.supervisorWaker = createSupervisorWaker({
 			debounceMs: options.supervisorWakeDebounceMs,
-			supervisorFor: (cwd) => this.supervisorSessionId(cwd),
+			registryFor: (cwd) => this.supervisorRegistry(cwd),
 			paused: async (cwd) => (await this.supervisorStore.readMandate(cwd)).paused,
 			enqueue: (supervisorId, text, replace) => this.enqueueSupervisorDigest(supervisorId, text, replace),
 			report: (message) => this.options.logger.warn(message, { module: "supervisor" }),
@@ -3088,6 +3103,7 @@ export class PixAcpAgent {
 			sdkQueueRestoreAfterInterrupt: undefined,
 			pendingDialogIds: new Set(),
 			pendingQuestionIds: new Set(),
+			liveQuestions: new Map(),
 			events: this.sessionEvents.observe(acpSessionId, cwd),
 			workspaceUndoResults: new Map(),
 			contextInventory: undefined,
@@ -3317,8 +3333,9 @@ export class PixAcpAgent {
       return;
     }
 		if (event.type === "pix_supervisor_request") {
-			void forwardSupervisorRequest(session, event, (cwd, caller, request) => this.supervisor.handle(cwd, caller, request),
-				() => this.sessions.get(session.acpSessionId) === session, this.options.logger);
+			const current = () => !this.disposed && this.sessions.get(session.acpSessionId) === session;
+			void forwardSupervisorRequest(session, event, (cwd, caller, request) => this.supervisor.handle(cwd, caller, request, current),
+				current, this.options.logger);
 			return;
 		}
 		if (event.type === "pix_btw_event") {
@@ -3550,6 +3567,25 @@ export class PixAcpAgent {
 		this.rejectActiveRun(session, error);
 		session.pendingDialogIds.clear();
 		session.pendingQuestionIds.clear();
+		session.liveQuestions.clear();
+	}
+
+	private isLiveQuestion(session: AgentSessionState, question: { run: ActiveRun | undefined }): boolean {
+		return !this.disposed && (!question.run || (session.activeRun === question.run && !question.run.cancelled && !question.run.settlement));
+	}
+
+	private answerSupervisorQuestion(sessionId: string, questionId: string, value: string): void {
+		const session = this.sessions.get(sessionId);
+		const question = session?.liveQuestions.get(questionId);
+		if (!session || !question || !this.isLiveQuestion(session, question)) throw new Error("Question is no longer pending; use supervisor read");
+		// No await between checking ownership, writing the response and claiming the request.
+		session.pi.respondToExtensionUi({ type: "extension_ui_response", id: question.rpcId, value });
+		session.liveQuestions.delete(questionId);
+		session.pendingQuestionIds.delete(question.rpcId);
+		session.pendingDialogIds.delete(question.rpcId);
+		session.events.questionResolved(question.rpcId);
+		void session.client.notify(PIX_SESSION_STATE_METHOD, { sessionId, channel: SUPERVISOR_QUESTION_RESOLVED_CHANNEL, data: { questionId } })
+			.catch((error: unknown) => this.options.logger.warn(`supervisor question dismissal failed: ${stringifyUnknown(error)}`, { module: "supervisor" }));
 	}
 
 	/** Bridges one extension UI request to ACP and answers pi. */
@@ -3644,8 +3680,10 @@ export class PixAcpAgent {
 		}
 
 		session.pendingDialogIds.add(request.id);
-		const isQuestion = elicitation.mode === PIX_QUESTION_ELICITATION_MODE;
-		if (isQuestion) {
+		const question = isQuestionElicitation(elicitation) ? elicitation : undefined;
+		if (question) {
+			session.liveQuestions.set(question.elicitationId, { questionId: question.elicitationId, questions: question.questions,
+				rpcId: request.id, run: session.activeRun });
 			session.pendingQuestionIds.add(request.id);
 			session.events.questionPending(request.id);
 		}
@@ -3654,7 +3692,8 @@ export class PixAcpAgent {
 			const answer = await session.client.request("elicitation/create", elicitation);
 			// The session may have been closed while the user was thinking.
 			if (this.sessions.get(session.acpSessionId) !== session) return;
-			if (isQuestion && answer._meta?.["_pix/question-interrupted"] === true) {
+			if (question && !session.liveQuestions.has(question.elicitationId)) return;
+			if (question && answer._meta?.["_pix/question-interrupted"] === true) {
 				interrupted = true;
 				return;
 			}
@@ -3667,14 +3706,16 @@ export class PixAcpAgent {
 			} else {
 				this.options.logger.warn(`elicitation/create failed: ${stringifyUnknown(error)}`);
 			}
-			interrupted = isQuestion;
-			if (!isQuestion && this.sessions.get(session.acpSessionId) === session) {
+			interrupted = question !== undefined;
+			if (!question && this.sessions.get(session.acpSessionId) === session) {
 				this.safeRespond(session.pi, cancelledResponse(request.id));
 			}
 		} finally {
+			if (question && session.liveQuestions.delete(question.elicitationId) && !interrupted) {
+				session.pendingQuestionIds.delete(request.id);
+				session.events.questionResolved(request.id);
+			}
 			session.pendingDialogIds.delete(request.id);
-			if (!interrupted) session.pendingQuestionIds.delete(request.id);
-			if (isQuestion && !interrupted) session.events.questionResolved(request.id);
 		}
 	}
 
@@ -4397,6 +4438,7 @@ export class PixAcpAgent {
 		const run: ActiveRun = {
 			cancelled: false,
 			slashPrompt: isSlashPrompt,
+			...(!isSlashPrompt && input.text.trim() && !input.text.startsWith("[Supervisor digest] ") ? { userPromptAt: Date.now() } : {}),
 			started: false,
 			stopReason: undefined,
 			resolve: () => {},
@@ -4947,6 +4989,7 @@ export class PixAcpAgent {
 		// A questionnaire is an interrupted transcript call, not a user Cancel.
 		// Stop RPC without answering it so it can reopen after loading the session.
 		const hasPendingQuestion = session.pendingQuestionIds.size > 0;
+		session.liveQuestions.clear();
 		for (const id of session.pendingDialogIds) {
 			if (session.pendingQuestionIds.has(id)) continue;
 			this.safeRespond(session.pi, cancelledResponse(id));

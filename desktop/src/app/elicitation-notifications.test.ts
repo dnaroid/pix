@@ -16,9 +16,9 @@ function formRequest(sessionId = "session-1"): CreateElicitationRequest {
 }
 
 describe("elicitation notification ownership", () => {
-  function questionRequest(): CreateElicitationRequest {
+  function questionRequest(elicitationId = "question-1"): CreateElicitationRequest {
     return { mode: "_pix.question", sessionId: "session-1", message: "Which scope?",
-      version: 1, questions: [{ id: "scope", label: "Scope", prompt: "Which scope?", choices: [
+      elicitationId, version: 1, questions: [{ id: "scope", label: "Scope", prompt: "Which scope?", choices: [
         { value: "small", label: "Small" }, { value: "large", label: "Large" },
       ] }],
     } as unknown as CreateElicitationRequest;
@@ -41,6 +41,24 @@ describe("elicitation notification ownership", () => {
     if (pending?.kind !== "question") throw new Error("Expected questionnaire");
     store.cancel(pending.requestId);
     await expect(response).resolves.toEqual({ action: "cancel" });
+  });
+
+  it("dismisses only the questionnaire claimed by the supervisor", async () => {
+    const cancelImages = vi.fn();
+    const store = createElicitationStore({ cancelQuestionImageOperation: cancelImages, activeSessionId: () => "session-1" });
+    const first = store.request(questionRequest());
+    const firstRequest = store.pendingBySession.get("session-1");
+    if (firstRequest?.kind !== "question") throw new Error("Expected questionnaire");
+    store.resolveSupervisorQuestion("another-session", "question-1");
+    expect(store.pendingBySession.get("session-1")).toBe(firstRequest);
+    store.resolveSupervisorQuestion("session-1", "question-1");
+    await expect(first).resolves.toEqual({ action: "cancel" });
+    expect(cancelImages).toHaveBeenCalledWith(firstRequest.requestId);
+    const next = store.request(questionRequest("question-2"));
+    store.resolveSupervisorQuestion("session-1", "question-1");
+    expect(store.pendingBySession.get("session-1")?.kind).toBe("question");
+    store.resolveSupervisorQuestion("session-1", "question-2");
+    await expect(next).resolves.toEqual({ action: "cancel" });
   });
 
   it("announces accepted agent elicitations but not Desktop-local text input", async () => {

@@ -4,6 +4,7 @@
 // as one wake turn, and a busy one gets it after its current turn. While that
 // message is still queued, later events rewrite it instead of adding more.
 import type { SessionEvent } from "./session-events.js";
+import type { SupervisorRegistry } from "./supervisor-store.js";
 
 export const DEFAULT_WAKE_DEBOUNCE_MS = 5_000;
 const MAX_DIGEST_SESSIONS = 20;
@@ -13,7 +14,7 @@ export interface SupervisorWakerDeps {
 	readonly debounceMs?: number | undefined;
 	readonly setTimer?: (callback: () => void, ms: number) => unknown;
 	readonly clearTimer?: (handle: unknown) => void;
-	supervisorFor(cwd: string): Promise<string | undefined>;
+	registryFor(cwd: string): Promise<SupervisorRegistry | undefined>;
 	paused(cwd: string): Promise<boolean>;
 	/**
 	 * Rewrite queued item `replace.id` with `replace.text` when it is still
@@ -62,20 +63,23 @@ export function createSupervisorWaker(deps: SupervisorWakerDeps): SupervisorWake
 
 	async function flush(cwd: string, state: ProjectState): Promise<void> {
 		if (disposed || state.pending.size === 0) return;
-		const supervisorId = await deps.supervisorFor(cwd);
+		const paused = await deps.paused(cwd);
 		if (disposed) return;
-		if (!supervisorId) {
+		const registry = await deps.registryFor(cwd);
+		if (disposed) return;
+		if (!registry?.supervisorSessionId) {
 			state.pending = new Map();
 			return;
 		}
-		state.pending.delete(supervisorId);
+		const supervisorId = registry.supervisorSessionId;
+		state.pending = eligibleEntries(state.pending, registry);
 		if (state.pending.size === 0) return;
 		// Pause holds the wake but keeps the digest current.
-		if (await deps.paused(cwd) || disposed) return;
+		if (paused) return;
 		const taken = state.pending;
 		state.pending = new Map();
 		const previous = state.delivered?.supervisorId === supervisorId ? state.delivered : undefined;
-		const merged = previous ? mergeEntries(previous.entries, taken) : undefined;
+		const merged = previous ? mergeEntries(eligibleEntries(previous.entries, registry), taken) : undefined;
 		const result = await deps.enqueue(supervisorId, renderDigest(taken),
 			previous && merged ? { id: previous.itemId, text: renderDigest(merged) } : undefined);
 		if (!result) {
@@ -96,7 +100,7 @@ export function createSupervisorWaker(deps: SupervisorWakerDeps): SupervisorWake
 			}
 			let lines = state.pending.get(event.sessionId);
 			if (!lines) {
-				if (state.pending.size >= MAX_DIGEST_SESSIONS) return;
+				// Apply the digest limit after filtering so ordinary sessions cannot consume worker slots.
 				lines = new Map();
 				state.pending.set(event.sessionId, lines);
 			}
@@ -115,6 +119,20 @@ export function createSupervisorWaker(deps: SupervisorWakerDeps): SupervisorWake
 			projects.clear();
 		},
 	};
+}
+
+function eligibleEntries(entries: Entries, registry: SupervisorRegistry): Entries {
+	const result: Entries = new Map();
+	for (const [id, lines] of entries) {
+		if (id === registry.supervisorSessionId || !Object.hasOwn(registry.sessions, id)) continue;
+		if (registry.sessions[id]?.mode === "managed") result.set(id, lines);
+		else {
+			const takeover = lines.get("manual_takeover");
+			if (takeover !== undefined) result.set(id, new Map([["manual_takeover", takeover]]));
+		}
+		if (result.size >= MAX_DIGEST_SESSIONS) break;
+	}
+	return result;
 }
 
 function mergeEntries(base: Entries, next: Entries): Entries {
