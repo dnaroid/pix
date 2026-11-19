@@ -9,7 +9,7 @@ import type { SessionStateNotification } from "../lib/session-state";
 import { createConnectionStore } from "./connection.svelte";
 import type { DesktopDiagnosticEvent } from "../lib/diagnostic-logging";
 import type { TaskRunRequest, TaskRunResponse } from "../../../acp/src/acp/task-run-contract";
-import type { SupervisorStartRequest, SupervisorStartResponse } from "../../../acp/src/acp/supervisor-contract";
+import type { SupervisorCloseTabRequest, SupervisorCloseTabResponse, SupervisorStartRequest, SupervisorStartResponse } from "../../../acp/src/acp/supervisor-contract";
 
 type SessionCoordinatorBridge = {
   handleUpdate: (notification: SessionNotification) => void;
@@ -33,6 +33,7 @@ type WorkspaceSessionStartupBridge = {
 type DesktopConnectionServicesOptions = {
   onTaskRun?: (request: TaskRunRequest, signal: AbortSignal) => Promise<TaskRunResponse>;
   onSupervisorStart?: (request: SupervisorStartRequest, signal: AbortSignal) => Promise<SupervisorStartResponse>;
+  onSupervisorCloseTab?: (request: SupervisorCloseTabRequest) => Promise<SupervisorCloseTabResponse>;
   workspace: () => string;
   onSessionCatalogChanged?: (cwd: string) => void;
   sessionCoordinator: () => SessionCoordinatorBridge;
@@ -50,6 +51,7 @@ export function createDesktopConnectionServices(options: DesktopConnectionServic
   return createConnectionStore({
     onTaskRun: options.onTaskRun,
     onSupervisorStart: options.onSupervisorStart,
+    onSupervisorCloseTab: options.onSupervisorCloseTab,
     workspace: options.workspace,
     onSessionCatalogChanged: options.onSessionCatalogChanged,
     onSessionUpdate: (notification) => options.sessionCoordinator().handleUpdate(notification),

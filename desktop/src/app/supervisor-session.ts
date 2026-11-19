@@ -5,6 +5,7 @@ import { SvelteSet } from "svelte/reactivity";
 import { supervisionActions, type SupervisionState } from "../lib/session-supervision";
 import { sessionIsSupervisor, sessionSupervisedMode } from "../lib/session-tabs";
 import { isSubagentSession } from "../lib/session-subagent-link";
+import type { SupervisorCloseTabRequest, SupervisorCloseTabResponse } from "../../../acp/src/acp/supervisor-contract";
 
 /** Matches `supervisor_menu::EVENT` in desktop/src-tauri/src/supervisor_menu.rs. */
 export const SUPERVISOR_MENU_EVENT = "pix-open-supervisor";
@@ -60,6 +61,31 @@ export function createSupervisorSessionAction<C extends SupervisorClient>(option
 type HandoverClient = {
   supervisorHandover(cwd: string, sessionId: string, supervised: boolean): Promise<{ supervised: boolean }>;
 };
+
+/**
+ * `pix/supervisor/close_tab` (0077): after `close outcome=done` of a worker the
+ * supervisor started, ACP asks Desktop to close that session's tab. Desktop
+ * only closes the tab; the saved conversation stays for review and `reopen`.
+ */
+export type SupervisorTabAutoCloseOptions = {
+  workspace: () => string;
+  isTabOpen: (sessionId: string) => boolean;
+  /** A running or otherwise busy session is left alone, never confirmed away. */
+  isBusy: (sessionId: string) => boolean;
+  closeTab: (sessionId: string) => Promise<boolean>;
+};
+
+export function createSupervisorTabAutoClose(options: SupervisorTabAutoCloseOptions) {
+  return async (request: SupervisorCloseTabRequest): Promise<SupervisorCloseTabResponse> => {
+    if (options.workspace() !== request.cwd) return { closed: false };
+    if (!options.isTabOpen(request.sessionId) || options.isBusy(request.sessionId)) return { closed: false };
+    try {
+      return { closed: await options.closeTab(request.sessionId) };
+    } catch {
+      return { closed: false };
+    }
+  };
+}
 
 /**
  * Manual handover (0077): the user hands an ordinary conversation to the

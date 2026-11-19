@@ -26,6 +26,13 @@ function harness(options: { paused?: boolean; supervisor?: string | undefined } 
 			queue.push({ id: itemId, text });
 			return { itemId, replaced: false };
 		},
+		rewrite: async (_sup, itemId, text) => {
+			const index = queue.findIndex((item) => item.id === itemId);
+			if (index < 0) return false;
+			if (text === undefined) queue.splice(index, 1);
+			else queue[index]!.text = text;
+			return true;
+		},
 	});
 	const fire = async () => {
 		await waker.whenIdle(); // edits resolve registry snapshots before scheduling a wake
@@ -254,4 +261,92 @@ test("dispose invalidates an overlap still waiting on its registry snapshots", a
 	await idle;
 	assert.equal(h.timers.size, 0);
 	assert.equal(h.queue.length, 0);
+});
+
+test("forget withdraws a session's lines from a still-queued digest and drops an emptied one", async () => {
+	const h = harness();
+	h.waker.push("/p", settled("w1"));
+	h.waker.push("/p", settled("w2"));
+	await h.fire();
+	assert.equal(h.queue.length, 1);
+	delete h.sessions.w1;
+	h.waker.forget("/p", "w1");
+	await h.waker.whenIdle();
+	assert.equal(h.queue.length, 1);
+	assert.doesNotMatch(h.queue[0]!.text, /w1:/);
+	assert.match(h.queue[0]!.text, /w2: turn settled/);
+	delete h.sessions.w2;
+	h.waker.forget("/p", "w2");
+	await h.waker.whenIdle();
+	assert.equal(h.queue.length, 0, "a digest with no remaining sessions is removed, not left empty");
+	// A later event starts a fresh digest instead of rewriting the removed item.
+	h.waker.push("/p", settled("w3"));
+	await h.fire();
+	assert.equal(h.queue.length, 1);
+	assert.doesNotMatch(h.queue[0]!.text, /w1|w2/);
+});
+
+test("forget drops pending events before the debounce fires", async () => {
+	const h = harness();
+	h.waker.push("/p", settled("w1"));
+	delete h.sessions.w1;
+	h.waker.forget("/p", "w1");
+	await h.fire();
+	assert.equal(h.queue.length, 0);
+});
+
+test("forget after the supervisor consumed the digest changes nothing and the next digest is fresh", async () => {
+	const h = harness();
+	h.waker.push("/p", settled("w1"));
+	h.waker.push("/p", settled("w2"));
+	await h.fire();
+	h.queue.length = 0; // supervisor consumed it
+	delete h.sessions.w1;
+	h.waker.forget("/p", "w1");
+	await h.waker.whenIdle();
+	assert.equal(h.queue.length, 0, "a consumed digest is never re-queued");
+	h.waker.push("/p", stalled("w2"));
+	await h.fire();
+	assert.equal(h.queue.length, 1);
+	assert.doesNotMatch(h.queue[0]!.text, /w1/);
+});
+
+test("forget is ordered after an in-flight flush, so the withdrawn session never survives a rewrite", async () => {
+	const h = harness();
+	h.waker.push("/p", settled("w1"));
+	await h.fire();
+	h.waker.push("/p", stalled("w2"));
+	const pending = [...h.timers];
+	h.timers.clear();
+	for (const callback of pending) callback(); // flush queued on the chain, not yet run
+	delete h.sessions.w1;
+	h.waker.forget("/p", "w1");
+	await h.waker.whenIdle();
+	assert.equal(h.queue.length, 1);
+	assert.doesNotMatch(h.queue[0]!.text, /w1:/);
+	assert.match(h.queue[0]!.text, /w2: stalled/);
+});
+
+test("a session handed over again before the withdrawal runs keeps its new events", async () => {
+	const h = harness();
+	h.waker.push("/p", settled("w1"));
+	await h.fire();
+	const entry = h.sessions.w1!;
+	delete h.sessions.w1;
+	h.waker.forget("/p", "w1"); // queued on the chain
+	h.sessions.w1 = { ...entry, registeredAt: 5 }; // handed over again before it runs
+	h.waker.push("/p", stalled("w1"));
+	await h.fire();
+	assert.equal(h.queue.length, 1);
+	assert.match(h.queue[0]!.text, /w1: .*stalled/);
+});
+
+test("forget of a still-registered session changes nothing", async () => {
+	const h = harness();
+	h.waker.push("/p", settled("w1"));
+	await h.fire();
+	const before = h.queue[0]!.text;
+	h.waker.forget("/p", "w1");
+	await h.waker.whenIdle();
+	assert.deepEqual(h.queue.map((item) => item.text), [before]);
 });

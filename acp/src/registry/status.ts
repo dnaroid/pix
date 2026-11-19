@@ -73,14 +73,24 @@ export async function collectStatuses(executor: RegistryExecutor, project: Proje
 			resourceRevision(executor, resourceRuntime, type, name),
 		]);
 		const localChanged = localHash !== tracked.hash;
-		const remoteChanged = remoteRevision !== tracked.revision;
-		const kind: RegistryStatusKind = localChanged && remoteChanged
-			? "diverged"
-			: localChanged
-				? "local-changes"
-				: remoteChanged
-					? "update-available"
-					: "up-to-date";
+		let remoteChanged = remoteRevision !== tracked.revision;
+		let converged = false;
+		if (remoteChanged) {
+			// A path revision also moves on content-neutral commits (scope moves in
+			// another project). Only changed published bytes are a registry change.
+			const remoteHash = await hashResource(type, remote.path);
+			remoteChanged = remoteHash !== tracked.hash;
+			converged = remoteHash === localHash;
+		}
+		const kind: RegistryStatusKind = converged
+			? "up-to-date"
+			: localChanged && remoteChanged
+				? "diverged"
+				: localChanged
+					? "local-changes"
+					: remoteChanged
+						? "update-available"
+						: "up-to-date";
 		statuses.push({ type, name, kind, local, remote, provenance: tracked, remoteRevision });
 	}
 

@@ -53,7 +53,7 @@
   import { createDesktopWorkbenchGitServices } from "./app/desktop-workbench-git-services";
   import { createDesktopModelServices } from "./app/desktop-model-services";
   import { createDesktopCommandServices } from "./app/desktop-command-services";
-  import { createSupervisorHandover, createSupervisorSessionAction, handleSupervisorMenu, listenSupervisorMenu } from "./app/supervisor-session";
+  import { createSupervisorHandover, createSupervisorSessionAction, createSupervisorTabAutoClose, handleSupervisorMenu, listenSupervisorMenu } from "./app/supervisor-session";
   import { SUPERVISOR_QUESTION_RESOLVED_CHANNEL } from "../../acp/src/acp/supervisor-contract";
   import { createDesktopInteractionServices } from "./app/desktop-interaction-services.svelte";
   import { createDesktopPresentationState } from "./app/desktop-presentation-state.svelte";
@@ -158,6 +158,7 @@
   const connection = createDesktopConnectionServices({
     onTaskRun: (request, signal) => projectActionServices.runTaskFromAgent(request, signal),
     onSupervisorStart: (request, signal) => projectActionServices.startFromSupervisor(request, signal),
+    onSupervisorCloseTab: (request) => supervisorTabAutoClose(request),
     workspace: () => workspace,
     onSessionCatalogChanged: (cwd) => sessionServices.catalog.nativeCatalogChanged(cwd),
     sessionCoordinator: () => sessionCoordinator,
@@ -596,6 +597,12 @@
   });
   const draftSession = sessionTransitions.draft;
   const sessionTabController = sessionTransitions.sessionTabs;
+  const supervisorTabAutoClose = createSupervisorTabAutoClose({
+    workspace: () => workspace,
+    isTabOpen: (id) => tabSessions.some((session) => session.sessionId === id),
+    isBusy: (id) => promptRuntime.isRunning(id),
+    closeTab: (id) => sessionTabController.closeSessionTab(id),
+  });
   const draftSessionTabOpen = $derived(draftSession.open);
   const draftSessionTabActive = $derived(draftSession.active);
   const draftSessionTabTouched = $derived(draftSession.touched);
@@ -1021,7 +1028,8 @@
     const sessionId = activeSessionId;
     if (activeWorkbenchTab?.kind !== "session" || !sessionId) return null;
     const supervision = supervisorHandover.supervision(sessionId);
-    return supervision ? {
+    // Ordinary sessions get no header; handover stays in the context menu.
+    return supervision?.mode ? {
       supervision,
       onSetSupervised: (supervised: boolean) => void supervisorHandover.setSupervised(sessionId, supervised),
     } : null;

@@ -25,11 +25,21 @@ export interface SupervisorWakerDeps {
 	 */
 	enqueue(supervisorSessionId: string, text: string, replace?: { readonly id: string; readonly text: string }):
 		Promise<{ readonly itemId: string; readonly replaced: boolean } | undefined>;
+	/**
+	 * Rewrite (`text`) or remove (`undefined`) queued item `itemId` only while it
+	 * is still queued; never queues anything. False once the supervisor took it.
+	 */
+	rewrite(supervisorSessionId: string, itemId: string, text: string | undefined): Promise<boolean>;
 	report?(message: string): void;
 }
 
 export interface SupervisorWaker {
 	push(cwd: string, event: SessionEvent): void;
+	/**
+	 * The session left the registry (close, take back, delete): drop its
+	 * pending events and withdraw its lines from a still-queued digest.
+	 */
+	forget(cwd: string, sessionId: string): void;
 	/** Resolves when queued edit checks and started deliveries finish (tests). */
 	whenIdle(): Promise<void>;
 	dispose(): void;
@@ -55,7 +65,7 @@ interface TouchHistory {
 interface ProjectState {
 	timer: unknown;
 	pending: Entries;
-	delivered?: { readonly itemId: string; readonly supervisorId: string; readonly entries: Entries };
+	delivered?: { readonly itemId: string; readonly supervisorId: string; readonly entries: Entries } | undefined;
 	chain: Promise<void>;
 	touches: Map<string, TouchHistory>;
 	supervisorId?: string | undefined;
@@ -151,15 +161,50 @@ export function createSupervisorWaker(deps: SupervisorWakerDeps): SupervisorWake
 		state.delivered = { itemId: result.itemId, supervisorId, entries: result.replaced && merged ? merged : taken };
 	}
 
+	/**
+	 * Ordered on the project chain, so it never interleaves with a flush. The
+	 * registry is read when this runs, not when `forget` was called: a session
+	 * handed over again in between keeps its new events.
+	 */
+	async function withdraw(cwd: string, state: ProjectState, sessionId: string): Promise<void> {
+		const registry = await deps.registryFor(cwd);
+		if (disposed || !registry) return;
+		if (Object.hasOwn(registry.sessions, sessionId) && registry.supervisorSessionId !== sessionId) return;
+		state.pending.delete(sessionId);
+		state.touches.delete(sessionId);
+		pruneTouches(state, registry);
+		const delivered = state.delivered;
+		if (!delivered || delivered.supervisorId !== registry.supervisorSessionId) return;
+		const remaining = eligibleEntries(delivered.entries, registry, state.touches);
+		const text = remaining.size > 0 ? renderDigest(remaining) : undefined;
+		if (text === renderDigest(delivered.entries)) return;
+		const rewritten = await deps.rewrite(delivered.supervisorId, delivered.itemId, text);
+		if (disposed || state.delivered !== delivered) return;
+		// Consumed already: nothing left to withdraw; the next digest starts fresh.
+		if (!rewritten || remaining.size === 0) state.delivered = undefined;
+		else state.delivered = { ...delivered, entries: remaining };
+	}
+
+	function project(cwd: string): ProjectState {
+		let state = projects.get(cwd);
+		if (!state) {
+			state = { timer: undefined, pending: new Map(), chain: Promise.resolve(), touches: new Map() };
+			projects.set(cwd, state);
+		}
+		return state;
+	}
+
 	return {
+		forget(cwd, sessionId) {
+			if (disposed) return;
+			cwd = resolve(cwd);
+			const state = project(cwd);
+			run(state, () => withdraw(cwd, state, sessionId));
+		},
 		push(cwd, event) {
 			if (disposed) return;
 			cwd = resolve(cwd);
-			let state = projects.get(cwd);
-			if (!state) {
-				state = { timer: undefined, pending: new Map(), chain: Promise.resolve(), touches: new Map() };
-				projects.set(cwd, state);
-			}
+			const state = project(cwd);
 			if (event.type === "file_changed") {
 				touch(cwd, state, event);
 				return;

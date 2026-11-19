@@ -57,6 +57,8 @@ async function setup(
 	const cancelled: string[] = [];
 	const taskWrites: { taskId: string; status: string }[] = [];
 	const released: string[] = [];
+	const autoClosed: string[] = [];
+	let catalogRefreshes = 0;
 	const gone = new Set<string>();
 	const launches: { item: SupervisorStartItem; modelRef: string | undefined; caller: string }[] = [];
 	let launchGate: Promise<void> = Promise.resolve();
@@ -87,6 +89,8 @@ async function setup(
 			},
 			writeTaskStatus: async (_cwd, taskId, status) => { taskWrites.push({ taskId, status }); return true; },
 			released: (sessionId) => { released.push(sessionId); },
+			autoCloseTab: (_cwd, _caller, sessionId) => { autoClosed.push(sessionId); },
+			registered: () => { catalogRefreshes++; },
 		},
 		live: (sessionId) => live.get(sessionId),
 		digest: async (_cwd, _caller, sessionId) => digests.get(sessionId) ?? goodDigest(sessionId),
@@ -95,7 +99,8 @@ async function setup(
 	});
 	const handle = (request: SupervisorMutation, caller = SUPERVISOR, current?: () => boolean) => actions.handle(cwd, caller, request, current);
 	const ledger = async () => (await store.readLedger(cwd)).map((entry) => entry.kind);
-	return { cwd, store, live, digests, stops, delivered, cancelled, taskWrites, released, gone, exclusive, handle, ledger, launches,
+	return { cwd, store, live, digests, stops, delivered, cancelled, taskWrites, released, autoClosed, gone, exclusive, handle, ledger, launches,
+		catalogRefreshes: () => catalogRefreshes,
 		questions, answers, setUserPromptAt: (at: number) => { userPromptAt = at; },
 		gate: (gate: Promise<void>) => { launchGate = gate; }, failLaunch: (error: Error | undefined) => { launchError = error; } };
 }
@@ -327,6 +332,33 @@ test("supervisor closes a completed prompt session without inventing a task or p
 	assert.equal((closed?.detail as { evidence: { plan: unknown } }).evidence.plan, null);
 });
 
+test("close done auto-closes only supervisor-started workers; reopen restores the origin", async (t) => {
+	const s = await setup(t, { sessions: {
+		w1: managed({ origin: "started" }),
+		w2: managed({ item: { kind: "prompt" }, origin: "handed_over" }),
+		w3: managed({ item: { kind: "prompt" } }),
+	} });
+	for (const id of ["w1", "w2", "w3"]) {
+		s.live.set(id, liveSession());
+		s.digests.set(id, goodDigest(id, { task: undefined, plan: undefined }));
+	}
+	// A refused close never reaches the tab.
+	s.stops.set("w1", "cancelled");
+	assert.equal((await s.handle({ op: "close", sessionId: "w1", outcome: "done", summary: "x" }) as { closed: boolean }).closed, false);
+	assert.deepEqual(s.autoClosed, []);
+	s.stops.set("w1", "end_turn");
+	for (const [id, outcome] of [["w1", "done"], ["w2", "done"], ["w3", "failed"]] as const) {
+		assert.equal((await s.handle({ op: "close", sessionId: id, outcome, summary: "x" }) as { closed: boolean }).closed, true);
+	}
+	assert.deepEqual(s.autoClosed, ["w1"], "only started origin, only done");
+	assert.equal(s.catalogRefreshes(), 3, "every successful close refreshes the Desktop catalog; a refused one does not");
+	const closed = (await s.store.readLedger(s.cwd)).filter((entry) => entry.kind === "closed" && entry.sessionId === "w1").at(-1);
+	assert.equal((closed?.detail as { origin?: string }).origin, "started");
+	assert.equal((await s.handle({ op: "reopen", sessionId: "w1" }) as { reopened: boolean }).reopened, true);
+	assert.equal((await s.store.readRegistry(s.cwd)).sessions.w1?.origin, "started");
+	assert.equal(s.catalogRefreshes(), 4, "reopen refreshes the catalog too");
+});
+
 test("a user takeover holding the lock wins over a racing supervisor send", async (t) => {
 	const s = await setup(t);
 	let release!: () => void;
@@ -385,7 +417,7 @@ test("supervisor start launches an item, registers it managed and briefed, and j
 		[[undefined, SUPERVISOR], ["p/worker", SUPERVISOR], ["p/explicit", SUPERVISOR]], "tasks keep their own model");
 	const sessions = (await s.store.readRegistry(s.cwd)).sessions;
 	assert.deepEqual(sessions.new3?.item, { kind: "prompt" });
-	for (const id of ["new1", "new2", "new3"]) assert.deepEqual([sessions[id]?.mode, sessions[id]?.briefed, sessions[id]?.reworkRounds], ["managed", true, 0]);
+	for (const id of ["new1", "new2", "new3"]) assert.deepEqual([sessions[id]?.mode, sessions[id]?.briefed, sessions[id]?.reworkRounds, sessions[id]?.origin], ["managed", true, 0, "started"]);
 	assert.deepEqual(await s.ledger(), ["started", "started", "started"]);
 	const ledger = await s.store.readLedger(s.cwd);
 	assert.equal((ledger.at(-1)?.detail as { text?: string }).text, "fix the flaky test");

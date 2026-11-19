@@ -7,7 +7,7 @@ import { createSessionActivityStore } from "../app/session-activity.svelte";
 import { TODO_STATE_CHANNEL } from "./session-todos";
 import { parseQueueState } from "./acp-response-parsers";
 import { TASK_RUN_METHOD, TASK_RUN_CANCEL_METHOD } from "../../../acp/src/acp/task-run-contract";
-import { PIX_SUPERVISOR_START_METHOD } from "../../../acp/src/acp/supervisor-contract";
+import { PIX_SUPERVISOR_START_METHOD, PIX_SUPERVISOR_CLOSE_TAB_METHOD } from "../../../acp/src/acp/supervisor-contract";
 
 class FakeTransport implements AcpTransport {
   handlers?: AcpTransportHandlers;
@@ -131,6 +131,19 @@ describe("ACP JSON-RPC client", () => {
     finish();
     await vi.waitFor(() => expect(transport.sent).toHaveLength(3));
     expect(requestAt(transport, 2)).toMatchObject({ id: 101, result: { sessionId: "worker" } });
+    await client.dispose();
+  });
+
+  it("routes supervisor close-tab requests and validates both directions", async () => {
+    const transport = new FakeTransport();
+    const onSupervisorCloseTab = vi.fn(async (request: { cwd: string; sessionId: string }) => ({ closed: request.sessionId === "w" }));
+    const client = await startedClient(transport, { onSupervisorCloseTab });
+    transport.message({ jsonrpc: "2.0", id: 200, method: PIX_SUPERVISOR_CLOSE_TAB_METHOD, params: { cwd: "/workspace", sessionId: "" } });
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toHaveProperty("error");
+    transport.message({ jsonrpc: "2.0", id: 201, method: PIX_SUPERVISOR_CLOSE_TAB_METHOD, params: { cwd: "/workspace", sessionId: "w" } });
+    await vi.waitFor(() => expect(onSupervisorCloseTab).toHaveBeenCalledWith({ cwd: "/workspace", sessionId: "w" }));
+    await vi.waitFor(() => expect(requestAt(transport, 2)).toMatchObject({ id: 201, result: { closed: true } }));
     await client.dispose();
   });
 

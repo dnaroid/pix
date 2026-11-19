@@ -249,6 +249,35 @@ function modelRefOf(value: unknown): string | undefined {
 	return value.trim();
 }
 
+/**
+ * `pix/supervisor/close_tab` (ACP -> Desktop): after `close outcome=done` of a
+ * supervisor-started worker, Desktop closes that session's tab. Best-effort;
+ * the conversation itself stays in the saved list.
+ */
+export const PIX_SUPERVISOR_CLOSE_TAB_METHOD = "pix/supervisor/close_tab";
+export interface SupervisorCloseTabRequest {
+	readonly cwd: string;
+	readonly sessionId: string;
+}
+export interface SupervisorCloseTabResponse {
+	readonly closed: boolean;
+}
+
+export function parseSupervisorCloseTabRequest(value: unknown): SupervisorCloseTabRequest {
+	const row = record(value, "Invalid supervisor close-tab request");
+	const { cwd } = parseSupervisorOpenRequest({ cwd: row.cwd });
+	if (typeof row.sessionId !== "string" || !row.sessionId || row.sessionId.length > MAX_SESSION_ID) {
+		throw new Error("Invalid supervisor close-tab sessionId");
+	}
+	return { cwd, sessionId: row.sessionId };
+}
+
+export function parseSupervisorCloseTabResponse(value: unknown): SupervisorCloseTabResponse {
+	const row = record(value, "Invalid supervisor close-tab response");
+	if (typeof row.closed !== "boolean") throw new Error("Invalid supervisor close-tab response");
+	return { closed: row.closed };
+}
+
 /** Desktop side: validate ACP's launch request before running anything. */
 export function parseSupervisorStartRequest(value: unknown): SupervisorStartRequest {
 	const row = record(value, "Invalid supervisor start request");

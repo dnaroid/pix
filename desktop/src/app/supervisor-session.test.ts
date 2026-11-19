@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createSupervisorHandover, createSupervisorSessionAction, handleSupervisorMenu, SUPERVISOR_MENU_UNAVAILABLE } from "./supervisor-session";
+import { createSupervisorHandover, createSupervisorSessionAction, createSupervisorTabAutoClose, handleSupervisorMenu, SUPERVISOR_MENU_UNAVAILABLE } from "./supervisor-session";
 import { sessionIsSupervisor } from "../lib/session-tabs";
 import { COMMAND_PALETTE_IDS, desktopCommandDefinition } from "../lib/desktop-commands";
 
@@ -141,5 +141,40 @@ describe("manual supervisor handover", () => {
     await h.action.setSupervised("w", false);
     expect(h.client.supervisorHandover).toHaveBeenLastCalledWith("/p", "w", false);
     expect(h.errors).toHaveLength(1);
+  });
+});
+
+describe("supervisor close-tab auto close", () => {
+  function autoClose(overrides: Partial<Parameters<typeof createSupervisorTabAutoClose>[0]> = {}) {
+    const closed: string[] = [];
+    const options = {
+      workspace: () => "/p",
+      isTabOpen: (id: string) => id === "w",
+      isBusy: () => false,
+      closeTab: async (id: string) => { closed.push(id); return true; },
+      ...overrides,
+    };
+    return { action: createSupervisorTabAutoClose(options), closed };
+  }
+
+  it("closes the tab of an idle, open worker of the current workspace", async () => {
+    const h = autoClose();
+    await expect(h.action({ cwd: "/p", sessionId: "w" })).resolves.toEqual({ closed: true });
+    expect(h.closed).toEqual(["w"]);
+  });
+
+  it("never closes for another workspace, an unopened tab or a busy session", async () => {
+    const busy = autoClose({ isBusy: (id) => id === "w" });
+    await expect(busy.action({ cwd: "/p", sessionId: "w" })).resolves.toEqual({ closed: false });
+    const otherWorkspace = autoClose();
+    await expect(otherWorkspace.action({ cwd: "/other", sessionId: "w" })).resolves.toEqual({ closed: false });
+    const unopened = autoClose();
+    await expect(unopened.action({ cwd: "/p", sessionId: "gone" })).resolves.toEqual({ closed: false });
+    expect([...busy.closed, ...otherWorkspace.closed, ...unopened.closed]).toEqual([]);
+  });
+
+  it("reports no close when closing fails", async () => {
+    const h = autoClose({ closeTab: async () => { throw new Error("busy mutation"); } });
+    await expect(h.action({ cwd: "/p", sessionId: "w" })).resolves.toEqual({ closed: false });
   });
 });

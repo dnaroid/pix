@@ -22,15 +22,28 @@
   // The parent keys by scope and content. Remounting an unchanged block restores
   // its selection and pending/submitted state rather than the model defaults.
   const state = untrack(() => choiceActionsStateCache.get(stateScope, blockIndex, actions));
-  const enabled = $derived(active && !state.submitting && !state.submitted);
+  // Reply buttons belong to the latest turn only. Checklist rows stay usable on
+  // older unsent blocks, so the user can still run some offered steps later.
+  const enabled = $derived(!state.submitting && !state.submitted);
+  const buttonsEnabled = $derived(active && enabled);
+  // Model defaults are a recommendation for the latest turn only; an expired
+  // block shows just the choices the user actually made on it.
+  const showSelection = $derived(active || state.submitted || state.edited);
+
+  function selectingText(event: MouseEvent): boolean {
+    const selection = window.getSelection();
+    return !!selection && !selection.isCollapsed && (event.currentTarget as Node).contains(selection.anchorNode);
+  }
 
   function toggle(index: number): void {
     if (!enabled) return;
-    state.selected = state.selected.includes(index) ? state.selected.filter((value) => value !== index) : [...state.selected, index];
+    const base = showSelection ? state.selected : [];
+    state.edited = true;
+    state.selected = base.includes(index) ? base.filter((value) => value !== index) : [...base, index];
   }
 
   async function submit(button?: number): Promise<void> {
-    if (!enabled) return;
+    if (button !== undefined ? !buttonsEnabled : !enabled || !showSelection) return;
     // Compatibility buttons preserve the full prompt, not just its short label.
     if (button !== undefined) state.selected = [button];
     if (!state.selected.length) return;
@@ -55,12 +68,12 @@
       class={[
         "rounded-md px-3 py-1 text-xs font-medium disabled:cursor-default",
         index === 0 ? "bg-primary text-primary-foreground" : "border border-border/70 text-foreground",
-        enabled && (index === 0 ? "hover:opacity-90" : "hover:bg-panel-hover"),
-        !enabled && !pressed && "opacity-40",
+        buttonsEnabled && (index === 0 ? "hover:opacity-90" : "hover:bg-panel-hover"),
+        !buttonsEnabled && !pressed && "opacity-40",
       ]}
       type="button"
       title={item.prompt}
-      disabled={!enabled}
+      disabled={!buttonsEnabled}
       aria-pressed={state.submitted ? pressed : undefined}
       data-choice-button={index}
       onclick={() => submit(index)}
@@ -72,42 +85,49 @@
 <div class="my-3 w-full rounded-md border border-border/70" data-choice-actions>
   <div class="divide-y divide-border/70" role="group" aria-label={actions.submitLabel}>
     {#each actions.items as item, index}
-      <!-- An expired, unsubmitted block shows no checks: model defaults are not user choices. -->
-      {@const isSelected = (active || state.submitted) && state.selected.includes(index)}
-      <button
+      {@const isSelected = showSelection && state.selected.includes(index)}
+      <!-- Not a <button>: WebKit cannot select text inside buttons, and labels must stay copyable. -->
+      <div
         class={[
-          "flex w-full items-start gap-2.5 px-2.5 py-2 text-left text-sm transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring",
+          "flex w-full cursor-default items-start gap-2.5 px-2.5 py-2 text-left text-sm transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring",
           isSelected ? "bg-panel-selected" : enabled && "hover:bg-panel-hover",
-          !enabled && "cursor-default",
         ]}
-        type="button"
         role="checkbox"
+        tabindex={enabled ? 0 : -1}
         aria-checked={isSelected}
         aria-disabled={!enabled || undefined}
         data-choice-action={index}
-        onclick={() => toggle(index)}
+        onclick={(event) => {
+          // A double-click selects a word: undo the toggle made by its first click.
+          if (event.detail === 2) toggle(index);
+          else if (event.detail < 2 && !selectingText(event)) toggle(index);
+        }}
+        onkeydown={(event) => {
+          if (event.key !== " " && event.key !== "Enter") return;
+          event.preventDefault();
+          toggle(index);
+        }}
       >
         <span class={[
           "mt-0.5 grid size-4 shrink-0 place-items-center rounded-sm border",
           isSelected ? "border-primary" : "border-muted-foreground/50",
-          !enabled && "opacity-60",
+          (!enabled || !active) && "opacity-60",
         ]}>{#if isSelected}<Check class="size-3 text-primary" strokeWidth={2.4} />{/if}</span>
         <span class={[
-          "min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere] text-foreground",
-          !enabled && "select-text",
-          !enabled && !isSelected && "opacity-60",
+          "select-text min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere] text-foreground",
+          (!enabled || !active) && !isSelected && "opacity-60",
         ]}>
           <span class="text-muted-foreground tabular-nums">{index + 1}.</span> {item.label}
         </span>
-      </button>
+      </div>
     {/each}
   </div>
-  {#if active && !state.submitted}
+  {#if !state.submitted && (active || state.edited)}
     <div class="flex items-center gap-3 border-t border-border/70 px-2.5 py-2">
       <button
         class="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
         type="button"
-        disabled={!enabled || !state.selected.length}
+        disabled={!enabled || !showSelection || !state.selected.length}
         data-choice-actions-submit
         onclick={() => submit()}
       >{actions.submitLabel}</button>

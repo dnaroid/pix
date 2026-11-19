@@ -4,6 +4,8 @@ interface ChoiceActionsState {
   selected: number[];
   submitting: boolean;
   submitted: boolean;
+  /** The user toggled a row; distinguishes real choices from model defaults. */
+  edited: boolean;
   error: string;
 }
 
@@ -24,6 +26,7 @@ export function createChoiceActionsStateCache(limit = 512) {
         selected: actions.items.flatMap((item, index) => item.checked ? [index] : []),
         submitting: false,
         submitted: false,
+        edited: false,
         error: "",
       });
       if (scope) {

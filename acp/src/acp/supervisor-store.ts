@@ -53,6 +53,8 @@ export interface ManagedSession {
 	readonly escalation?: { readonly text: string; readonly at: number; readonly questionId?: string };
 	/** The worker rules preamble was delivered with a supervisor message. */
 	readonly briefed?: boolean;
+	/** How the session was registered; `close done` auto-closes only `started` tabs. */
+	readonly origin?: "started" | "handed_over";
 }
 
 export interface SupervisorRegistry {
@@ -141,6 +143,7 @@ export function parseRegistry(value: unknown): SupervisorRegistry {
 			registeredAt: typeof record["registeredAt"] === "number" ? record["registeredAt"] : 0,
 			reworkRounds: intIn(record["reworkRounds"], 0, 1_000, 0),
 			...(record["briefed"] === true ? { briefed: true } : {}),
+			...(record["origin"] === "started" || record["origin"] === "handed_over" ? { origin: record["origin"] } : {}),
 		};
 		const escalation = record["escalation"];
 		const escalationText = isRecord(escalation) ? text(escalation["text"], 2_000) : undefined;

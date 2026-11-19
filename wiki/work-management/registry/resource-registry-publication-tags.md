@@ -86,6 +86,20 @@ status: active
   one Git commit/push, and never changes or republishes local copies/edits.
   Provenance moves with the publication while retaining the local baseline and
   any pending remote update. Legacy provenance without a scope means Global.
+- Resource sync state compares published bytes, not path revisions alone. A
+  moved registry revision whose published bytes still match the provenance
+  baseline hash (for example a content-neutral Make project / Make global move
+  done from another project) is not a registry change. When the registry
+  revision has moved, status is `up-to-date` if the local copy's hash equals the
+  published hash, even if both differ from the baseline. Otherwise status is
+  `update-available` or `diverged` only when the published bytes differ from the
+  baseline (`diverged` also requires a local change). Push refuses with the
+  "changed in the registry" error only when the published bytes differ from the
+  baseline; a moved revision alone does not block it. Update, when local edits
+  already equal the published copy, adopts the publication as the new baseline
+  (recording the current remote revision and hash) without copying files and
+  reports current. Real conflicts (published bytes changed and local bytes
+  changed differently) remain `diverged`; overwrite protection is unchanged.
 - Global/Project name collisions are refused rather than shadowed or overwritten.
   Global promotion and a new Global publication also refuse a same-named
   definition in another project. Scoped install/update/push, diff, tags and
@@ -159,7 +173,9 @@ status: active
 
 ## Verification
 
-Run targeted registry/metadata, ACP command-validation and Desktop unit tests,
+`acp/test/registry.test.ts` covers content-neutral scope moves in another
+project (not registry changes) and convergence of matching copies. Run targeted
+registry/metadata, ACP command-validation and Desktop unit tests,
 tools-suite typecheck and Desktop/ACP typechecks. Real UI QA checks both tabs,
 tag editing/search and both conversion directions with retained evidence.
 

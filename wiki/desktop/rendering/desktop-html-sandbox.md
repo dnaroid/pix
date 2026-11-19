@@ -225,14 +225,19 @@ and the widget sends a button on its digit (or Enter when there is a single one)
 Desktop renders a valid checklist as checkboxes and a submit button. A standalone
 title or other non-checklist body content makes the block invalid, so it stays
 ordinary escaped Markdown/code. Only the latest assistant message that contains
-a valid block is interactive, and only when no prompt is running and no later
-user message exists; older choices are read-only. Later assistant replies
+a valid block is active, and only when no prompt is running and no later
+user message exists. Later assistant replies
 without a block (the agent kept working despite the rule) do not disable it,
 so an offered checklist never becomes unreachable; a reply submitted from it is
-still recognized as a receipt. An
-inactive assistant checklist still allows native text selection and copy of
-option labels, with the transcript's visible selection highlight, without
-toggling or submitting the choice. An
+still recognized as a receipt. An older, never-submitted checklist stays
+usable: rows start unchecked, and ticking one reveals the submit button so the
+user can still run some offered steps later (a running prompt queues the
+message). Reply-button blocks (`- Done` lines) accept a click only while active.
+Checklist rows are focusable `role="checkbox"` elements, not `<button>`s,
+because WebKit cannot select text inside buttons. Option labels always allow
+native text selection and copy with the transcript's selection highlight. A
+click that ends a text selection does not toggle the row, and a double-click
+that selects a word leaves the row unchanged. Space/Enter toggle a focused row. An
 incomplete or malformed block remains ordinary escaped Markdown/code.
 Submitting sends the selected steps as a normal user message, formatted as
 `<button label>:\n1. item\n3. item` (numbering follows original checklist
@@ -264,9 +269,9 @@ history: restarting Desktop or evicting an old entry resets it. In-flight
 submissions are not evicted.
 
 Once a newer message makes a checklist inactive without it being submitted,
-it shows every row unchecked: recommended defaults and unsent edits are not
-user choices and must not read as a past selection. A submitted block keeps
-showing what was sent.
+it shows every row unchecked: recommended defaults are not user choices and
+must not read as a past selection. Selections the user makes on the expired
+block after that point are shown. A submitted block keeps showing what was sent.
 
 In user-message history, an exact generated quick-choice reply is displayed as
 a static checkbox receipt: all source options are shown, checked only if they
@@ -396,8 +401,10 @@ user message bubbles and restored composer drafts.
 
 - Native Desktop regression: render a valid checklist, verify its checked
   defaults and formatting, confirm only the latest settled assistant message is
-  interactive, confirm an older unsubmitted checklist shows no checks while a
-  submitted one shows its sent selection, and verify malformed/incomplete fences
+  interactive, confirm an older unsubmitted checklist starts with no checks,
+  that ticking a row reveals its submit button, and that a submitted one shows
+  its sent selection; verify row clicks that end a text selection or double-click
+  word selection do not toggle, Space/Enter toggle a focused row, and malformed/incomplete fences
   remain code.
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`

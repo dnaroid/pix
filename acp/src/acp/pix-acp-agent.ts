@@ -61,8 +61,12 @@ import {
 	PIX_SUPERVISOR_HANDOVER_METHOD,
 	PIX_SUPERVISOR_MANDATE_METHOD,
 	PIX_SUPERVISOR_START_METHOD,
+	PIX_SUPERVISOR_CLOSE_TAB_METHOD,
 	SUPERVISOR_WORKER_PREAMBLE,
 	parseSupervisorStartResponse,
+	parseSupervisorCloseTabResponse,
+	type SupervisorCloseTabRequest,
+	type SupervisorCloseTabResponse,
 	type SupervisorStartItem,
 	type SupervisorStartRequest,
 	type SupervisorStartResponse,
@@ -422,6 +426,7 @@ type ClientCaller = {
   request(method: typeof TASK_RUN_METHOD, params: TaskRunRequest): Promise<TaskRunResponse>;
   notify(method: typeof TASK_RUN_CANCEL_METHOD, params: { requestId: string }): Promise<void>;
 	request(method: typeof PIX_SUPERVISOR_START_METHOD, params: SupervisorStartRequest): Promise<SupervisorStartResponse>;
+	request(method: typeof PIX_SUPERVISOR_CLOSE_TAB_METHOD, params: SupervisorCloseTabRequest): Promise<SupervisorCloseTabResponse>;
 };
 
 /** Below the supervisor bridge's 60 s timeout, so the model gets the real reason. */
@@ -912,6 +917,9 @@ export class PixAcpAgent {
 					if (supervisor) this.notifySupervisorCatalogChanged(supervisor.client, cwd);
 				},
 				writeTaskStatus,
+				// A closed worker's lines leave any still-queued digest.
+				released: (sessionId, cwd) => this.supervisorWaker.forget(cwd, sessionId),
+				autoCloseTab: (cwd, caller, sessionId) => this.closeSupervisorWorkerTab(cwd, caller, sessionId),
 			},
 		});
 		this.supervisorWaker = createSupervisorWaker({
@@ -919,6 +927,7 @@ export class PixAcpAgent {
 			registryFor: (cwd) => this.supervisorRegistry(cwd),
 			paused: async (cwd) => (await this.supervisorStore.readMandate(cwd)).paused,
 			enqueue: (supervisorId, text, replace) => this.enqueueSupervisorDigest(supervisorId, text, replace),
+			rewrite: (supervisorId, itemId, text) => this.rewriteSupervisorDigest(supervisorId, itemId, text),
 			report: (message) => this.options.logger.warn(message, { module: "supervisor" }),
 		});
 		this.unsubscribeSupervisorEvents = this.sessionEvents.subscribe((event) => {
@@ -1977,6 +1986,22 @@ export class PixAcpAgent {
 		return { itemId: message.id, replaced };
 	}
 
+	/** Rewrite or remove a still-queued supervisor digest; never queues a new one. */
+	private async rewriteSupervisorDigest(supervisorId: string, itemId: string, text: string | undefined): Promise<boolean> {
+		const session = this.sessions.get(supervisorId);
+		if (!session || this.disposed) return false;
+		await this.ensureDesktopQueuesLoaded(session);
+		if (this.disposed || this.sessions.get(supervisorId) !== session) return false;
+		// Decided after the await: Desktop may have taken the item meanwhile.
+		const index = session.autoUserMessages.findIndex((item) => item.id === itemId);
+		if (index < 0) return false;
+		if (text === undefined) session.autoUserMessages.splice(index, 1);
+		else session.autoUserMessages[index] = { id: itemId, promptText: text, displayText: text, images: [] };
+		await this.persistDesktopQueues(session);
+		await this.notifyDesktopQueueState(session);
+		return true;
+	}
+
 	private async notifyDesktopQueueState(session: AgentSessionState): Promise<void> {
 		if (this.sessions.get(session.acpSessionId) !== session) return;
 		await session.client.notify(PIX_QUEUE_STATE_METHOD, this.desktopQueueSnapshot(session)).catch((error: unknown) => {
@@ -2656,15 +2681,18 @@ export class PixAcpAgent {
 			if (supervised) {
 				if (existing?.mode === "managed") return current;
 				changed = true;
+				// A hand-over (re-)marks the session as the user's own: `close done`
+				// must not auto-close its tab.
 				return { ...current, sessions: { ...current.sessions, [sessionId]: existing
-					? { ...existing, mode: "managed" }
-					: { item: { kind: "prompt" }, mode: "managed", registeredAt: Date.now(), reworkRounds: 0 } } };
+					? { ...existing, mode: "managed", origin: "handed_over" as const }
+					: { item: { kind: "prompt" }, mode: "managed", registeredAt: Date.now(), reworkRounds: 0, origin: "handed_over" as const } } };
 			}
 			if (!existing) return current;
 			changed = true;
 			const { [sessionId]: _removed, ...sessions } = current.sessions;
 			return { ...current, sessions };
 		}));
+		if (changed && !supervised) this.supervisorWaker.forget(cwd, sessionId);
 		if (changed) {
 			await this.supervisorStore.appendLedger(cwd, { kind: supervised ? "handed_over" : "released", sessionId })
 				.catch((error: unknown) => this.options.logger.warn(`supervisor ledger append failed: ${stringifyUnknown(error)}`, { module: "supervisor" }));
@@ -2771,6 +2799,22 @@ export class PixAcpAgent {
 			throw new Error(`Desktop reported session ${response.sessionId}, which is not a work session of this project`);
 		}
 		return response;
+	}
+
+	/**
+	 * Best-effort companion to `close outcome=done`: a worker the supervisor
+	 * started gets its Desktop tab closed. The saved conversation stays, so
+	 * `reopen` keeps working; failures only log.
+	 */
+	private closeSupervisorWorkerTab(cwd: string, callerSessionId: string, sessionId: string): void {
+		const supervisor = this.sessions.get(callerSessionId);
+		if (!supervisor || this.disposed || this.clientName !== "pix-desktop") return;
+		const request: SupervisorCloseTabRequest = { cwd, sessionId };
+		void supervisor.client.request(PIX_SUPERVISOR_CLOSE_TAB_METHOD, request)
+			.then((response) => parseSupervisorCloseTabResponse(response))
+			.catch((error: unknown) => {
+				this.options.logger.warn(`supervisor tab close failed: ${stringifyUnknown(error)}`, { module: "supervisor" });
+			});
 	}
 
 	/**
@@ -2926,6 +2970,7 @@ export class PixAcpAgent {
 					? { version: current.version, sessions }
 					: { ...current, sessions };
 			});
+			this.supervisorWaker.forget(cwd, sessionId);
 			await this.supervisorStore.appendLedger(cwd, { kind: "closed_by_user", sessionId });
 		} catch (error) {
 			this.options.logger.warn(`supervisor registry cleanup failed: ${stringifyUnknown(error)}`, { module: "supervisor" });

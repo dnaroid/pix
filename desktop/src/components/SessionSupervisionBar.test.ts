@@ -10,9 +10,9 @@ function bar(mode: SupervisionState["mode"], enabled = true, supervisorAvailable
 }
 
 describe("SessionSupervisionBar", () => {
-  it("offers handover for an ordinary session only when a supervisor exists", () => {
-    expect(bar(undefined)).toContain("Hand Over to Supervisor");
-    expect(bar(undefined)).not.toContain("Take Back from Supervisor");
+  it("renders no header for an ordinary session", () => {
+    expect(bar(undefined)).not.toContain("<button");
+    expect(bar(undefined)).not.toContain("Hand Over to Supervisor");
     expect(bar(undefined, true, false)).not.toContain("<button");
   });
 

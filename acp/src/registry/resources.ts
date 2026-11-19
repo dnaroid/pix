@@ -64,6 +64,11 @@ export async function updateResourceWithRuntime(
 	if (await pathExists(destination)) {
 		const localHash = await hashResource(type, destination);
 		if (localHash !== tracked.hash) {
+			// Local edits that already match the publication: adopt it as the baseline.
+			if (localHash === await hashResource(type, source)) {
+				await recordProvenance(ctx, runtime, type, name, remoteRevision, localHash);
+				return "current";
+			}
 			throw new Error(`${type} "${name}" has local changes. Push them or resolve the divergence before updating.`);
 		}
 	}
@@ -100,7 +105,10 @@ export async function pushResourceWithRuntime(
 	if (!remoteExists && runtime.publicationScope !== "project") await assertOtherProjectsAbsent(runtime, type, name);
 	const remoteRevision = remoteExists ? await resourceRevision(executor, runtime, type, name) : undefined;
 
-	if (tracked && samePublication(tracked, runtime) && remoteRevision && remoteRevision !== tracked.revision) {
+	// A moved path revision alone (e.g. a scope move from another project) is not
+	// a registry change; refuse only when the published bytes left the baseline.
+	if (tracked && samePublication(tracked, runtime) && remoteRevision && remoteRevision !== tracked.revision
+		&& await hashResource(type, destination) !== tracked.hash) {
 		throw new Error(`${type} "${name}" changed in the registry since revision ${tracked.revision.slice(0, 8)}. Check Registry and update/resolve before pushing.`);
 	}
 

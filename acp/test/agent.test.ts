@@ -6388,6 +6388,9 @@ test("project supervisor: worker events wake the supervisor with one coalesced q
 			assert.equal(queue().length, 1, "a still-queued digest is rewritten, not multiplied");
 			assert.equal(queue()[0]!.id, firstId);
 			assert.equal(harness.clients[0]!.promptCalls.length, 0, "ACP queues the wake; Desktop runs it");
+			// Taking the worker back withdraws it from the still-queued digest.
+			await cx.request("pix/supervisor/handover", { cwd, sessionId: worker.sessionId, supervised: false });
+			await waitFor(() => queue().length === 0);
 		});
 	} finally {
 		await harness.adapter.dispose();

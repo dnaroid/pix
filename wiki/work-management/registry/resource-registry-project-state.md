@@ -129,8 +129,9 @@ JSONC/task overlay import or fallback.
    skills/agents under `projects/<key>/skills|agents`. Published resource edits
    and unsafe/conflict/removal states are not automatically pushed. It never
    promotes a resource to Global (see publication/tags spec).
-   Untracked remote collisions and changed tracked revisions return actionable
-   errors without overwrite; explicit foreground push retains confirmation.
+   Untracked remote collisions and changed tracked content (published bytes
+   differing from the baseline) return actionable errors without overwrite;
+   explicit foreground push retains confirmation.
    Initial/refresh snapshots seed safe local-only/local-changes project artifacts
    and Local-only project resources.
    Persistent poll observations neither restart debounce nor clear terminal

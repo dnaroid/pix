@@ -412,6 +412,49 @@ test("scope moves preserve a pending remote update and legacy global provenance"
 	assert.match(fs.readFileSync(path.join(project, ".pi", "skills", "demo", "SKILL.md"), "utf8"), /Remote update/);
 });
 
+test("content-neutral scope moves in another project are not registry changes; matching copies converge", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
+	const { root, project, seed, h } = await scopeFixture();
+	const other = path.join(root, "other");
+	const sibling = path.join(root, "sibling");
+	fs.mkdirSync(other);
+	fs.mkdirSync(sibling);
+	const otherH = harness(other);
+	const siblingH = harness(sibling);
+	process.env.PI_RESOURCE_REGISTRY_PROJECT_KEY = "beta";
+	assert.equal((await act(other, { action: "install", type: "skill", name: "demo" }, otherH.ctx)).error, undefined);
+	process.env.PI_RESOURCE_REGISTRY_PROJECT_KEY = "gamma";
+	assert.equal((await act(sibling, { action: "install", type: "skill", name: "demo" }, siblingH.ctx)).error, undefined);
+
+	// Project alpha moves the publication to Project scope and back: same bytes, new path revision.
+	process.env.PI_RESOURCE_REGISTRY_PROJECT_KEY = "alpha";
+	assert.equal((await act(project, { action: "toggle-scope", type: "skill", name: "demo" }, h.ctx)).error, undefined);
+	assert.equal((await act(project, { action: "toggle-scope", type: "skill", name: "demo" }, h.ctx)).error, undefined);
+
+	process.env.PI_RESOURCE_REGISTRY_PROJECT_KEY = "beta";
+	const otherSkill = path.join(other, ".pi", "skills", "demo", "SKILL.md");
+	fs.appendFileSync(otherSkill, "Local edit\n");
+	const edited = await act(other, { action: "refresh" }, otherH.ctx);
+	assert.equal(item(edited, "skill:demo").status, "local-changes");
+	const pushed = await act(other, { action: "push", type: "skill", name: "demo" }, otherH.ctx);
+	assert.equal(pushed.error, undefined);
+	assert.equal(item(pushed, "skill:demo").status, "up-to-date");
+	git(seed, ["pull", "--ff-only", "origin", "main"]);
+	const published = path.join(seed, "skills", "demo", "SKILL.md");
+	assert.match(fs.readFileSync(published, "utf8"), /Local edit/);
+
+	// An unchanged copy sees the real update; a copy already matching it converges.
+	process.env.PI_RESOURCE_REGISTRY_PROJECT_KEY = "gamma";
+	const siblingSkill = path.join(sibling, ".pi", "skills", "demo", "SKILL.md");
+	assert.equal(item(await act(sibling, { action: "refresh" }, siblingH.ctx), "skill:demo").status, "update-available");
+	fs.copyFileSync(published, siblingSkill);
+	assert.equal(item(await act(sibling, { action: "refresh" }, siblingH.ctx), "skill:demo").status, "up-to-date");
+	const adopted = await act(sibling, { action: "update", type: "skill", name: "demo" }, siblingH.ctx);
+	assert.equal(adopted.error, undefined);
+	assert.equal(item(adopted, "skill:demo").status, "up-to-date");
+	const provenance = JSON.parse(fs.readFileSync(path.join(sibling, ".pi", "registry.jsonc"), "utf8"));
+	assert.equal(provenance.resources["skill:demo"].revision, git(seed, ["log", "-1", "--format=%H", "--", "skills/demo"]));
+});
+
 test("refuses global/project name collisions and global promotion or creation over another project", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
 	const { project, seed, h } = await scopeFixture();
 	const scoped = path.join(seed, "projects", "alpha", "skills", "demo");

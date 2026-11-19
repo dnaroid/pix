@@ -28,12 +28,14 @@ export interface SupervisorActionRuntime {
 	 * prepended; resolves once the launch prompt is dispatched.
 	 */
 	launch(cwd: string, callerSessionId: string, item: SupervisorStartItem, modelRef: string | undefined): Promise<{ sessionId: string }>;
-	/** Invalidate Desktop's session catalog after the launched worker is registered. */
+	/** Invalidate Desktop's session catalog after a worker's registration changed (start, close, reopen). */
 	registered?(cwd: string, callerSessionId: string): void;
 	/** Set a saved task's status; false when the task does not exist. */
 	writeTaskStatus(cwd: string, taskId: string, status: "done" | "failed" | "in-progress"): Promise<boolean>;
 	/** The session left the registry (closed by the supervisor). */
-	released?(sessionId: string): void;
+	released?(sessionId: string, cwd: string): void;
+	/** Best-effort: after `close done` of a supervisor-started worker, close its Desktop tab. */
+	autoCloseTab?(cwd: string, callerSessionId: string, sessionId: string): void;
 }
 
 export interface SupervisorActionDeps {
@@ -148,7 +150,7 @@ export function createSupervisorActions(deps: SupervisorActionDeps) {
 		await store.updateRegistry(cwd, (current) => ({
 			...current,
 			sessions: { ...current.sessions, [sessionId]: current.sessions[sessionId]
-				?? { item: registered, mode: "managed", registeredAt: Date.now(), reworkRounds: 0, briefed: true } },
+				?? { item: registered, mode: "managed", registeredAt: Date.now(), reworkRounds: 0, briefed: true, origin: "started" as const } },
 		}));
 		runtime.registered?.(cwd, callerSessionId);
 		await journal(cwd, "started", sessionId, { item: registered, ...(modelRef ? { modelRef } : {}),
@@ -252,6 +254,7 @@ export function createSupervisorActions(deps: SupervisorActionDeps) {
 			// `reopen` restores the item and its rework count from this entry.
 			item: managed.item,
 			reworkRounds: managed.reworkRounds,
+			...(managed.origin ? { origin: managed.origin } : {}),
 			summary: clip(request.summary, 2_000),
 			...(taskId ? { taskId, taskUpdated } : {}),
 			evidence: {
@@ -263,11 +266,16 @@ export function createSupervisorActions(deps: SupervisorActionDeps) {
 				messageCount: digest.messageCount,
 			},
 		});
-		runtime.released?.(request.sessionId);
+		runtime.released?.(request.sessionId, cwd);
+		// The tab marker comes from the catalog: refresh it, or the closed worker still looks managed.
+		runtime.registered?.(cwd, callerSessionId);
+		// Only supervisor-started workers close their tab: a handed-over
+		// conversation belongs to the user, not to the supervisor.
+		if (request.outcome === "done" && managed.origin === "started") runtime.autoCloseTab?.(cwd, callerSessionId, request.sessionId);
 		return { closed: true, outcome: request.outcome, ...(taskId ? { taskId, taskUpdated } : {}) };
 	}
 
-	async function reopen(cwd: string, request: Extract<SupervisorMutation, { op: "reopen" }>, registry: SupervisorRegistry) {
+	async function reopen(cwd: string, callerSessionId: string, request: Extract<SupervisorMutation, { op: "reopen" }>, registry: SupervisorRegistry) {
 		if (registry.sessions[request.sessionId]) throw new Error(`Session ${request.sessionId} is already registered; nothing to reopen`);
 		const closed = (await store.readLedger(cwd, 500)).filter((entry) => entry.sessionId === request.sessionId
 			&& (entry.kind === "closed" || entry.kind === "reopened")).at(-1);
@@ -282,11 +290,15 @@ export function createSupervisorActions(deps: SupervisorActionDeps) {
 		const reworkRounds = typeof rounds === "number" && Number.isInteger(rounds) && rounds >= 0 ? rounds : 0;
 		const taskId = item.kind === "task" ? item.taskId
 			: typeof closed.detail?.["taskId"] === "string" ? closed.detail["taskId"] as string : undefined;
+		const origin = closed.detail?.["origin"] === "started" || closed.detail?.["origin"] === "handed_over"
+			? closed.detail["origin"] : undefined;
 		const taskUpdated = taskId ? await runtime.writeTaskStatus(cwd, taskId, "in-progress") : false;
 		await store.updateRegistry(cwd, (current) => current.sessions[request.sessionId] ? current : {
 			...current,
-			sessions: { ...current.sessions, [request.sessionId]: { item, mode: "managed", registeredAt: Date.now(), reworkRounds, briefed: true } },
+			sessions: { ...current.sessions, [request.sessionId]: { item, mode: "managed", registeredAt: Date.now(), reworkRounds, briefed: true,
+				...(origin ? { origin } : {}) } },
 		});
+		runtime.registered?.(cwd, callerSessionId);
 		await journal(cwd, "reopened", request.sessionId, { ...(taskId ? { taskId, taskUpdated } : {}) });
 		return { reopened: true, reworkRounds, ...(taskId ? { taskId, taskUpdated } : {}),
 			note: "The session is managed again; send rework to start a new turn." };
@@ -338,7 +350,7 @@ export function createSupervisorActions(deps: SupervisorActionDeps) {
 					case "answer": return answer(cwd, callerSessionId, request, registry);
 					case "cancel": return cancel(cwd, request, registry);
 					case "close": return close(cwd, callerSessionId, request, registry);
-					case "reopen": return reopen(cwd, request, registry);
+					case "reopen": return reopen(cwd, callerSessionId, request, registry);
 				}
 			});
 		},

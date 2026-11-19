@@ -112,7 +112,18 @@ decision outside its mandate.
   otherwise a `{ item: prompt, mode: managed, reworkRounds: 0 }` entry is
   created without `briefed`. Sub-agent sessions and the supervisor itself are
   refused.
+- Registry entries also carry `origin: started | handed_over`. `start` marks
+  the session `started`; handover marks it `handed_over`; `reopen` restores
+  the origin from the closed ledger entry. Only `started` workers are eligible
+  for the automatic tab close below.
 - **Take Back from Supervisor** (`supervised: false`) removes the registry entry.
+- Desktop shows the supervision header above the conversation only for a
+  registered session (`managed` or `manual`). An ordinary session gets no
+  header; **Hand Over to Supervisor** is offered there only in the session tab
+  context menu.
+- `start`, `close` and `reopen` change the registry, so ACP sends
+  `pix/session/catalog_changed` after each of them; the tab marker and header
+  follow the refreshed catalog without a click.
 - Both run under the project supervisor lock and are idempotent: a call that
   changes nothing writes no ledger entry. A change appends `handed_over` or
   `released` to the ledger only. Neither emits a supervisor event nor wakes the
@@ -123,6 +134,11 @@ decision outside its mandate.
   send there until the user releases it. Supervisor sends that race with the
   takeover are rejected, not queued.
 - The `close` op removes the session from the registry and journals `closed`.
+  With `outcome=done` and origin `started`, ACP also asks Desktop, via
+  `pix/supervisor/close_tab`, to close that worker's tab. This is best-effort:
+  Desktop closes only an open, idle tab in the same workspace and keeps the
+  saved conversation (so `reopen` still works). Failures only log. A `failed`
+  outcome and handed-over sessions never auto-close.
   Deleting a managed session unregisters it and journals `closed_by_user`, with
   no wake. The task's status is not changed automatically.
 
@@ -180,6 +196,15 @@ longer registered are dropped. A session in `manual` mode keeps only its
 `manual_takeover` line, and only while it stays registered. The 20-session limit
 applies after this filtering. The filter affects wake digests only; the general
 event monitor and the ledger are unchanged.
+
+When a session leaves the registry (`close`, **Take Back from Supervisor** or
+deleting the session), ACP withdraws it from the waker on the same ordered
+per-project chain as digest delivery: its pending events are dropped, and its
+lines are removed from a digest that is still queued in the supervisor session.
+A queued digest left with no sessions is removed. A digest the supervisor has
+already taken is never re-queued; the next digest starts fresh. The withdrawal
+re-reads the registry when it runs, so a session handed over again in the
+meantime keeps its new events.
 
 A `conflict` line is kept only while both sessions are still `managed` and
 their touch snapshots still match the ones that produced it. Conflict-only
@@ -308,7 +333,7 @@ rationale.
   pending, any linked plan is readable, non-empty and fully checked (a failed
   lookup refuses) and the final report has a verification section; on success ACP writes the task status in
   `.pi/tasks.sqlite` (`supervisor-tasks.ts`), then unregisters the session and
-  journals `closed` with evidence (including the item and rework count).
+  journals `closed` with evidence (including the item, rework count and origin). After a `done` close of a `started` session, ACP requests the best-effort tab close (`pix/supervisor/close_tab`, see Managed sessions and handover); `reopen` restores the stored origin.
   `reopen` reverts a supervisor closure from that ledger entry: the session
   must still exist and not be registered; it is registered `managed` again with
   its item and rework count, and the task returns to `in-progress`

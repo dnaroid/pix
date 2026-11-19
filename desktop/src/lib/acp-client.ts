@@ -25,8 +25,11 @@ import type { RegistryActionRequest, RegistryDiff, RegistryResourceType, Registr
 import type { PlanLaunches, PlanLaunchesRequest } from "../../../acp/src/acp/plan-launches-contract";
 import {
   PIX_SUPERVISOR_START_METHOD,
+  PIX_SUPERVISOR_CLOSE_TAB_METHOD,
   parseSupervisorStartRequest,
   parseSupervisorStartResponse,
+  parseSupervisorCloseTabRequest,
+  parseSupervisorCloseTabResponse,
   type SupervisorMandatePatch,
   type SupervisorMandateResponse,
 } from "../../../acp/src/acp/supervisor-contract";
@@ -658,6 +661,11 @@ export class AcpClient {
       const request = parseSupervisorStartRequest(params);
       const start = this.handlers.onSupervisorStart;
       return this.trackLaunch(request.requestId, async (signal) => parseSupervisorStartResponse(await start(request, signal)));
+    }
+    if (method === PIX_SUPERVISOR_CLOSE_TAB_METHOD && this.handlers.onSupervisorCloseTab) {
+      const request = parseSupervisorCloseTabRequest(params);
+      const closeTab = this.handlers.onSupervisorCloseTab;
+      return parseSupervisorCloseTabResponse(await closeTab(request));
     }
     if (method !== "elicitation/create" || !isRecord(params)) {
       throw new AcpIncomingRequestError(-32601, `unsupported client method: ${method}`);

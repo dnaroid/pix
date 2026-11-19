@@ -13,12 +13,14 @@ import { emitUsageStatsChanged } from "../lib/usage-stats-events";
 import type { DesktopDiagnosticEvent } from "../lib/diagnostic-logging";
 import type { TaskRunRequest, TaskRunResponse } from "../../../acp/src/acp/task-run-contract";
 import type { SupervisorStartRequest, SupervisorStartResponse } from "../../../acp/src/acp/supervisor-contract";
+import type { SupervisorCloseTabRequest, SupervisorCloseTabResponse } from "../../../acp/src/acp/supervisor-contract";
 
 export type ConnectionStatus = "starting" | "ready" | "error" | "stopped";
 
 type ConnectionStoreOptions = {
   onTaskRun?: (request: TaskRunRequest, signal: AbortSignal) => Promise<TaskRunResponse>;
   onSupervisorStart?: (request: SupervisorStartRequest, signal: AbortSignal) => Promise<SupervisorStartResponse>;
+  onSupervisorCloseTab?: (request: SupervisorCloseTabRequest) => Promise<SupervisorCloseTabResponse>;
   workspace: () => string;
   onSessionUpdate: (notification: SessionNotification) => void;
   onSessionCatalogChanged?: (cwd: string) => void;
@@ -102,6 +104,10 @@ export function createConnectionStore(options: ConnectionStoreOptions) {
       onSupervisorStart: async (request, signal) => {
         if (client !== next || !options.onSupervisorStart) throw new Error("Supervisor launch connection is unavailable");
         return options.onSupervisorStart(request, signal);
+      },
+      onSupervisorCloseTab: async (request) => {
+        if (client !== next || !options.onSupervisorCloseTab) throw new Error("Supervisor close-tab connection is unavailable");
+        return options.onSupervisorCloseTab(request);
       },
       onSessionUpdate: (notification) => {
         if (client === next) options.onSessionUpdate(notification);

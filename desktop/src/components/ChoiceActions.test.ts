@@ -8,12 +8,13 @@ describe("ChoiceActions quick-choice block", () => {
     expect(choiceSource).toContain("untrack(() => choiceActionsStateCache.get(stateScope, blockIndex, actions))");
   });
 
-  it("accepts input only while active, idle and not yet submitted", () => {
-    expect(choiceSource).toContain("const enabled = $derived(active && !state.submitting && !state.submitted);");
+  it("keeps unsent checklists usable after they expire; reply buttons only while active", () => {
+    expect(choiceSource).toContain("const enabled = $derived(!state.submitting && !state.submitted);");
+    expect(choiceSource).toContain("const buttonsEnabled = $derived(active && enabled);");
     expect(choiceSource).toContain("if (!enabled) return;");
     expect(choiceSource).toContain("if (!state.selected.length) return;");
-    expect(choiceSource).toContain("disabled={!enabled || !state.selected.length}");
-    expect(choiceSource).toContain("{#if active && !state.submitted}");
+    expect(choiceSource).toContain("disabled={!enabled || !showSelection || !state.selected.length}");
+    expect(choiceSource).toContain("{#if !state.submitted && (active || state.edited)}");
   });
 
   it("exposes accessible checkboxes and a language-neutral counter", () => {
@@ -23,22 +24,24 @@ describe("ChoiceActions quick-choice block", () => {
     expect(choiceSource).not.toMatch(/selected ·|type your own reply/);
   });
 
-  it("hides model-default checks on an expired block that was never submitted", () => {
-    expect(choiceSource).toContain("const isSelected = (active || state.submitted) && state.selected.includes(index)");
+  it("hides model-default checks on an expired block until the user edits it", () => {
+    expect(choiceSource).toContain("const showSelection = $derived(active || state.submitted || state.edited);");
+    expect(choiceSource).toContain("const isSelected = showSelection && state.selected.includes(index)");
+    expect(choiceSource).toContain("const base = showSelection ? state.selected : [];");
   });
 
-  it("dims only unselected inactive text while keeping all checkboxes inactive", () => {
-    expect(choiceSource).toContain('!enabled && !isSelected && "opacity-60"');
-    expect(choiceSource).not.toContain('!enabled && "cursor-default opacity-60"');
-    expect(choiceSource).toContain('!enabled && "opacity-60"');
+  it("dims only unselected text on expired or locked blocks", () => {
+    expect(choiceSource).toContain('(!enabled || !active) && !isSelected && "opacity-60"');
+    expect(choiceSource).toContain('(!enabled || !active) && "opacity-60"');
     expect(choiceSource).toContain("aria-disabled={!enabled || undefined}");
-    expect(choiceSource).toContain("if (!enabled) return;");
   });
 
-  it("opts inactive option labels into native selection without enabling the checkbox", () => {
-    expect(choiceSource).toMatch(/<span class=\{\[\s*"min-w-0 flex-1[^\n]+\n\s*!enabled && "select-text"/);
-    expect(choiceSource).toContain("aria-disabled={!enabled || undefined}");
-    expect(choiceSource).toContain("if (!enabled) return;");
+  it("keeps option labels selectable: rows are not buttons and selecting text does not toggle", () => {
+    expect(choiceSource).toContain('"select-text min-w-0 flex-1');
+    expect(choiceSource).not.toMatch(/<button[^>]*\n[^<]*role="checkbox"/);
+    expect(choiceSource).toMatch(/<div\n[^<]*role="checkbox"\n\s*tabindex=\{enabled \? 0 : -1\}/);
+    expect(choiceSource).toContain("!selectingText(event)");
+    expect(choiceSource).toContain('if (event.key !== " " && event.key !== "Enter") return;');
   });
 
   it("sends the formatted selection and surfaces submission errors", () => {
@@ -65,7 +68,7 @@ describe("ChoiceActions quick-choice block", () => {
     expect(choiceSource).toContain("{#if actions.buttons}");
     expect(choiceSource).toContain("onclick={() => submit(index)}");
     expect(choiceSource).toContain("if (button !== undefined) state.selected = [button];");
-    expect(choiceSource).toContain("disabled={!enabled}");
+    expect(choiceSource).toContain("disabled={!buttonsEnabled}");
     expect(choiceSource).toContain("aria-pressed={state.submitted ? pressed : undefined}");
   });
 });
