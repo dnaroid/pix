@@ -98,10 +98,10 @@ mod search_index_status;
 mod sidebar_registry_resource_hash;
 mod startup_theme;
 mod subagent_retention;
+mod supervisor_menu;
 mod window_geometry;
 mod window_restore;
 mod window_tiling;
-mod supervisor_menu;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(40);
 const MAX_ATTACHMENT_COUNT: usize = 10;

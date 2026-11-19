@@ -47,7 +47,10 @@ pub(crate) fn setup(app: &tauri::App) -> tauri::Result<()> {
             })
             .collect::<Vec<_>>();
         let Some(label) = target_label(&windows) else {
-            crate::logging::error(module_path!(), "no Pix window for Open Project Supervisor".into());
+            crate::logging::error(
+                module_path!(),
+                "no Pix window for Open Project Supervisor".into(),
+            );
             return;
         };
         if let Err(error) = app.emit_to(EventTarget::webview_window(&label), EVENT, ()) {
@@ -80,7 +83,11 @@ mod tests {
             Some("c".into())
         );
         assert_eq!(
-            target_label(&[w("c", false, true), w("b", false, true), w("a", false, false)]),
+            target_label(&[
+                w("c", false, true),
+                w("b", false, true),
+                w("a", false, false)
+            ]),
             Some("b".into())
         );
         assert_eq!(target_label(&[w("a", false, false)]), None);
