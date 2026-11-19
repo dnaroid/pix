@@ -12,7 +12,7 @@
   } from "../lib/project-tasks";
   import PromptComposer from "./PromptComposer.svelte";
   import TaskFieldSelect from "./TaskFieldSelect.svelte";
-  import WorkspaceSidebarTaskModelControl from "./WorkspaceSidebarTaskModelControl.svelte";
+  import ModelThinkingAssignmentControl from "./ModelThinkingAssignmentControl.svelte";
   import WorkspaceSidebarTaskRelations from "./WorkspaceSidebarTaskRelations.svelte";
 
   let {
@@ -126,7 +126,13 @@
       <span class="block text-xs font-medium text-muted-foreground">Type</span>
       <TaskFieldSelect value={taskType} options={taskTypeOptions} ariaLabel="Task type" onChange={(value) => taskType = value as ProjectTaskType} />
     </div>
-    <WorkspaceSidebarTaskModelControl
+    <ModelThinkingAssignmentControl
+      class="border-t border-sidebar-border pt-3"
+      label="Assigned model"
+      optional
+      triggerLabel="Assigned task model and effort"
+      help="Choose from your visible models or Manage the full catalog; pick a supported effort. Applies only to new task sessions."
+      selectionDescription="Assign this model and effort to new sessions for this task. The current session stays unchanged."
       bind:value={editorModelRef}
       {configOptions}
       {visibleModelRefs}

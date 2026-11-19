@@ -266,3 +266,86 @@ test("unsubscribe and monitor dispose release listeners; listener throws are rep
 	late.settled("end_turn");
 	assert.deepEqual(lateEvents, []);
 });
+
+test("apply_patch records added, updated, deleted and both sides of moved files", () => {
+	const { events, monitor } = harness();
+	const observer = monitor.observe("s1", "/work/proj");
+	const input = [
+		"*** Begin Patch",
+		"*** Add File: src/new.ts",
+		"+export {};",
+		"*** Update File: src/old.ts",
+		"*** Move to: src/renamed.ts",
+		"@@",
+		"-a",
+		"+b",
+		"*** Update File: /work/proj/src/edited.ts",
+		"@@",
+		"-x",
+		"+y",
+		"*** Delete File: src/gone.ts",
+		"*** End Patch",
+	].join("\n");
+	observer.event({ type: "tool_execution_start", toolCallId: "p1", toolName: "apply_patch", args: { input } });
+	observer.event({ type: "tool_execution_end", toolCallId: "p1", toolName: "apply_patch", isError: false,
+		result: { details: { changedFiles: ["src/new.ts", "src/renamed.ts", "src/edited.ts", "src/gone.ts"] } } });
+	assert.deepEqual(monitor.touchedFiles("s1"),
+		["src/new.ts", "src/old.ts", "src/renamed.ts", "src/edited.ts", "src/gone.ts"]);
+	assert.deepEqual(events.filter((event) => event.type === "file_changed").length, 5, "one file_changed per file, no duplicates");
+});
+
+test("apply_patch with a unified diff, a failed call and a result-only path", () => {
+	const { monitor } = harness();
+	const observer = monitor.observe("s1", "/p");
+	const unified = ["--- a/src/u.ts\t2026-01-01", "+++ b/src/u.ts", "@@ -1 +1 @@", "-a", "+b",
+		"--- /dev/null", "+++ b/src/created.ts", "@@ -0,0 +1 @@", "+c"].join("\r\n");
+	observer.event({ type: "tool_execution_start", toolCallId: "u", toolName: "apply_patch", args: { input: unified } });
+	observer.event({ type: "tool_execution_end", toolCallId: "u", toolName: "apply_patch", isError: false });
+	observer.event({ type: "tool_execution_start", toolCallId: "bad", toolName: "apply_patch",
+		args: { input: "*** Begin Patch\n*** Update File: src/failed.ts\n*** End Patch" } });
+	observer.event({ type: "tool_execution_end", toolCallId: "bad", toolName: "apply_patch", isError: true });
+	observer.event({ type: "tool_execution_start", toolCallId: "r", toolName: "apply_patch", args: { input: "opaque" } });
+	observer.event({ type: "tool_execution_end", toolCallId: "r", toolName: "apply_patch", isError: false,
+		result: { details: { changedFiles: ["src/from-result.ts"] } } });
+	assert.deepEqual(monitor.touchedFiles("s1"), ["src/u.ts", "src/created.ts", "src/from-result.ts"]);
+});
+
+test("apply_patch wrapped in a heredoc still yields its file headers", () => {
+	const { monitor } = harness();
+	const observer = monitor.observe("s1", "/p");
+	const input = "<<'EOF'\n*** Begin Patch\n*** Update File: src/h.ts\n@@\n-a\n+b\n*** End Patch\nEOF";
+	observer.event({ type: "tool_execution_start", toolCallId: "h", toolName: "apply_patch", args: { input } });
+	observer.event({ type: "tool_execution_end", toolCallId: "h", toolName: "apply_patch", isError: false });
+	assert.deepEqual(monitor.touchedFiles("s1"), ["src/h.ts"]);
+});
+
+test("nested codemode calls (parentToolCallId) are tracked like direct calls", () => {
+	const { monitor } = harness();
+	const observer = monitor.observe("s1", "/p");
+	observer.event({ type: "tool_execution_start", toolCallId: "cm", toolName: "codemode", args: { code: "..." } });
+	observer.event({ type: "tool_execution_start", toolCallId: "cm/1", toolName: "apply_patch", parentToolCallId: "cm",
+		args: { input: "*** Begin Patch\n*** Add File: src/nested.ts\n+x\n*** End Patch" } });
+	observer.event({ type: "tool_execution_end", toolCallId: "cm/1", toolName: "apply_patch", parentToolCallId: "cm", isError: false });
+	observer.event({ type: "tool_execution_start", toolCallId: "cm/2", toolName: "Edit", parentToolCallId: "cm", args: { file_path: "src/e.ts" } });
+	observer.event({ type: "tool_execution_end", toolCallId: "cm/2", toolName: "Edit", parentToolCallId: "cm", isError: false });
+	observer.event({ type: "tool_execution_end", toolCallId: "cm", toolName: "codemode", isError: false });
+	assert.deepEqual(monitor.touchedFiles("s1"), ["src/nested.ts", "src/e.ts"]);
+});
+
+test("unified diff hunk lines that look like file headers are not read as paths", () => {
+	const { monitor } = harness();
+	const observer = monitor.observe("s1", "/p");
+	const input = [
+		"--- a/src/real.ts", "+++ b/src/real.ts",
+		"@@ -1,2 +1,2 @@",
+		"--- not/a/header.ts",
+		"+++ also/not.ts",
+		" context",
+		"\\ No newline at end of file",
+		"--- a/src/second.ts", "+++ b/src/second.ts",
+		"@@ -1 +1 @@", "-x", "+y",
+	].join("\n");
+	observer.event({ type: "tool_execution_start", toolCallId: "u", toolName: "apply_patch", args: { input } });
+	observer.event({ type: "tool_execution_end", toolCallId: "u", toolName: "apply_patch", isError: false });
+	assert.deepEqual(monitor.touchedFiles("s1"), ["src/real.ts", "src/second.ts"]);
+});

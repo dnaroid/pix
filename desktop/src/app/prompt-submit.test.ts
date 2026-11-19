@@ -2,6 +2,42 @@ import { describe, expect, it, vi } from "vitest";
 import type { AcpClient } from "../lib/acp-client";
 import { createPromptSubmit } from "./prompt-submit";
 
+describe("createPromptSubmit /new", () => {
+  it.each([
+    { command: "/new", supervisorActive: true, running: false, action: "fresh" },
+    { command: "/new", supervisorActive: false, running: false, action: "start" },
+    { command: "/new_tab", supervisorActive: true, running: false, action: "start" },
+    { command: "/new", supervisorActive: true, running: true, action: "none" },
+  ])("routes $command with supervisor=$supervisorActive and running=$running to $action", async ({ command, supervisorActive, running, action }) => {
+    const openFresh = vi.fn(async () => {});
+    const openSessionStartTab = vi.fn();
+    const setPromptText = vi.fn();
+    const submit = createPromptSubmit({
+      client: () => ({} as AcpClient),
+      sessionMutationRunning: () => false,
+      sessionHistoryLoading: () => false,
+      waitForAttachmentDraftSettled: async () => {},
+      attachmentDraftKey: () => "session",
+      attachmentGeneration: () => 1,
+      promptText: () => command,
+      promptAttachments: () => [],
+      activeSessionId: () => "session",
+      sessionRuntimeReady: () => true,
+      promptRunning: () => running,
+      supervisor: { isActive: () => supervisorActive, openFresh },
+      openSessionStartTab,
+      setPromptText,
+    } as unknown as Parameters<typeof createPromptSubmit>[0]);
+
+    await submit.submit();
+
+    expect(openFresh).toHaveBeenCalledTimes(action === "fresh" ? 1 : 0);
+    expect(openSessionStartTab).toHaveBeenCalledTimes(action === "start" ? 1 : 0);
+    if (action === "none") expect(setPromptText).not.toHaveBeenCalled();
+    else expect(setPromptText).toHaveBeenCalledWith("");
+  });
+});
+
 describe("createPromptSubmit terminal commands", () => {
   it("ordinary Send handles edit before slash/terminal routing", async () => {
     const submitMessageEdit = vi.fn(async () => true);

@@ -1,15 +1,23 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { MAX_MODEL_REF, SUPERVISOR_MANDATE_LIMITS as LIMITS, type SupervisorMandateResponse } from "../../../acp/src/acp/supervisor-contract";
+  import type { SessionConfigOption } from "@agentclientprotocol/sdk";
+  import { SUPERVISOR_MANDATE_LIMITS as LIMITS, type SupervisorMandateResponse } from "../../../acp/src/acp/supervisor-contract";
   import type { SupervisorMandateDraft } from "../app/supervisor-mandate.svelte";
   import { dialogCancelButtonClass, dialogPrimaryButtonClass, modalBackdropClass } from "../lib/dialog";
   import { activateModalDialog } from "../lib/modal-dialog";
+  import ModelThinkingAssignmentControl from "./ModelThinkingAssignmentControl.svelte";
 
-  let { mandate, enable = false, saving, onsave, oncancel, reportError }: {
+  let { mandate, enable = false, saving, workspace, configOptions, visibleModelRefs,
+    rememberedThinkingByModel, onVisibleModelsChange, onsave, oncancel, reportError }: {
     mandate: SupervisorMandateResponse;
     /** Opened from "Set up": the enable box starts checked. */
     enable?: boolean;
     saving: boolean;
+    workspace: string;
+    configOptions: readonly SessionConfigOption[];
+    visibleModelRefs?: readonly string[];
+    rememberedThinkingByModel: Readonly<Record<string, string>>;
+    onVisibleModelsChange: (refs: readonly string[]) => Promise<void> | void;
     onsave: (draft: SupervisorMandateDraft) => void;
     oncancel: () => void;
     reportError: (error: unknown) => void;
@@ -20,6 +28,7 @@
   let maxConcurrent = $state(initial.maxConcurrent);
   let maxReworkRounds = $state(initial.maxReworkRounds);
   let stalledAfterMinutes = $state(initial.stalledAfterMinutes);
+  let budgetTokens = $state(initial.budgetTokens);
   let workerModelRef = $state(initial.workerModelRef ?? "");
   let policy = $state(initial.policy);
   let dialog = $state<HTMLDialogElement>();
@@ -43,6 +52,7 @@
       maxConcurrent: clamp(maxConcurrent, LIMITS.maxConcurrent),
       maxReworkRounds: clamp(maxReworkRounds, LIMITS.maxReworkRounds),
       stalledAfterMinutes: clamp(stalledAfterMinutes, LIMITS.stalledAfterMinutes),
+      budgetTokens: budgetTokens ?? null,
       workerModelRef,
       policy,
     });
@@ -77,14 +87,26 @@
           min={LIMITS.stalledAfterMinutes.min} max={LIMITS.stalledAfterMinutes.max} step="1" />
       </label>
     </div>
-    <p class="mt-2 text-xs text-muted-foreground">Token budget: no limit (not configurable yet).</p>
-    <label for={`${ids}-worker-model`} class="mt-3 block text-xs text-muted-foreground">Default worker model</label>
-    <input id={`${ids}-worker-model`} type="text" class={fieldClass} bind:value={workerModelRef} disabled={saving}
-      maxlength={MAX_MODEL_REF} placeholder="provider/model[:thinking]" spellcheck="false" autocomplete="off"
-      aria-describedby={`${ids}-worker-model-help`} />
-    <p id={`${ids}-worker-model-help`} class="mt-1 text-xs text-muted-foreground">
-      For supervisor-launched plans and prompts. Leave blank to use the session default.
-    </p>
+    <label class="mt-3 block text-xs text-muted-foreground">Token budget (rolling 24 h)
+      <input type="number" class={fieldClass} bind:value={budgetTokens} disabled={saving}
+        min={LIMITS.budgetTokens.min} max={LIMITS.budgetTokens.max} step="1"
+        placeholder="No limit" aria-describedby={`${ids}-budget-help`} />
+    </label>
+    <p id={`${ids}-budget-help`} class="mt-1 text-xs text-muted-foreground">Leave empty for no limit. The budget only limits automatic supervisor wakes.</p>
+    <ModelThinkingAssignmentControl
+      class="mt-3"
+      label="Default worker model"
+      triggerLabel="Default worker model and effort"
+      help="For supervisor-launched plans and prompts. Reset to use the session default."
+      selectionDescription="Choose the default model and effort for supervisor-launched plans and prompts."
+      bind:value={workerModelRef}
+      {workspace}
+      {configOptions}
+      {visibleModelRefs}
+      {rememberedThinkingByModel}
+      {onVisibleModelsChange}
+      disabled={saving}
+    />
     <label for={`${ids}-policy`} class="mt-3 block text-xs text-muted-foreground">Policy: what to escalate, priorities, areas not to touch</label>
     <textarea id={`${ids}-policy`} bind:value={policy} disabled={saving} rows={5} maxlength={20000} spellcheck="false"
       class="mt-1 w-full resize-none rounded-md border border-input bg-background px-2 py-1.5 text-xs"></textarea>

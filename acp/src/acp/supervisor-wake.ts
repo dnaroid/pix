@@ -18,6 +18,8 @@ export interface SupervisorWakerDeps {
 	readonly clearTimer?: (handle: unknown) => void;
 	registryFor(cwd: string): Promise<SupervisorRegistry | undefined>;
 	paused(cwd: string): Promise<boolean>;
+	budgetBlocks?(cwd: string, registry: SupervisorRegistry): Promise<boolean>;
+	exclusive?<T>(cwd: string, operation: () => Promise<T>): Promise<T>;
 	/**
 	 * Rewrite queued item `replace.id` with `replace.text` when it is still
 	 * queued, otherwise queue `text` as a new item. Undefined when the
@@ -35,6 +37,8 @@ export interface SupervisorWakerDeps {
 
 export interface SupervisorWaker {
 	push(cwd: string, event: SessionEvent): void;
+	/** Serialize release or conversation rotation and the first flush with auto-queue takes. */
+	updateAndRecheck<T extends { retry: boolean; rotation?: { from: string; to: string } }>(cwd: string, update: () => Promise<T>): Promise<T>;
 	/**
 	 * The session left the registry (close, take back, delete): drop its
 	 * pending events and withdraw its lines from a still-queued digest.
@@ -69,6 +73,7 @@ interface ProjectState {
 	chain: Promise<void>;
 	touches: Map<string, TouchHistory>;
 	supervisorId?: string | undefined;
+	rotationEpoch?: symbol;
 }
 
 export function createSupervisorWaker(deps: SupervisorWakerDeps): SupervisorWaker {
@@ -80,22 +85,26 @@ export function createSupervisorWaker(deps: SupervisorWakerDeps): SupervisorWake
 	let disposed = false;
 
 	function run(state: ProjectState, operation: () => void | Promise<void>): void {
-		state.chain = state.chain.then(() => disposed ? undefined : operation()).catch((error: unknown) => {
-			report(`supervisor wake failed: ${error instanceof Error ? error.message : String(error)}`);
-		});
+		state.chain = state.chain.then(() => disposed ? undefined : operation()).catch(reportFailure);
 	}
 
 	function schedule(cwd: string, state: ProjectState): void {
 		if (state.timer !== undefined) clearTimer(state.timer);
 		state.timer = setTimer(() => {
 			state.timer = undefined;
-			run(state, () => flush(cwd, state));
+			requestFlush(cwd, state);
 		}, debounceMs);
+	}
+
+	function requestFlush(cwd: string, state: ProjectState): void {
+		const operation = () => flush(cwd, state);
+		run(state, () => deps.exclusive ? deps.exclusive(cwd, operation) : operation());
 	}
 
 	function touch(cwd: string, state: ProjectState, event: Extract<SessionEvent, { type: "file_changed" }>): void {
 		// Request the registry read now, not after the debounce (or the last
 		// wake): store reads are ordered with handover/takeover registry writes.
+		const epoch = state.rotationEpoch;
 		const snapshot = deps.registryFor(cwd).then(
 			(registry) => ({ registry }), (error: unknown) => ({ error }),
 		);
@@ -105,7 +114,7 @@ export function createSupervisorWaker(deps: SupervisorWakerDeps): SupervisorWake
 			if ("error" in result) throw result.error;
 			const registry = result.registry;
 			if (!registry) return;
-			pruneTouches(state, registry);
+			pruneTouches(state, registry, epoch !== state.rotationEpoch);
 			const { sessionId, path } = event;
 			const worker = registry.supervisorSessionId && managedWorker(registry, sessionId);
 			if (!worker) return;
@@ -147,12 +156,18 @@ export function createSupervisorWaker(deps: SupervisorWakerDeps): SupervisorWake
 		if (state.pending.size === 0) return;
 		// Pause holds the wake but keeps the digest current.
 		if (paused) return;
-		const taken = state.pending;
+		if (deps.budgetBlocks && (await deps.budgetBlocks(cwd, registry) || disposed)) return;
+		// Events can arrive during the budget read.
+		const taken = eligibleEntries(state.pending, registry, state.touches);
+		if (taken.size === 0) return;
 		state.pending = new Map();
 		const previous = state.delivered?.supervisorId === supervisorId ? state.delivered : undefined;
 		const merged = previous ? mergeEntries(eligibleEntries(previous.entries, registry, state.touches), taken) : undefined;
 		const result = await deps.enqueue(supervisorId, renderDigest(taken),
-			previous && merged ? { id: previous.itemId, text: renderDigest(merged) } : undefined);
+			previous && merged ? { id: previous.itemId, text: renderDigest(merged) } : undefined).catch((error: unknown) => {
+			reportFailure(error);
+			return undefined;
+		});
 		if (!result) {
 			// Supervisor not loaded: keep the events for the next attempt.
 			state.pending = mergeEntries(taken, state.pending);
@@ -195,6 +210,31 @@ export function createSupervisorWaker(deps: SupervisorWakerDeps): SupervisorWake
 	}
 
 	return {
+		updateAndRecheck(cwd, update) {
+			cwd = resolve(cwd);
+			if (disposed) return deps.exclusive ? deps.exclusive(cwd, update) : update();
+			const state = project(cwd);
+			const result = state.chain.then(async () => {
+				const operation = async () => {
+					const updated = await update();
+					const rotation = updated.rotation;
+				if (rotation) {
+					// Keep worker conflict history and let rewrites find a copied or
+					// concurrently restored digest in the new queue.
+					state.supervisorId = rotation.to;
+					state.rotationEpoch = Symbol();
+						if (state.delivered?.supervisorId === rotation.from) {
+						state.delivered = { ...state.delivered, supervisorId: rotation.to };
+						}
+					}
+					if (updated.retry) await flush(cwd, state).catch(reportFailure);
+					return updated;
+				};
+				return deps.exclusive ? deps.exclusive(cwd, operation) : operation();
+			});
+			state.chain = result.then(() => undefined, () => undefined);
+			return result;
+		},
 		forget(cwd, sessionId) {
 			if (disposed) return;
 			cwd = resolve(cwd);
@@ -228,6 +268,10 @@ export function createSupervisorWaker(deps: SupervisorWakerDeps): SupervisorWake
 			projects.clear();
 		},
 	};
+
+	function reportFailure(error: unknown): void {
+		report(`supervisor wake failed: ${error instanceof Error ? error.message : String(error)}`);
+	}
 }
 
 function managedWorker(registry: SupervisorRegistry, id: string) {
@@ -235,8 +279,8 @@ function managedWorker(registry: SupervisorRegistry, id: string) {
 	return id !== registry.supervisorSessionId && worker?.mode === "managed" ? worker : undefined;
 }
 
-function pruneTouches(state: ProjectState, registry: SupervisorRegistry): void {
-	if (state.supervisorId !== registry.supervisorSessionId) {
+function pruneTouches(state: ProjectState, registry: SupervisorRegistry, beforeRotation = false): void {
+	if (!beforeRotation && state.supervisorId !== registry.supervisorSessionId) {
 		state.touches.clear();
 		state.supervisorId = registry.supervisorSessionId;
 	}

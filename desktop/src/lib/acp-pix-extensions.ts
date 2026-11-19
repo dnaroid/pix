@@ -513,8 +513,8 @@ export class AcpPixExtensions {
   }
 
   /** Open (or create on first use) the project's single supervisor session (0077). */
-  async openSupervisor(cwd: string): Promise<SupervisorOpenResponse> {
-    return parseSupervisorOpenResponse(await this.request<unknown>(PIX_SUPERVISOR_OPEN_METHOD, { cwd }, 120_000));
+  async openSupervisor(cwd: string, fresh = false): Promise<SupervisorOpenResponse> {
+    return parseSupervisorOpenResponse(await this.request<unknown>(PIX_SUPERVISOR_OPEN_METHOD, { cwd, ...(fresh ? { fresh } : {}) }, 120_000));
   }
 
   /** Hand a session over to the project supervisor (`managed` mode) or take it back. */
@@ -560,12 +560,16 @@ export class AcpPixExtensions {
     prompt: readonly ContentBlock[],
     displayText: string,
     fileImages: readonly PromptFileImage[] = [],
+    restoreSupervisorDigest?: string,
   ): Promise<{ disposition: "steering" | "auto"; itemId: string }> {
     const response = await this.request<unknown>("pix/session/queue_message", {
       sessionId,
       prompt,
       displayText,
-      ...(fileImages.length > 0 ? { _meta: { "pix.fileImages": fileImages } } : {}),
+      ...(fileImages.length || restoreSupervisorDigest ? { _meta: {
+        ...(fileImages.length ? { "pix.fileImages": fileImages } : {}),
+        ...(restoreSupervisorDigest ? { "pix.restoreSupervisorDigest": restoreSupervisorDigest } : {}),
+      } } : {}),
     }, null);
     if (!isRecord(response) || !["steering", "auto"].includes(String(response.disposition)) || typeof response.itemId !== "string") {
       throw new Error("pix/session/queue_message returned an invalid response");

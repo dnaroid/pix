@@ -17,6 +17,7 @@ import { SUPERVISOR_MANDATE_LIMITS as LIMITS } from "./supervisor-contract.js";
  */
 export const SUPERVISOR_DIR = ".pi/supervisor";
 export const MANDATE_FILE = "mandate.json";
+const BUDGET_HOLD_FILE = "budget-hold.json";
 export const REGISTRY_FILE = "registry.json";
 export const LEDGER_FILE = "ledger.jsonl";
 export const MAX_MANAGED_SESSIONS = 200;
@@ -60,6 +61,8 @@ export interface ManagedSession {
 export interface SupervisorRegistry {
 	readonly version: 1;
 	readonly supervisorSessionId?: string;
+	/** Former supervisor IDs and when each stopped accruing supervisor usage. */
+	readonly previousSupervisors?: Readonly<Record<string, number>>;
 	readonly sessions: Readonly<Record<string, ManagedSession>>;
 }
 
@@ -107,7 +110,7 @@ export function parseMandate(value: unknown): SupervisorMandate {
 		paused: value["paused"] === undefined ? false : value["paused"] !== false,
 		maxConcurrent: intIn(value["maxConcurrent"], LIMITS.maxConcurrent.min, LIMITS.maxConcurrent.max, DEFAULT_MANDATE.maxConcurrent),
 		maxReworkRounds: intIn(value["maxReworkRounds"], LIMITS.maxReworkRounds.min, LIMITS.maxReworkRounds.max, DEFAULT_MANDATE.maxReworkRounds),
-		...(typeof budget === "number" && Number.isInteger(budget) && budget > 0 ? { budgetTokens: budget } : {}),
+		...(typeof budget === "number" && Number.isInteger(budget) && budget > 0 ? { budgetTokens: Math.min(budget, LIMITS.budgetTokens.max) } : {}),
 		stalledAfterMinutes: intIn(value["stalledAfterMinutes"], MIN_STALLED_AFTER_MINUTES, MAX_STALLED_AFTER_MINUTES, DEFAULT_STALLED_AFTER_MINUTES),
 		...(model ? { workerModelRef: model } : {}),
 		policy: typeof value["policy"] === "string" ? value["policy"].slice(0, MAX_POLICY) : "",
@@ -154,7 +157,12 @@ export function parseRegistry(value: unknown): SupervisorRegistry {
 		}
 	}
 	const supervisorSessionId = text(value["supervisorSessionId"], MAX_ID);
-	return { version: 1, ...(supervisorSessionId ? { supervisorSessionId } : {}), sessions: boundSessions(sessions) };
+	const archived = value["previousSupervisors"];
+	const previous = isRecord(archived) ? Object.entries(archived).flatMap(([id, at]) =>
+		id !== supervisorSessionId && id.length > 0 && id.length <= MAX_ID && typeof at === "number" && Number.isSafeInteger(at) && at > 0
+			? [[id, at] as const] : []) : [];
+	return { version: 1, ...(supervisorSessionId ? { supervisorSessionId } : {}),
+		...(previous.length ? { previousSupervisors: Object.fromEntries(previous) } : {}), sessions: boundSessions(sessions) };
 }
 
 function boundSessions(sessions: Record<string, ManagedSession>): Record<string, ManagedSession> {
@@ -170,9 +178,12 @@ export interface SupervisorStoreOptions {
 
 export interface SupervisorStore {
 	readMandate(cwd: string): Promise<SupervisorMandate>;
+	readBudgetHold(cwd: string): Promise<string | undefined>;
+	writeBudgetHold(cwd: string, supervisorId: string | undefined): Promise<void>;
 	/** Merge a patch into the saved mandate; returns the normalized result. */
-	updateMandate(cwd: string, patch: Partial<Omit<SupervisorMandate, "version" | "updatedAt" | "workerModelRef">> & {
+	updateMandate(cwd: string, patch: Partial<Omit<SupervisorMandate, "version" | "updatedAt" | "workerModelRef" | "budgetTokens">> & {
 		workerModelRef?: string | null;
+		budgetTokens?: number | null;
 	}): Promise<SupervisorMandate>;
 	readRegistry(cwd: string): Promise<SupervisorRegistry>;
 	/** Atomic read-modify-write; `update` must be synchronous and pure. */
@@ -226,6 +237,10 @@ export function createSupervisorStore(options: SupervisorStoreOptions = {}): Sup
 
 	return {
 		readMandate: (cwd) => serialized(cwd, async () => parseMandate(await readJson(cwd, MANDATE_FILE))),
+		readBudgetHold: (cwd) => serialized(cwd, async () => text(await readJson(cwd, BUDGET_HOLD_FILE), MAX_ID)),
+		writeBudgetHold: (cwd, id) => serialized(cwd, () => id === undefined
+			? rm(join(cwd, SUPERVISOR_DIR, BUDGET_HOLD_FILE), { force: true })
+			: writeJson(cwd, BUDGET_HOLD_FILE, id)),
 		updateMandate: (cwd, patch) => serialized(cwd, async () => {
 			const current = parseMandate(await readJson(cwd, MANDATE_FILE));
 			const next = parseMandate({ ...current, ...patch, updatedAt: now() });

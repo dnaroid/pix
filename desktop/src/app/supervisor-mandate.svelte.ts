@@ -119,6 +119,7 @@ export type SupervisorMandateDraft = {
   maxConcurrent: number;
   maxReworkRounds: number;
   stalledAfterMinutes: number;
+  budgetTokens: number | null;
   workerModelRef: string;
   policy: string;
 };
@@ -131,6 +132,7 @@ export function mandatePatch(current: SupervisorMandateResponse, draft: Supervis
     if (draft[key] !== current[key]) patch[key] = draft[key];
   }
   if (draft.policy !== current.policy) patch.policy = draft.policy;
+  if (draft.budgetTokens !== (current.budgetTokens ?? null)) patch.budgetTokens = draft.budgetTokens;
   if (draft.workerModelRef !== (current.workerModelRef ?? "")) {
     const workerModelRef = draft.workerModelRef.trim() || null;
     if (workerModelRef !== (current.workerModelRef ?? null)) patch.workerModelRef = workerModelRef;

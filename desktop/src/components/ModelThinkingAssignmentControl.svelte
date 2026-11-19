@@ -16,6 +16,13 @@
     rememberedThinkingByModel = {},
     onVisibleModelsChange,
     disabled = false,
+    workspace = "",
+    label,
+    triggerLabel,
+    help,
+    selectionDescription,
+    optional = false,
+    class: sectionClass = "",
   }: {
     value: string;
     configOptions: readonly SessionConfigOption[];
@@ -23,7 +30,15 @@
     rememberedThinkingByModel?: Readonly<Record<string, string>>;
     onVisibleModelsChange: (modelRefs: readonly string[]) => Promise<void> | void;
     disabled?: boolean;
+    workspace?: string;
+    label: string;
+    triggerLabel: string;
+    help: string;
+    selectionDescription: string;
+    optional?: boolean;
+    class?: string;
   } = $props();
+  const ids = $props.id();
 
   let trigger = $state<HTMLButtonElement | null>(null);
   let pickerOpen = $state(false);
@@ -50,20 +65,20 @@
   $effect(() => { if (disabled) pickerOpen = false; });
 </script>
 
-<section class="space-y-1.5 border-t border-sidebar-border pt-3" aria-label="Task model">
-  <div class="flex items-center gap-1.5 text-xs font-medium text-foreground">
+<section class={["space-y-1.5", sectionClass]} aria-labelledby={`${ids}-label`}>
+  <div id={`${ids}-label`} class="flex items-center gap-1.5 text-xs font-medium text-foreground">
     <BrainCircuit class="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-    Assigned model <span class="font-normal text-muted-foreground">(optional)</span>
+    {label}{#if optional} <span class="font-normal text-muted-foreground">(optional)</span>{/if}
   </div>
   <div class="flex min-w-0 items-center gap-1.5">
     <button
       bind:this={trigger}
       type="button"
       class="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border border-input bg-background px-2.5 text-left text-xs text-foreground transition-colors hover:border-ring/55 hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-45"
-      aria-label="Assigned task model and effort"
+      aria-label={triggerLabel}
+      aria-describedby={`${ids}-help`}
       aria-haspopup="dialog"
       aria-expanded={pickerOpen}
-      data-task-model-trigger
       disabled={disabled || models.length === 0}
       title={value || "Use session default"}
       onclick={openPicker}
@@ -85,19 +100,20 @@
       ><RotateCcw class="h-3.5 w-3.5" aria-hidden="true" /></button>
     {/if}
   </div>
-  <p class="text-xs leading-4 text-muted-foreground">Choose from your visible models or Manage the full catalog; pick a supported effort. Applies only to new task sessions.</p>
+  <p id={`${ids}-help`} class="text-xs leading-4 text-muted-foreground">{help}</p>
 </section>
 
 {#if pickerOpen && trigger}
   <ModelThinkingPicker
     configOptions={pickerOptions}
+    {workspace}
     {visibleModelRefs}
     {rememberedThinkingByModel}
     {onVisibleModelsChange}
     {disabled}
     applyUnchanged
     anchor={trigger}
-    selectionDescription="Assign this model and effort to new sessions for this task. The current session stays unchanged."
+    {selectionDescription}
     onApply={assign}
     onClose={() => { pickerOpen = false; }}
     restoreFocus={() => trigger?.focus()}

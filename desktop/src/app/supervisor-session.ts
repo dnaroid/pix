@@ -16,7 +16,7 @@ export const SUPERVISOR_MENU_EVENT = "pix-open-supervisor";
  * creation, deduplication and the supervisor-only tool; Desktop only opens it.
  */
 type SupervisorClient = {
-  openSupervisor(cwd: string): Promise<{ sessionId: string; created: boolean }>;
+  openSupervisor(cwd: string, fresh?: boolean): Promise<{ sessionId: string; created: boolean }>;
 };
 
 export type SupervisorSessionOptions<C extends SupervisorClient> = {
@@ -29,15 +29,11 @@ export type SupervisorSessionOptions<C extends SupervisorClient> = {
 };
 
 export function createSupervisorSessionAction<C extends SupervisorClient>(options: SupervisorSessionOptions<C>) {
-  let opening: Promise<void> | null = null;
+  let opening: { client: C; workspace: string; fresh: boolean; token: symbol; promise: Promise<void> } | undefined;
 
-  async function openOnce(): Promise<void> {
-    const client = options.client();
-    const workspace = options.workspace();
-    if (!client || !workspace) return;
-    const current = () => options.client() === client && options.workspace() === workspace;
+  async function openOnce(client: C, workspace: string, fresh: boolean, current: () => boolean): Promise<void> {
     try {
-      const { sessionId } = await client.openSupervisor(workspace);
+      const { sessionId } = await (fresh ? client.openSupervisor(workspace, true) : client.openSupervisor(workspace));
       if (!current()) return;
       // A just-created session must be in the catalog before its tab is shown.
       await options.refreshSessions();
@@ -49,10 +45,21 @@ export function createSupervisorSessionAction<C extends SupervisorClient>(option
     }
   }
 
-  /** Repeated clicks while opening join the running request. */
-  function open(): Promise<void> {
-    opening ??= openOnce().finally(() => { opening = null; });
-    return opening;
+  /** Coalesce repeated clicks, but never swallow a fresh request behind an ordinary open. */
+  function open(fresh = false): Promise<void> {
+    const client = options.client();
+    const workspace = options.workspace();
+    if (!client || !workspace) return Promise.resolve();
+    const previous = opening?.client === client && opening.workspace === workspace ? opening : undefined;
+    if (previous && (!fresh || previous.fresh)) return previous.promise;
+    const token = Symbol();
+    const current = () => options.client() === client && options.workspace() === workspace && opening?.token === token;
+    const request = (previous?.promise ?? Promise.resolve())
+      .then(() => current() ? openOnce(client, workspace, fresh, current) : undefined);
+    const promise = request
+      .finally(() => { if (opening?.promise === promise) opening = undefined; });
+    opening = { client, workspace, fresh, token, promise };
+    return promise;
   }
 
   return { open };

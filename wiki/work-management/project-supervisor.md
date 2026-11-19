@@ -1,19 +1,20 @@
 ---
 kind: spec
-status: proposal
+status: active
 ---
 
-# Project supervisor (planned)
+# Project supervisor
 
-**Status: partially implemented.** This page is the target contract for
-the project supervisor accepted in
-[0077](../decisions/0077-project-supervisor-session.md). Implemented so far:
-phase 0, the supervisor session with read-only `status`/`read`, debounced wakes,
-the pinned supervisor tab, manual handover (`pix/supervisor/handover`), the
-mandate header block (`pix/supervisor/mandate`), the mutating ops `start`,
-`send`, `answer`, `cancel`, `close` (with completion guards), `reopen` and `escalate`, the worker preamble, startup reconciliation, and user takeover.
-Not yet: the token budget. See *State and lifetime*. The staged rollout is tracked in the project plan
-`.pi/plans/project-supervisor.md`.
+**Status: implemented; manual acceptance pending.** This page is the contract
+for the project supervisor accepted in
+[0077](../decisions/0077-project-supervisor-session.md). Every item of the
+project plan `.pi/plans/project-supervisor.md` (phases 0–3) is implemented and
+covered by focused automated tests: the supervisor session with `status`/`read`,
+debounced wakes, the pinned supervisor tab, the mandate header block, manual
+handover and take back, the mutating ops `start`, `send`, `answer`, `cancel`,
+`close` (with completion guards), `reopen` and `escalate`, the worker preamble,
+startup reconciliation, user takeover and `conflict` events. The manual Desktop
+acceptance runs from the plan's definitions of done have not been carried out.
 
 [Work management](index.md)
 
@@ -29,8 +30,23 @@ decision outside its mandate.
 
 - Pix Desktop only, and only while the project window is open. Standalone TUI,
   headless/MCP and sub-agent runtimes do not get supervisor tools.
-- One supervisor session per project (canonical workspace). Starting another
-  one opens the existing session.
+- One active supervisor conversation per project (canonical workspace).
+  **Open Project Supervisor** opens that conversation. In the command palette,
+  **New Project Supervisor Conversation** starts without the previous chat
+  context. In the active supervisor conversation, a bare `/new` runs the same
+  fresh-conversation action; in ordinary sessions `/new` still opens a session
+  start tab. `/new_tab` is unchanged. Existing gates apply: a `/new` sent while
+  the current turn is running is ignored. The previous conversation remains in
+  history and no longer controls the project. The previous conversation must be idle (no running turn, pending
+  dialog, streaming or compaction); otherwise the command is refused and
+  nothing changes.
+- A new conversation keeps the saved mandate (including pause and budget
+  state and any budget hold), worker ownership, rework counts, escalations,
+  ledger, and queued worker wakes. It does not stop or restart workers. Wakes
+  queued in the old conversation are copied to the new one, and the old copies
+  are removed after the switch. A late restore of an unconsumed digest from a
+  retired conversation is applied to the current one; a digest prompt sent to a
+  retired conversation is refused.
 - Workers are ordinary native ACP sessions, not sub-agents. They stay visible
   in the session list and can be opened by the user.
 - Out of scope: background operation without Desktop, git worktrees, commits,
@@ -69,10 +85,13 @@ decision outside its mandate.
 - Mandate fields, with defaults:
   - `maxConcurrent`: 5 managed sessions with a turn in flight;
   - `maxReworkRounds`: 5 follow-ups per item after its first completed turn;
-  - `budget`: optional ceiling in tokens over a rolling 24 hours, counting
-    the supervisor and its managed sessions; provider cost is shown for
-    reference where reported but is never the limit. When absent, no budget
-    check runs and the UI says so;
+  - `budgetTokens`: optional ceiling over a rolling 24 hours, using assistant
+    `usage.totalTokens` (including cache reads and writes) from the supervisor
+    conversation and sessions currently in `managed` mode. Saved former
+    supervisor conversations contribute only the usage incurred before they
+    were replaced, within the same rolling window. Manual, closed and released
+    workers are excluded. Provider cost is never the limit. When the ceiling is
+    absent, no budget check runs;
   - `stalledAfterMinutes`: 15 by default, allowed 5–60 (see `stalled`);
   - `workerModelRef`: optional default for plan and prompt sessions (an explicit
     `start` `modelRef` overrides it; tasks keep their saved `modelRef`);
@@ -84,9 +103,13 @@ decision outside its mandate.
 ## Mandate UI
 
 - A compact block in the supervisor session header shows state (active or
-  paused), a one-click **Pause**/**Resume**, counters (running sessions,
-  rework rounds used, budget used — shown as "no limit" until the budget is implemented) and **Edit mandate**, which opens the
-  mandate form. The mandate is stored in `.pi/supervisor/`.
+  paused), a one-click **Pause**/**Resume**, running sessions, rework rounds
+  used, and rolling token usage against the ceiling (or "no limit" without
+  one). **Edit mandate** opens the mandate form. The mandate is stored in
+  `.pi/supervisor/`.
+- **Budget hold** indicates that a wake was blocked. **Resume wakes** (or
+  **Resume** while paused) rechecks current usage; raising or clearing the
+  ceiling can also release the hold. Ordinary pause still blocks wakes.
 
 ## Pause
 
@@ -186,8 +209,14 @@ involved.
 Events are coalesced per supervisor with a short debounce. An idle supervisor
 gets one wake turn with one digest. A busy supervisor gets the digest as a
 single queued follow-up that later events update rather than multiply. Pause
-holds wakes but keeps the digest current. A wake that would exceed the budget
-escalates instead.
+holds wakes but keeps the digest current. Before queuing a digest, and again
+before Desktop automatically takes a queued digest, ACP checks the current
+budget. If usage is at or above the ceiling, or accounting is unavailable,
+it holds the digest, keeps coalescing events and escalates without a model
+turn. Window expiry or a change in membership alone does not release a hold.
+An explicit **Resume**, raise or clear releases it only if usage is below the
+ceiling or no ceiling remains. This gate applies only to automatic wakes, not
+to `start`, `send` or user prompts.
 
 The digest is filtered against the project registry whenever it is composed or
 rewritten, including queued digests that are being replaced. Only sessions in
@@ -237,10 +266,14 @@ summary but no guards. Closures can be reverted with `reopen`.
   no repository-wide formatting or mass rewrites, run only checks relevant to
   their scope, and expect other sessions' uncommitted changes in the tree.
 - ACP tracks the files each managed session touches through successful
-  write/edit tool calls. When two different managed sessions in the same
+  `write`, `edit` and `apply_patch` calls. For `apply_patch` it takes every
+  Add/Update/Delete header and both sides of a move (or the `---`/`+++`
+  headers of a unified diff), plus the tool's reported `changedFiles`. When two different managed sessions in the same
   project touch the same path, the supervisor gets a `conflict` event. The
-  supervisor's own session is excluded. Writes made through shell commands are
-  not tracked; this is a known gap, not a guarantee.
+  supervisor's own session is excluded. Calls made inside `codemode` count too:
+  the SDK emits them as ordinary `tool_execution_*` events with
+  `parentToolCallId`. Writes made through shell commands are not tracked; this
+  is a known gap, not a guarantee.
 - Only the user commits. The supervisor may report which files belong to
   which item.
 
@@ -281,12 +314,12 @@ rationale.
   so the supervisor and Desktop read the same outcomes (phase 0, done).
 - The per-session event source exists (phase 0, done): ACP
   `acp/src/acp/session-events.ts` emits `settled` (stop reason + files
-  changed by successful write/edit calls), `question`, `error`
+  changed by successful write/edit/apply_patch calls), `question`, `error`
   (model/compaction/run/process), `stalled` and `checklist` to in-process
   subscribers (`PixAcpAgent.subscribeSessionEvents`). Session retirement emits
   nothing and disposes the observer's timer. Touched files are kept per session
   id across runtime replacement and dropped on session delete. Conflict detection
-  runs in `acp/src/acp/supervisor-wake.ts` from successful write/edit
+  runs in `acp/src/acp/supervisor-wake.ts` from successful write/edit/apply_patch
   completions (`file_changed`, which is not a lifecycle status). Conflict
   history is in memory: it survives runtime replacement but not an adapter
   restart, and keeps at most 500 recent paths per worker, dropping the oldest. A worker's
@@ -298,18 +331,22 @@ rationale.
   `ledger.jsonl` (torn lines skipped). Invalid mandate fields fall back to
   defaults, never to wider limits; a malformed pause flag reads as paused.
   Desktop cleanup treats `.pi/supervisor/` as canonical.
-- The supervisor session and read-only tool exist (phase 1, partial).
+- The supervisor session and read-only tool exist (phase 1, done).
   Desktop's command palette entry **Open Project Supervisor** calls ACP
-  `pix/supervisor/open` (`acp/src/acp/supervisor-contract.ts`). ACP records
-  the session id in `registry.json` before spawning, so concurrent opens
-  share one session, and a reopen returns the existing session. A recorded but
+  `pix/supervisor/open` (`acp/src/acp/supervisor-contract.ts`). Concurrent
+  opens share one operation and a reopen returns the registered session. The
+  new-conversation command uses `fresh: true`: ACP prepares a blank runtime
+  with a new session ID, copies any queued wakes, then switches the active ID
+  in `registry.json` and records the old ID in `previousSupervisors`. The old
+  runtime is not stopped and keeps its history. If preparation fails, the
+  previous conversation stays active. A recorded but
   missing session is journaled (`supervisor-missing`) and replaced by a new
   one. Other ACP clients are refused. `session/list` marks the session with
   `_meta["pix.supervisor"]`, and Desktop shows a radar icon on its row.
   Deleting the supervisor or a managed session unregisters it and journals
   `closed_by_user`.
 - ACP loads `acp/src/extensions/supervisor.ts` with `PIX_SUPERVISOR_BRIDGE=1`
-  only into the registered supervisor session of a Pix Desktop client.
+  only when preparing or loading the supervisor for a Pix Desktop client.
   `acp/src/pi/supervisor-host.js` installs the correlated bridge only under
   that variable; requests carry random per-runtime ids, time out after 60 s,
   and a replaced runtime gets no reply. ACP also rejects requests from any
@@ -361,20 +398,24 @@ rationale.
   count. Handover registers sessions as `managed`.
 - Desktop-only `pix/supervisor/mandate` reads (`{cwd}`) or patches
   (`{cwd, patch}`) the mandate and returns it with live counters (`managed`,
-  `manual`, `running`, `reworkRounds`); ACP clamps limits and journals
+  `manual`, `running`, `reworkRounds`, optional `budgetUsedTokens`) and
+  `budgetHeld: true` during a budget stop; ACP clamps limits and journals
   `mandate_changed`. Desktop shows a compact block above the supervisor
   transcript (`SupervisorMandateBar.svelte`, store
   `desktop/src/app/supervisor-mandate.svelte.ts`, polled every 5 s while
   visible): state Off/Active/Paused, counters, **Set up** when disabled,
   **Pause**/**Resume** and **Edit mandate** (`SupervisorMandateDialog.svelte`:
   enable, parallel sessions 1–20, rework rounds 0–50, stalled 5–60 min,
-  default worker model, policy). The default worker model applies to plans and
-  prompts when `start` does not specify a model. Enter `provider/model[:thinking]`
-  or leave the field blank to clear it. In the RPC patch, `workerModelRef: null`
+  token budget, default worker model, policy). The default worker model applies to plans and
+  prompts when `start` does not specify a model. Choose a model and supported
+  effort in the shared Desktop picker, then save the mandate. Reset the field
+  and save to use the session default. In the RPC patch, `workerModelRef: null`
   clears the saved value, omission leaves it unchanged, and responses include
   `workerModelRef` only when saved. The RPC accepts up to 512 characters and
-  trims surrounding whitespace before saving. The token budget shows "no limit"
-  until it is implemented.
+  trims surrounding whitespace before saving. For `budgetTokens`, omission
+  keeps the ceiling, `null` clears it, and a positive integer is capped at
+  `Number.MAX_SAFE_INTEGER`. Clearing the budget field in Desktop sends `null`.
+  A configured ceiling with unavailable usage is shown as such, not as zero.
 - Debounced wakes exist (phase 1): `acp/src/acp/supervisor-wake.ts` coalesces
   worker events per project for 5 s into one `[Supervisor digest]` text (one
   line per session, newest event per type, at most 20 sessions; the
@@ -387,6 +428,16 @@ rationale.
   Pause keeps events pending without waking. Events that arrive while the
   supervisor runtime is not loaded stay pending until the next event. Only Pix
   Desktop clients get wakes; adapter dispose clears the timers.
+- `acp/src/acp/supervisor-budget.ts` caches rolling usage points from mapped
+  Pi JSONL files, reusing unchanged logs and parsing only appended lines when
+  they grow. Fork-copied entries count once. The budget hold is saved per
+  supervisor in `.pi/supervisor/budget-hold.json`; restarting ACP does not
+  resume wakes. A hold stays in force after `fresh: true` rotates the
+  conversation, because it is matched against the current and retired
+  conversations of the project. Debounced events not yet queued live only in the adapter.
+  A digest already in the saved Desktop auto queue is checked again at take.
+  If Desktop returns an unconsumed digest to the queue, it keeps its wake ID
+  and goes through that check again instead of becoming a steering message.
 - The macOS app menu (first submenu) has **Open Project Supervisor**, placed
   after **Arrange windows**. It emits `pix-open-supervisor` to the focused Pix
   window, or else the first visible one (`desktop/src-tauri/src/supervisor_menu.rs`).
@@ -411,8 +462,9 @@ rationale.
 
 Refused actions, guard failures, bridge errors, reconciliation mismatches and
 budget stops go to the existing diagnostic logger (see
-[logging](../operations/logging.md)), as well as appearing in the supervisor
-session.
+[logging](../operations/logging.md)). A budget stop records one project-level
+`budget_exceeded` ledger entry and one warning per hold. It appears in the
+supervisor mandate bar, not as a message to the supervisor model.
 
 ## Verification scenarios
 
@@ -422,6 +474,9 @@ session.
   `send`: the session ends up in `manual`, and the supervisor send is rejected.
 - Events from several workers produce one wake. A busy supervisor gets one
   coalesced follow-up. Teardown releases timers and subscriptions.
+- At the token ceiling a new or queued digest does not wake the supervisor.
+  A held digest stays current, does not resume on window expiry alone, and is
+  delivered once after explicit release when not paused.
 - `close done` is refused for each failing guard and succeeds when all hold.
   A session with no linked plan closes without one; a failed plan lookup is
   refused. The ledger contains the evidence.

@@ -528,7 +528,7 @@
     conversation: conversationServices,
     focusComposer: () => promptComposer?.focus(),
     setPromptText: (text) => promptText = text,
-    openSupervisor: () => supervisorSession.open(),
+    openSupervisor: (fresh) => supervisorSession.open(fresh),
   });
   const desktopCommands = commandServices.controller;
   // Callbacks run after initialization; the session tab controller is created below.
@@ -662,6 +662,10 @@
   const taskActionId = $derived(projectActions.actionId);
 
   const promptActionServices = createDesktopPromptActionServices({
+    supervisor: {
+      isActive: () => supervisorSessionVisible,
+      openFresh: () => supervisorSession.open(true),
+    },
     handoffAllowed: () => status === "ready" && !activePendingElicitation,
     retargetSessionAnchors: (sourceId, targetId) => workbenchController.retargetSessionAnchors(sourceId, targetId),
     submitMessageEdit: () => messageEdit.submit(),
@@ -1171,6 +1175,10 @@
 <DeleteConfirmationHost />
 {#if supervisorMandate.editor && supervisorMandate.mandate}
   <SupervisorMandateDialog mandate={supervisorMandate.mandate} enable={supervisorMandate.editor.enable}
+    {workspace} configOptions={configOptions.length ? configOptions : draftConfigOptions}
+    visibleModelRefs={modelServices.preferences.visibleModelRefs}
+    rememberedThinkingByModel={modelServices.preferences.rememberedThinkingByModel}
+    onVisibleModelsChange={modelServices.preferences.saveVisibleModelRefs}
     saving={supervisorMandate.saving} onsave={(draft) => void supervisorMandate.save(draft)}
     oncancel={supervisorMandate.closeEditor} {reportError} />
 {/if}

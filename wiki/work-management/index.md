@@ -12,6 +12,6 @@ Session-local todos, saved project tasks and durable resource registry are disti
 
 ## Pages
 
-- [Project supervisor](project-supervisor.md) — partially implemented (phases 0–1 and part of phase 2): pinned autopilot session that orchestrates task/plan sessions ([0077](../decisions/0077-project-supervisor-session.md)).
+- [Project supervisor](project-supervisor.md) — implemented (all plan phases 0–3; manual Desktop acceptance pending): pinned autopilot session that orchestrates task/plan sessions ([0077](../decisions/0077-project-supervisor-session.md)).
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"a2f0db699cbc730e5a234b35a6a7ce89faf4b3276263761af98dce3030dc7c91","checkedAt":"2026-10-30T23:04:01.003Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":38,"reportLanguage":"ru"} -->

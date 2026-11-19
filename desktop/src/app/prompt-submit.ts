@@ -32,6 +32,10 @@ type PromptSubmitOptions = {
   waitForSessionReady?: (client: AcpClient, sessionId: string) => Promise<boolean>;
   promptRunning: (sessionId: string) => boolean;
   openSessionStartTab: () => void | Promise<void>;
+  supervisor?: {
+    isActive: () => boolean;
+    openFresh: () => Promise<void>;
+  };
   enhancePromptDraft: (draft: string) => void | Promise<void>;
   importConversationPath: (path: string) => void | Promise<void>;
   chooseImportSession: () => void | Promise<void>;
@@ -202,7 +206,11 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
         case "new_tab":
           if (sessionId && options.promptRunning(sessionId)) return;
           options.setPromptText("");
-          await options.openSessionStartTab();
+          if (desktopCommand.kind === "new" && sessionId && options.supervisor?.isActive()) {
+            await options.supervisor.openFresh();
+          } else {
+            await options.openSessionStartTab();
+          }
           break;
         case "enhance":
           if (sessionId && options.promptRunning(sessionId)) return;

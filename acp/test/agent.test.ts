@@ -6388,9 +6388,131 @@ test("project supervisor: worker events wake the supervisor with one coalesced q
 			assert.equal(queue().length, 1, "a still-queued digest is rewritten, not multiplied");
 			assert.equal(queue()[0]!.id, firstId);
 			assert.equal(harness.clients[0]!.promptCalls.length, 0, "ACP queues the wake; Desktop runs it");
+			const mandate = "pix/supervisor/mandate";
+			const map = new SessionMapStore(harness.sessionMapPath, TEST_LOGGER);
+			const workerPath = join(cwd, "worker.jsonl");
+			await writeFile(workerPath, `${JSON.stringify({ type: "message", id: "spent", message: {
+				role: "assistant", timestamp: Date.now(), usage: { totalTokens: 40 },
+			} })}\n`);
+			const workerRecord = await map.get(worker.sessionId);
+			assert.ok(workerRecord);
+			await map.put({ ...workerRecord, piSessionPath: workerPath });
+			const limited = parseSupervisorMandateResponse(await cx.request(mandate, { cwd, patch: { budgetTokens: 40 } }));
+			assert.equal(limited.budgetUsedTokens, 40);
+			const take = () => cx.request(PIX_TAKE_AUTO_MESSAGE_METHOD, { sessionId: supervisor.sessionId });
+			assert.deepEqual(await take(), {}, "a digest queued before the limit cannot wake the model");
+			assert.deepEqual(await take(), {});
+			assert.equal(parseSupervisorMandateResponse(await cx.request(mandate, { cwd })).budgetHeld, true);
+			const ledger = await createSupervisorStore().readLedger(cwd);
+			assert.deepEqual(ledger.filter((entry) => entry.kind === "budget_exceeded").map((entry) => entry.detail), [{ used: 40, limit: 40 }]);
+			assert.equal(parseSupervisorMandateResponse(await cx.request(mandate, { cwd, patch: { budgetTokens: null } })).budgetHeld, undefined);
+			assert.equal(queue()[0]!.id, firstId, "clear permits the existing queued digest rather than duplicating it");
+			const { message } = await take() as { message?: DesktopQueuedUserMessage };
+			assert.equal(message?.id, firstId);
+			await cx.request(mandate, { cwd, patch: { budgetTokens: 40 } });
+			const restored = await cx.request(PIX_QUEUE_MESSAGE_METHOD, {
+				sessionId: supervisor.sessionId, prompt: [{ type: "text", text: message!.promptText }], displayText: message!.displayText,
+				_meta: { "pix.restoreSupervisorDigest": message!.id },
+			});
+			assert.deepEqual(restored, { disposition: "auto", itemId: firstId });
+			assert.deepEqual(await take(), {}, "a failed dispatch restored to the queue still obeys the budget");
 			// Taking the worker back withdraws it from the still-queued digest.
 			await cx.request("pix/supervisor/handover", { cwd, sessionId: worker.sessionId, supervised: false });
 			await waitFor(() => queue().length === 0);
+		});
+	} finally {
+		await harness.adapter.dispose();
+	}
+});
+
+test("project supervisor: a clean conversation inherits workers, queued wakes and the rolling budget", async (t) => {
+	const cwd = mkdtempSync(join(tmpdir(), "pix-acp-supervisor-rotation-"));
+	const store = createSupervisorStore();
+	let failDigestCopy = false;
+	const harness = createTestAdapter({
+		agentDir: cwd, supervisorStore: store, supervisorExtensionPath: "/opt/pix/supervisor.js", supervisorWakeDebounceMs: 5,
+		loadDesktopQueues: async () => ({ auto: [], deferred: [] }),
+		saveDesktopQueues: async (_cwd, _path, queues) => {
+			if (failDigestCopy && queues.auto.length > 0) throw new Error("queue write failed");
+		},
+	});
+	t.after(() => rm(cwd, { recursive: true, force: true }));
+	try {
+		await connectAs(harness.adapter, "pix-desktop", async (cx) => {
+			await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientCapabilities: {}, clientInfo: { name: "pix-desktop", version: "test" } });
+			const open = (fresh?: boolean) => cx.request("pix/supervisor/open", { cwd, fresh }) as Promise<{ sessionId: string; created: boolean }>;
+			const take = (sessionId: string) => cx.request(PIX_TAKE_AUTO_MESSAGE_METHOD, { sessionId });
+			const mandate = "pix/supervisor/mandate";
+			const old = await open();
+			const worker = await cx.request("session/new", { cwd, mcpServers: [] }) as { sessionId: string };
+			await cx.request("pix/supervisor/handover", { cwd, sessionId: worker.sessionId, supervised: true });
+			await cx.request(mandate, { cwd, patch: { enabled: true, policy: "Keep working" } });
+			const pending = cx.request("session/prompt", { sessionId: worker.sessionId, prompt: [{ type: "text", text: SUPERVISOR_WORKER_PREAMBLE }] });
+			const pi = harness.clients[1]!;
+			await waitFor(() => pi.promptCalls.length === 1);
+			pi.emit({ type: "agent_start" });
+			pi.emit({ type: "agent_end", messages: [], willRetry: false } as unknown as JsonAgentSessionEvent);
+			pi.emit({ type: "agent_settled", aborted: false });
+			await pending;
+			const queue = (id: string) => harness.adapter.getSession(id)!.autoUserMessages;
+			await waitFor(() => queue(old.sessionId).length === 1);
+			const wake = queue(old.sessionId)[0]!;
+			const map = new SessionMapStore(harness.sessionMapPath, TEST_LOGGER);
+			const oldRecord = (await map.get(old.sessionId))!;
+			const transcript = join(cwd, "old.jsonl");
+			const spent = `${JSON.stringify({ type: "message", id: "spent", message: {
+				role: "assistant", timestamp: Date.now(), usage: { totalTokens: 40 },
+			} })}\n`;
+			await writeFile(transcript, spent);
+			await map.put({ ...oldRecord, piSessionPath: transcript });
+			await cx.request(mandate, { cwd, patch: { budgetTokens: 40 } });
+			assert.deepEqual(await take(old.sessionId), {});
+			const before = await store.readRegistry(cwd);
+
+			failDigestCopy = true;
+			await assert.rejects(open(true), /queue write failed/);
+			assert.deepEqual(await store.readRegistry(cwd), before);
+			assert.deepEqual(queue(old.sessionId), [wake]);
+			assert.deepEqual(await open(), { sessionId: old.sessionId, created: false });
+			failDigestCopy = false;
+
+			const [fresh, duplicate] = await Promise.all([open(true), open(true)]);
+			assert.notEqual(fresh.sessionId, old.sessionId);
+			assert.deepEqual(duplicate, fresh);
+			assert.deepEqual(await open(), { sessionId: fresh.sessionId, created: false });
+			assert.deepEqual((await store.readRegistry(cwd)).sessions, before.sessions);
+			assert.equal(await readFile(transcript, "utf8"), spent);
+			assert.equal(harness.clients.at(-1)!.promptCalls.length, 0, "the new conversation has no prompt history");
+			const { sessions } = await cx.request("session/list", { cwd }) as { sessions: Array<{ sessionId: string; _meta?: Record<string, unknown> }> };
+			assert.ok(sessions.some((row) => row.sessionId === old.sessionId));
+			assert.deepEqual(sessions.filter((row) => row._meta?.["pix.supervisor"] === true).map((row) => row.sessionId), [fresh.sessionId]);
+			const replies: Array<{ error?: string; result?: unknown }> = [];
+			for (const boss of [harness.clients[0]!, harness.clients.at(-1)!]) {
+				Object.assign(boss, { respondToSupervisor: async (_id: string, reply: typeof replies[number]) => { replies.push(reply); } });
+				boss.emit({ type: "pix_supervisor_request", requestId: "read-status", request: { op: "status" } } as PiEvent);
+				await waitFor(() => replies.length === (boss === harness.clients[0] ? 1 : 2));
+			}
+			assert.match(replies[0]!.error ?? "", /not the project supervisor/);
+			assert.ok(replies[1]!.result);
+			assert.deepEqual(queue(fresh.sessionId), [wake]);
+			assert.deepEqual(queue(old.sessionId), []);
+			const current = parseSupervisorMandateResponse(await cx.request(mandate, { cwd }));
+			assert.equal(current.policy, "Keep working");
+			assert.equal(current.budgetUsedTokens, 40);
+			assert.equal(current.budgetHeld, true);
+			assert.deepEqual(await take(fresh.sessionId), {});
+			await cx.request(mandate, { cwd, patch: { budgetTokens: null } });
+			const { message } = await take(fresh.sessionId) as { message?: DesktopQueuedUserMessage };
+			assert.deepEqual(message, wake);
+			const successor = await open(true);
+			const prompt = [{ type: "text", text: wake.promptText }];
+			await assert.rejects(cx.request("session/prompt", { sessionId: fresh.sessionId, prompt }), /conversation changed/);
+			await cx.request(PIX_QUEUE_MESSAGE_METHOD, {
+				sessionId: fresh.sessionId, prompt, displayText: wake.displayText, _meta: { "pix.restoreSupervisorDigest": wake.id },
+			});
+			assert.deepEqual(queue(successor.sessionId), [wake], "an in-flight take restored to the retired ID follows the supervisor");
+			await cx.request("pix/supervisor/handover", { cwd, sessionId: worker.sessionId, supervised: false });
+			await waitFor(() => queue(successor.sessionId).length === 0);
 		});
 	} finally {
 		await harness.adapter.dispose();
@@ -6650,6 +6772,18 @@ test("project supervisor: mandate saves, reads and clears the default worker mod
 			const reread = parseSupervisorMandateResponse(await cx.request(method, { cwd }));
 			assert.equal(Object.hasOwn(reread, "workerModelRef"), false);
 			assert.equal(reread.maxConcurrent, 3);
+			assert.equal(reread.budgetTokens, undefined);
+			for (const invalid of [0, -1, 1.5, "100"]) {
+				await assert.rejects(cx.request(method, { cwd, patch: { budgetTokens: invalid } }), /Invalid supervisor mandate budgetTokens/);
+			}
+			const limited = parseSupervisorMandateResponse(await cx.request(method, { cwd, patch: { budgetTokens: 1e20 } }));
+			assert.equal(limited.budgetTokens, Number.MAX_SAFE_INTEGER);
+			assert.equal(limited.budgetUsedTokens, 0);
+			assert.equal((await readSaved()).budgetTokens, Number.MAX_SAFE_INTEGER);
+			const kept = parseSupervisorMandateResponse(await cx.request(method, { cwd, patch: { policy: "unrelated" } }));
+			assert.equal(kept.budgetTokens, Number.MAX_SAFE_INTEGER);
+			assert.equal(parseSupervisorMandateResponse(await cx.request(method, { cwd, patch: { budgetTokens: null } })).budgetTokens, undefined);
+			assert.equal(Object.hasOwn(await readSaved(), "budgetTokens"), false);
 		});
 	} finally {
 		await adapter.dispose();

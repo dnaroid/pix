@@ -48,7 +48,7 @@ type DesktopCommandControllerOptions = {
   closeWorkbenchTab: (id: WorkbenchTabId, fallbackId: WorkbenchTabId | null) => Promise<boolean>;
   openSessionStartTab: () => void | Promise<void>;
   /** Project supervisor (0077); absent hosts disable the command. */
-  openSupervisor?: () => void | Promise<void>;
+  openSupervisor?: (fresh?: boolean) => void | Promise<void>;
   openJumpPicker: (query: string) => void | Promise<void>;
   openHistoryPicker: (query: string) => void | Promise<void>;
   openModelThinkingPicker: () => void | Promise<void>;
@@ -92,6 +92,7 @@ export function createDesktopCommandController(options: DesktopCommandController
       case "session.open":
         return options.statusReady() && !!options.workspace() && !options.sessionMutationRunning();
       case "session.supervisor":
+      case "session.supervisorFresh":
         return !!options.openSupervisor && options.statusReady() && !!options.workspace()
           && options.clientAvailable() && !options.sessionMutationRunning();
       case "session.jump":
@@ -173,6 +174,9 @@ export function createDesktopCommandController(options: DesktopCommandController
         return;
       case "session.supervisor":
         await options.openSupervisor?.();
+        return;
+      case "session.supervisorFresh":
+        await options.openSupervisor?.(true);
         return;
       case "session.jump":
         await options.openJumpPicker("");

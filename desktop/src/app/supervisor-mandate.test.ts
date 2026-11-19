@@ -91,7 +91,7 @@ describe("supervisor mandate store", () => {
     await read;
     f.store.openEditor(true);
     expect(f.store.editor).toMatchObject({ enable: true });
-    const draft = { enabled: true, maxConcurrent: 3, maxReworkRounds: 5, stalledAfterMinutes: 15, policy: "", workerModelRef: "" };
+    const draft = { enabled: true, maxConcurrent: 3, maxReworkRounds: 5, stalledAfterMinutes: 15, budgetTokens: null, policy: "", workerModelRef: "" };
     const failing = f.store.save(draft);
     expect(f.calls[1]!.patch).toEqual({ enabled: true, maxConcurrent: 3 });
     f.calls[1]!.reply.reject(new Error("write failed"));
@@ -111,14 +111,14 @@ describe("supervisor mandate store", () => {
 
     const workerModelRef = "provider/model:high";
     f.store.openEditor();
-    const saving = f.store.save({ ...BASE, workerModelRef: ` ${workerModelRef} ` });
+    const saving = f.store.save({ ...BASE, budgetTokens: null, workerModelRef: ` ${workerModelRef} ` });
     expect(f.calls[1]!.patch).toEqual({ workerModelRef });
     f.calls[1]!.reply.resolve({ ...BASE, workerModelRef });
     await saving;
     expect(f.store.mandate?.workerModelRef).toBe(workerModelRef);
 
     f.store.openEditor();
-    const clearing = f.store.save({ ...BASE, workerModelRef: "" });
+    const clearing = f.store.save({ ...BASE, budgetTokens: null, workerModelRef: "" });
     expect(f.calls[2]!.patch).toEqual({ workerModelRef: null });
     f.calls[2]!.reply.resolve(BASE);
     await clearing;
@@ -164,10 +164,19 @@ describe("supervisor mandate store", () => {
   });
 
   it("patches only the changed fields", () => {
-    expect(mandatePatch(BASE, { ...BASE, workerModelRef: "  " })).toEqual({});
+    const draft = { ...BASE, budgetTokens: null, workerModelRef: "" };
+    expect(mandatePatch(BASE, { ...draft, workerModelRef: "  " })).toEqual({});
     const workerModelRef = "provider/model:high";
-    expect(mandatePatch({ ...BASE, workerModelRef }, { ...BASE, workerModelRef })).toEqual({});
-    expect(mandatePatch(BASE, { ...BASE, enabled: true, maxReworkRounds: 2, stalledAfterMinutes: 30, policy: "x", workerModelRef: "" }))
+    expect(mandatePatch({ ...BASE, workerModelRef }, { ...draft, workerModelRef })).toEqual({});
+    expect(mandatePatch(BASE, { ...draft, enabled: true, maxReworkRounds: 2, stalledAfterMinutes: 30, policy: "x" }))
       .toEqual({ enabled: true, maxReworkRounds: 2, stalledAfterMinutes: 30, policy: "x" });
+  });
+
+  it("sets a token ceiling, omits an unchanged ceiling and clears with null", () => {
+    const draft = { ...BASE, budgetTokens: 10_000, workerModelRef: "" };
+    const limited = { ...BASE, budgetTokens: 10_000, budgetUsedTokens: 1500 };
+    expect(mandatePatch(BASE, draft)).toEqual({ budgetTokens: 10_000 });
+    expect(mandatePatch(limited, draft)).toEqual({});
+    expect(mandatePatch(limited, { ...draft, budgetTokens: null })).toEqual({ budgetTokens: null });
   });
 });

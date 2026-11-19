@@ -63,6 +63,7 @@ import {
 	PIX_SUPERVISOR_START_METHOD,
 	PIX_SUPERVISOR_CLOSE_TAB_METHOD,
 	SUPERVISOR_WORKER_PREAMBLE,
+	SUPERVISOR_DIGEST_ID_PREFIX,
 	parseSupervisorStartResponse,
 	parseSupervisorCloseTabResponse,
 	type SupervisorCloseTabRequest,
@@ -87,6 +88,7 @@ import {
 } from "./supervisor-contract.js";
 import { forwardSupervisorRequest } from "./supervisor-bridge.js";
 import { createSupervisorService, readSessionBranchMessages, type SupervisorPendingQuestion, type SupervisorService } from "./supervisor-service.js";
+import { createSupervisorBudget, createSupervisorBudgetUsage } from "./supervisor-budget.js";
 import { createSupervisorActions, type SupervisorActions } from "./supervisor-actions.js";
 import { writeTaskStatus } from "./supervisor-tasks.js";
 import { reconcileSupervisor } from "./supervisor-reconcile.js";
@@ -742,13 +744,28 @@ export class PixAcpAgent {
 	private readonly supervisor: SupervisorService;
 	private readonly unsubscribeSupervisorEvents: () => void;
 	private readonly supervisorWaker: SupervisorWaker;
+	private readonly supervisorBudgetUsage = createSupervisorBudgetUsage(async (cwd, ids) =>
+		(await this.sessionMap.list(cwd)).flatMap((record) => {
+			const until = ids.get(record.sessionId);
+			return until !== undefined && !record.subagent ? [[record.piSessionPath, until] as const] : [];
+		}));
+	private readonly supervisorBudget = createSupervisorBudget({
+		usage: this.supervisorBudgetUsage.usage,
+		readHold: (cwd) => this.supervisorStore.readBudgetHold(cwd),
+		writeHold: (cwd, id) => this.supervisorStore.writeBudgetHold(cwd, id),
+		report: (error) => this.options.logger.warn(`supervisor budget state write failed: ${stringifyUnknown(error)}`, { module: "supervisor" }),
+		escalate: async (cwd, detail) => {
+			this.options.logger.warn(`supervisor budget stop: ${cwd} (${detail.used ?? "usage unavailable"} / ${detail.limit} tokens)`, { module: "supervisor" });
+			await this.supervisorStore.appendLedger(cwd, { kind: "budget_exceeded", detail });
+		},
+	});
 	private readonly supervisorActions: SupervisorActions;
 	/** Per-project lock shared by supervisor mutations, user takeover, handover and mandate edits. */
 	private readonly supervisorLocks = new Map<string, Promise<unknown>>();
 	/** Messages the supervisor queued per session (itemId → text): their prompts are not user takeovers. */
 	private readonly supervisorDelivered = new Map<string, Map<string, string>>();
 	/** Serializes `pix/supervisor/open` per project so one click creates one session. */
-	private readonly supervisorOpening = new Map<string, Promise<SupervisorOpenResponse>>();
+	private readonly supervisorOpening = new Map<string, { fresh: boolean; promise: Promise<SupervisorOpenResponse> }>();
 	/** Projects whose registry was reconciled in this ACP lifetime (0077). */
 	private readonly supervisorReconciled = new Set<string>();
 	private disposed = false;
@@ -926,6 +943,8 @@ export class PixAcpAgent {
 			debounceMs: options.supervisorWakeDebounceMs,
 			registryFor: (cwd) => this.supervisorRegistry(cwd),
 			paused: async (cwd) => (await this.supervisorStore.readMandate(cwd)).paused,
+			budgetBlocks: async (cwd, registry) => this.supervisorBudget.blocks(cwd, await this.supervisorStore.readMandate(cwd), registry),
+			exclusive: (cwd, operation) => this.supervisorExclusive(cwd, operation),
 			enqueue: (supervisorId, text, replace) => this.enqueueSupervisorDigest(supervisorId, text, replace),
 			rewrite: (supervisorId, itemId, text) => this.rewriteSupervisorDigest(supervisorId, itemId, text),
 			report: (message) => this.options.logger.warn(message, { module: "supervisor" }),
@@ -1239,6 +1258,8 @@ export class PixAcpAgent {
 		await Promise.all([...this.sessions.values()].map((session) => this.teardownSession(session)));
 		this.unsubscribeSupervisorEvents();
 		this.supervisorWaker.dispose();
+		this.supervisorBudget.dispose();
+		this.supervisorBudgetUsage.dispose();
 		this.sessionEvents.dispose();
 		await Promise.all([...this.retiringForkQueues]);
 		await registryDisposed;
@@ -1608,6 +1629,32 @@ export class PixAcpAgent {
 		const session = this.requireDesktopSession(params.sessionId);
 		await this.ensureDesktopQueuesLoaded(session);
 		const message = await this.desktopQueuedMessage(params);
+		const restoreId = params._meta?.["pix.restoreSupervisorDigest"];
+		if (typeof restoreId === "string" && restoreId.startsWith(SUPERVISOR_DIGEST_ID_PREFIX) && restoreId.length === SUPERVISOR_DIGEST_ID_PREFIX.length + 36) {
+			// Retry an unconsumed wake as a wake, never as SDK steering.
+			return this.supervisorExclusive(session.cwd, async () => {
+				const registry = await this.supervisorStore.readRegistry(session.cwd);
+				const target = registry.supervisorSessionId === params.sessionId ? session
+					: registry.supervisorSessionId && Object.hasOwn(registry.previousSupervisors ?? {}, params.sessionId)
+						? this.sessions.get(registry.supervisorSessionId) : undefined;
+				if (!target || this.sessions.get(target.acpSessionId) !== target || this.disposed) {
+					throw new RequestError(ERROR_INVALID_PARAMS, "supervisor digest no longer has an active session");
+				}
+				if (!target.autoUserMessages.some((item) => item.id === restoreId)) {
+					const restored = { ...message, id: restoreId };
+					target.autoUserMessages.unshift(restored);
+					try {
+						await this.persistDesktopQueues(target);
+					} catch (error) {
+						const index = target.autoUserMessages.indexOf(restored);
+						if (index >= 0) target.autoUserMessages.splice(index, 1);
+						throw error;
+					}
+					await this.notifyDesktopQueueState(target);
+				}
+				return { disposition: "auto", itemId: restoreId };
+			});
+		}
 		await this.takeOverFromSupervisor(session, message.promptText);
 		if (this.clientName === "pix-desktop" && message.displayText.trim()) {
 			void queueRequestHistoryEntry(message.displayText).catch(() => undefined);
@@ -1748,12 +1795,31 @@ export class PixAcpAgent {
 		await this.ensureDesktopQueuesLoaded(session);
 		const state = await session.pi.getState();
 		if (session.activeRun || session.builtinRunning || state.isStreaming || state.isCompacting) return {};
-		const message = session.autoUserMessages.shift();
+		if (session.autoUserMessages[0]?.id.startsWith(SUPERVISOR_DIGEST_ID_PREFIX)) {
+			return await this.supervisorExclusive(session.cwd, async () => {
+				const registry = await this.supervisorStore.readRegistry(session.cwd);
+				let held = registry.supervisorSessionId !== params.sessionId;
+				if (!held) {
+					const mandate = await this.supervisorStore.readMandate(session.cwd);
+					held = mandate.paused || await this.supervisorBudget.blocks(session.cwd, mandate, registry);
+				}
+				if (this.disposed || this.sessions.get(params.sessionId) !== session || session.activeRun || session.builtinRunning) return {};
+				// The decision applies to the current head, even if an edit/withdrawal changed it.
+				// Holding a digest does not block unrelated queued user messages.
+				const index = held ? session.autoUserMessages.findIndex((item) => !item.id.startsWith(SUPERVISOR_DIGEST_ID_PREFIX)) : 0;
+				return index < 0 ? {} : this.takeAutoMessageAt(session, index);
+			});
+		}
+		return this.takeAutoMessageAt(session, 0);
+	}
+
+	private async takeAutoMessageAt(session: AgentSessionState, index: number): Promise<DesktopQueueActionResponse> {
+		const [message] = session.autoUserMessages.splice(index, 1);
 		if (!message) return {};
 		try {
 			await this.persistDesktopQueues(session);
 		} catch (error) {
-			session.autoUserMessages.unshift(message);
+			session.autoUserMessages.splice(index, 0, message);
 			throw error;
 		}
 		await this.notifyDesktopQueueState(session);
@@ -1909,8 +1975,15 @@ export class PixAcpAgent {
 		// worker was invalidated. Do not hydrate a replacement from an interim state.
 		if (sessionPath) await this.retiringForkQueuePaths.get(sessionPath);
 		const persisted = await this.loadDesktopQueues(session.cwd, sessionPath);
+		let auto = persisted.auto;
+		if (auto.some((item) => item.id.startsWith(SUPERVISOR_DIGEST_ID_PREFIX))) {
+			const registry = await this.supervisorRegistry(session.cwd);
+			if (registry && registry.supervisorSessionId !== session.acpSessionId) {
+				auto = auto.filter((item) => !item.id.startsWith(SUPERVISOR_DIGEST_ID_PREFIX));
+			}
+		}
 		session.queueSessionPath = sessionPath;
-		session.autoUserMessages = persisted.auto.map(cloneQueuedUserMessage);
+		session.autoUserMessages = auto.map(cloneQueuedUserMessage);
 		session.deferredUserMessages = persisted.deferred.map(cloneQueuedUserMessage);
 		session.forks.load(persisted.fork ?? []);
 		void session.forks.tryIdle();
@@ -1977,11 +2050,18 @@ export class PixAcpAgent {
 		const replaced = index >= 0 && replace !== undefined;
 		const body = replaced ? replace.text : text;
 		const message: DesktopQueuedUserMessage = {
-			id: replaced ? replace.id : randomUUID(), promptText: body, displayText: body, images: [],
+			id: replaced ? replace.id : `${SUPERVISOR_DIGEST_ID_PREFIX}${randomUUID()}`, promptText: body, displayText: body, images: [],
 		};
+		const previous = session.autoUserMessages[index];
 		if (replaced) session.autoUserMessages[index] = message;
 		else session.autoUserMessages.push(message);
-		await this.persistDesktopQueues(session);
+		try {
+			await this.persistDesktopQueues(session);
+		} catch (error) {
+			const current = session.autoUserMessages.indexOf(message);
+			if (current >= 0) session.autoUserMessages.splice(current, 1, ...(previous ? [previous] : []));
+			throw error;
+		}
 		await this.notifyDesktopQueueState(session);
 		return { itemId: message.id, replaced };
 	}
@@ -2274,6 +2354,7 @@ export class PixAcpAgent {
 		client: ClientCaller,
 		defaultModelOverride?: PixDefaultModel,
 		activityOwner?: string,
+		prepareSupervisor = false,
 	): Promise<{ session: AgentSessionState; configOptions?: SessionConfigOption[] }> {
 		let defaultModel = defaultModelOverride;
 		if (!defaultModel) {
@@ -2287,7 +2368,7 @@ export class PixAcpAgent {
 		let lastError: unknown;
 		for (const candidate of defaultModelCandidates(defaultModel)) {
 			try {
-				session = await this.spawnSession(acpSessionId, cwd, client, candidate, activityOwner);
+				session = await this.spawnSession(acpSessionId, cwd, client, candidate, activityOwner, undefined, prepareSupervisor);
 				break;
 			} catch (error) {
 				lastError = error;
@@ -2879,8 +2960,9 @@ export class PixAcpAgent {
 			throw new RequestError(ERROR_SERVER, "the project supervisor requires Pix Desktop");
 		}
 		const { cwd, patch } = params;
-		return await this.supervisorExclusive(cwd, async () => {
-			const mandate = patch ? await this.supervisorStore.updateMandate(cwd, patch) : await this.supervisorStore.readMandate(cwd);
+		const update = async () => {
+			const previous = await this.supervisorStore.readMandate(cwd);
+			const mandate = patch ? await this.supervisorStore.updateMandate(cwd, patch) : previous;
 			if (patch) {
 				const { policy, ...fields } = patch;
 				await this.supervisorStore.appendLedger(cwd, { kind: "mandate_changed",
@@ -2888,6 +2970,9 @@ export class PixAcpAgent {
 					.catch((error: unknown) => this.options.logger.warn(`supervisor ledger append failed: ${stringifyUnknown(error)}`, { module: "supervisor" }));
 			}
 			const registry = await this.supervisorStore.readRegistry(cwd);
+			const { snapshot, retry } = patch
+				? await this.supervisorBudget.mandateChanged(cwd, previous, mandate, registry, patch.paused === false)
+				: { snapshot: await this.supervisorBudget.status(cwd, mandate, registry), retry: false };
 			let managed = 0;
 			let manual = 0;
 			let running = 0;
@@ -2899,13 +2984,24 @@ export class PixAcpAgent {
 				const live = this.sessions.get(sessionId);
 				if (live && (live.activeRun || live.pendingQuestionIds.size > 0)) running += 1;
 			}
-			return {
+			const response: SupervisorMandateResponse = {
 				enabled: mandate.enabled, paused: mandate.paused, maxConcurrent: mandate.maxConcurrent,
 				maxReworkRounds: mandate.maxReworkRounds, stalledAfterMinutes: mandate.stalledAfterMinutes,
 				...(mandate.workerModelRef === undefined ? {} : { workerModelRef: mandate.workerModelRef }),
-				policy: mandate.policy, managed, manual, running, reworkRounds,
+				policy: mandate.policy, managed, manual, running, reworkRounds, ...snapshot,
 			};
-		});
+			return { response, retry, supervisorId: registry.supervisorSessionId };
+		};
+		const { response, retry, supervisorId } = patch
+			? await this.supervisorWaker.updateAndRecheck(cwd, update)
+			: await this.supervisorExclusive(cwd, update);
+		if (retry) {
+			const session = supervisorId ? this.sessions.get(supervisorId) : undefined;
+			if (session?.autoUserMessages.some((item) => item.id.startsWith(SUPERVISOR_DIGEST_ID_PREFIX))) {
+				await this.notifyDesktopQueueState(session);
+			}
+		}
+		return response;
 	}
 
 	/**
@@ -2918,44 +3014,93 @@ export class PixAcpAgent {
 		return await this.supervisorSessionId(cwd) === sessionId ? path : undefined;
 	}
 
-	/** Open the project's single supervisor session, creating it on first use. */
+	/** Open or explicitly replace the project's single active supervisor conversation. */
 	private openSupervisor(params: SupervisorOpenRequest, client: ClientCaller): Promise<SupervisorOpenResponse> {
 		if (this.clientName !== "pix-desktop") {
 			return Promise.reject(new RequestError(ERROR_SERVER, "the project supervisor requires Pix Desktop"));
 		}
 		const key = resolve(params.cwd);
 		const running = this.supervisorOpening.get(key);
-		if (running) return running;
-		const opening = this.openSupervisorOnce(params.cwd, client)
-			.finally(() => { if (this.supervisorOpening.get(key) === opening) this.supervisorOpening.delete(key); });
-		this.supervisorOpening.set(key, opening);
-		return opening;
+		const fresh = params.fresh === true;
+		if (running && (!fresh || running.fresh)) return running.promise;
+		const promise = (running?.promise.catch(() => undefined) ?? Promise.resolve())
+			.then(() => this.openSupervisorOnce(params.cwd, client, fresh))
+			.finally(() => { if (this.supervisorOpening.get(key)?.promise === promise) this.supervisorOpening.delete(key); });
+		this.supervisorOpening.set(key, { fresh, promise });
+		return promise;
 	}
 
-	private async openSupervisorOnce(cwd: string, client: ClientCaller): Promise<SupervisorOpenResponse> {
+	private async openSupervisorOnce(cwd: string, client: ClientCaller, fresh: boolean): Promise<SupervisorOpenResponse> {
 		const existing = (await this.supervisorStore.readRegistry(cwd)).supervisorSessionId;
-		if (existing) {
-			const record = await this.sessionMap.get(existing);
-			if (record && record.cwd === cwd && !record.subagent) return { sessionId: existing, created: false };
+		const record = existing ? await this.sessionMap.get(existing) : undefined;
+		const previous = record && resolve(record.cwd) === resolve(cwd) && !record.subagent ? record : undefined;
+		if (previous && !fresh) return { sessionId: previous.sessionId, created: false };
+		if (existing && !previous) {
 			// A missing session is reported, never silently replaced by a duplicate.
 			this.options.logger.warn(`supervisor session ${existing} is missing; creating a new one`, { module: "supervisor" });
 			await this.supervisorStore.appendLedger(cwd, { kind: "supervisor-missing", sessionId: existing });
 		}
 		const sessionId = randomUUID();
-		// Register first: the runtime decides on the supervisor extension at spawn.
-		await this.supervisorStore.updateRegistry(cwd, (current) => ({ ...current, supervisorSessionId: sessionId }));
+		let candidateQueuePath: string | undefined;
+		// The candidate can load the tool now, but the registry still denies its
+		// requests until the conversation and its queue are ready to take over.
 		try {
-			const { session } = await this.startNewSession(sessionId, cwd, client);
+			const { session } = await this.startNewSession(sessionId, cwd, client, undefined, undefined, true);
 			await session.pi.setSessionName(SUPERVISOR_SESSION_TITLE).catch((error: unknown) => {
 				this.options.logger.warn(`supervisor title failed: ${stringifyUnknown(error)}`, { module: "supervisor" });
 			});
 			await this.sessionMap.touch(sessionId, SUPERVISOR_SESSION_TITLE);
+			if (!await this.sessionMap.get(sessionId)) throw new RequestError(ERROR_SERVER, "Could not save the new supervisor conversation");
+			await this.supervisorWaker.updateAndRecheck(cwd, async () => {
+				const old = previous ? this.sessions.get(previous.sessionId) : undefined;
+				if (old) {
+					const state = await old.pi.getState();
+					if (old.activeRun || old.builtinRunning || old.pendingDialogIds.size || state.isStreaming || state.isCompacting) {
+						throw new RequestError(ERROR_SERVER, "Wait for the current supervisor turn to finish before starting a new conversation");
+					}
+				}
+				const queued = old ? old.autoUserMessages
+					: previous ? (await this.loadDesktopQueues(cwd, previous.piSessionPath)).auto : [];
+				const digests = queued.filter((item) => item.id.startsWith(SUPERVISOR_DIGEST_ID_PREFIX));
+				// Copy before publishing. A failed queue write cannot revoke the old
+				// supervisor, and after publish only the new copy is eligible to run.
+				if (digests.length) {
+					candidateQueuePath = session.queueSessionPath;
+					session.autoUserMessages.push(...digests.map(cloneQueuedUserMessage));
+					await this.persistDesktopQueues(session);
+				}
+				if (this.disposed || this.sessions.get(sessionId) !== session) throw new RequestError(ERROR_SERVER, "The new supervisor runtime closed during startup");
+				await this.supervisorStore.updateRegistry(cwd, (current) => {
+					if (current.supervisorSessionId !== existing) throw new RequestError(ERROR_SERVER, "The project supervisor changed; try again");
+					return { ...current, supervisorSessionId: sessionId,
+						...(existing ? { previousSupervisors: { ...current.previousSupervisors, [existing]: Date.now() } } : {}) };
+				});
+				if (old && digests.length) {
+					old.autoUserMessages = old.autoUserMessages.filter((item) => !item.id.startsWith(SUPERVISOR_DIGEST_ID_PREFIX));
+					void this.notifyDesktopQueueState(old);
+				}
+				return { retry: true, ...(existing ? { rotation: { from: existing, to: sessionId } } : {}) };
+			});
 		} catch (error) {
-			await this.supervisorStore.updateRegistry(cwd, (current) => current.supervisorSessionId === sessionId
-				? { version: current.version, sessions: current.sessions } : current).catch(() => undefined);
-			throw error;
+			this.options.logger.warn(`supervisor open failed: ${stringifyUnknown(error)}`, { module: "supervisor" });
+			const candidate = this.sessions.get(sessionId);
+			if (candidate) await this.teardownSession(candidate);
+			const cleanup = [this.sessionMap.delete(sessionId)];
+			if (candidateQueuePath) cleanup.push(this.options.saveDesktopQueues
+				? this.saveDesktopQueues(cwd, candidateQueuePath, { auto: [], deferred: [], fork: [] })
+				: removeDesktopQueueTab(cwd, candidateQueuePath));
+			for (const result of await Promise.allSettled(cleanup)) {
+				if (result.status === "rejected") this.options.logger.warn(`supervisor candidate cleanup failed: ${stringifyUnknown(result.reason)}`, { module: "supervisor" });
+			}
+			if (error instanceof RequestError) throw error;
+			throw new RequestError(ERROR_SERVER, `Could not prepare the new supervisor conversation: ${stringifyUnknown(error)}`);
 		}
-		await this.supervisorStore.appendLedger(cwd, { kind: "supervisor-created", sessionId });
+		if (this.options.supervisorExtensionPath) this.reconcileSupervisorOnce(cwd);
+		this.notifySupervisorCatalogChanged(client, cwd);
+		await this.supervisorStore.appendLedger(cwd, previous
+			? { kind: "supervisor-rotated", sessionId, detail: { previousSessionId: previous.sessionId } }
+			: { kind: "supervisor-created", sessionId })
+			.catch((error: unknown) => this.options.logger.warn(`supervisor ledger append failed: ${stringifyUnknown(error)}`, { module: "supervisor" }));
 		return { sessionId, created: true };
 	}
 
@@ -2965,9 +3110,10 @@ export class PixAcpAgent {
 			const before = await this.supervisorStore.readRegistry(cwd);
 			if (before.supervisorSessionId !== sessionId && !before.sessions[sessionId]) return;
 			await this.supervisorStore.updateRegistry(cwd, (current) => {
+				const { supervisorSessionId, ...rest } = current;
 				const { [sessionId]: _removed, ...sessions } = current.sessions;
-				return current.supervisorSessionId === sessionId
-					? { version: current.version, sessions }
+				return supervisorSessionId === sessionId
+					? { ...rest, sessions }
 					: { ...current, sessions };
 			});
 			this.supervisorWaker.forget(cwd, sessionId);
@@ -3078,8 +3224,9 @@ export class PixAcpAgent {
 		defaultModel?: PixDefaultModel,
 		activityOwner?: string,
 		startupOverride?: PiRpcClientOptions,
+		prepareSupervisor = false,
 	): Promise<AgentSessionState> {
-		const pending = this.startSession(acpSessionId, cwd, client, defaultModel, activityOwner, startupOverride);
+		const pending = this.startSession(acpSessionId, cwd, client, defaultModel, activityOwner, startupOverride, prepareSupervisor);
 		this.pendingSpawns.add(pending);
 		void pending.finally(() => this.pendingSpawns.delete(pending)).catch(() => {});
 		return pending;
@@ -3092,6 +3239,7 @@ export class PixAcpAgent {
 		defaultModel?: PixDefaultModel,
 		activityOwner?: string,
 		startupOverride?: PiRpcClientOptions,
+		prepareSupervisor = false,
 	): Promise<AgentSessionState> {
 		if (this.disposed) throw new RequestError(ERROR_SERVER, "adapter is shutting down");
 		const toolsSuiteExtensionPath = desktopToolsSuiteExtensionPath({
@@ -3118,7 +3266,8 @@ export class PixAcpAgent {
 			this.clientName === "pix-desktop" ? this.options.htmlSandboxExtensionPath : undefined,
 			this.options.wikiConflictsExtensionPath,
 		);
-		const supervisorExtension = startupOverride ? undefined : await this.supervisorExtensionFor(cwd, acpSessionId);
+		const supervisorExtension = startupOverride ? undefined : prepareSupervisor
+			? this.options.supervisorExtensionPath : await this.supervisorExtensionFor(cwd, acpSessionId);
 		const pi = this.options.createPiClient({
 			...startup,
 			...(supervisorExtension ? { args: [...(startup.args ?? []), "--extension", supervisorExtension] } : {}),
@@ -3204,7 +3353,7 @@ export class PixAcpAgent {
 				`failed to start pi (${this.options.piEntry}): ${stringifyUnknown(error)}`,
 			);
 		}
-		if (supervisorExtension) this.reconcileSupervisorOnce(cwd);
+		if (supervisorExtension && !prepareSupervisor) this.reconcileSupervisorOnce(cwd);
 		void session.forks.tryIdle();
 		return session;
 	}
@@ -4495,25 +4644,40 @@ export class PixAcpAgent {
 				this.options.logger.debug(`request history save failed: ${stringifyUnknown(error)}`);
 			});
 		}
+		const supervisorDigest = input.text.startsWith("[Supervisor digest] ");
 		const run: ActiveRun = {
 			cancelled: false,
 			slashPrompt: isSlashPrompt,
-			...(!isSlashPrompt && input.text.trim() && !input.text.startsWith("[Supervisor digest] ") ? { userPromptAt: Date.now() } : {}),
+			...(!isSlashPrompt && input.text.trim() && !supervisorDigest ? { userPromptAt: Date.now() } : {}),
 			started: false,
 			stopReason: undefined,
 			resolve: () => {},
 			reject: () => {},
 		};
-		void this.setAgentControlState(session, "idle");
-		session.activeRun = run;
 		const settled = new Promise<StopReason>((resolve, reject) => {
 			run.resolve = resolve;
 			run.reject = reject;
 		});
-		// onExit can reject the run before prompt() reaches the final await (for
-		// example while session metadata is being synchronized). Handle that
-		// rejection immediately so Node never reports it as transiently unhandled.
+		// A process exit may reject before we reach the final await.
 		void settled.catch(() => {});
+		const ownsRun = () => session.activeRun === run;
+		const claimRun = () => {
+			void this.setAgentControlState(session, "idle");
+			session.activeRun = run;
+		};
+		if (supervisorDigest && this.clientName === "pix-desktop") {
+			await this.supervisorExclusive(session.cwd, async () => {
+				const registry = await this.supervisorStore.readRegistry(session.cwd);
+				if (Object.hasOwn(registry.previousSupervisors ?? {}, params.sessionId) && registry.supervisorSessionId !== params.sessionId) {
+					throw new RequestError(ERROR_SERVER, "The supervisor conversation changed; retry the wake in the new conversation");
+				}
+				if (this.sessions.get(params.sessionId) !== session || session.activeRun || session.builtinRunning) {
+					throw new RequestError(ERROR_SERVER, "The supervisor runtime is no longer idle");
+				}
+				claimRun();
+			});
+			if (!ownsRun()) return { stopReason: await settled };
+		} else claimRun();
 
 		try {
 			await session.pi.prompt(input.text, input.images.length > 0 ? input.images : undefined);
@@ -4530,10 +4694,10 @@ export class PixAcpAgent {
 		// Input handled there starts no agent run and therefore emits no
 		// agent_settled event; resolve it here instead of leaving ACP clients
 		// waiting forever. Normal agent prompts are already streaming by now.
-		if (session.activeRun === run && !run.started) {
+		if (ownsRun() && !run.started) {
 			try {
 				const state = await session.pi.getState();
-				if (!state.isStreaming && session.activeRun === run && !run.started) {
+				if (!state.isStreaming && ownsRun() && !run.started) {
 					this.resolveActiveRun(session, "end_turn");
 				}
 			} catch (error) {

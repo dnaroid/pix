@@ -9,8 +9,9 @@ import { SUPERVISOR_MANDATE_LIMITS } from "./supervisor-contract.js";
  * already observes; no model is involved. Consumers subscribe in-process.
  *
  * - `settled`: the ACP run finished, with its stop reason and the files the
- *   session changed through successful write/edit tool calls so far;
- * - `file_changed`: a successful write/edit, including repeat writes;
+ *   session changed through successful write/edit/apply_patch calls so far;
+ * - `file_changed`: one file of a successful write/edit/apply_patch, including
+ *   repeat writes (shell writes are not tracked);
  * - `question`: the session waits on a `question` dialog;
  * - `error`: model, compaction, run or process failure;
  * - `stalled`: a running turn produced no event for `stalledAfterMinutes`,
@@ -157,6 +158,63 @@ function toolPath(args: unknown): string | undefined {
 	return typeof path === "string" && path.length > 0 ? path : undefined;
 }
 
+const PATCH_FILE_HEADER = /^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gm;
+const HUNK_HEADER = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/;
+
+/**
+ * Files named by an `apply_patch` input: every Begin-patch Add/Update/Delete
+ * header and both sides of a move; for a unified diff, both paths of each
+ * `---`/`+++` header pair, without `a/`/`b/` prefixes and `/dev/null`.
+ */
+export function patchPaths(args: unknown): string[] {
+	const record = asRecord(args);
+	const input = typeof args === "string" ? args : record?.["input"] ?? record?.["patch"];
+	if (typeof input !== "string") return [];
+	const text = input.replace(/\r\n?/g, "\n");
+	const paths = new Set<string>();
+	// The tool also accepts a Begin-patch block wrapped in <<EOF … EOF.
+	if (/^\s*(?:\*\*\* Begin Patch\b|<<['"]?EOF['"]?\s*\n\s*\*\*\* Begin Patch\b)/.test(text)) {
+		for (const match of text.matchAll(PATCH_FILE_HEADER)) {
+			const path = match[1]?.trim();
+			if (path) paths.add(path);
+		}
+	} else {
+		// Hunk bodies are skipped by their `@@ -a,b +c,d @@` line counts, so a
+		// removed line `-- x` or an added line `++ x` is never read as a header.
+		const lines = text.split("\n");
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i] ?? "";
+			const hunk = HUNK_HEADER.exec(line);
+			if (hunk) {
+				let oldLeft = hunk[1] === undefined ? 1 : Number(hunk[1]);
+				let newLeft = hunk[2] === undefined ? 1 : Number(hunk[2]);
+				while ((oldLeft > 0 || newLeft > 0) && i + 1 < lines.length) {
+					const body = lines[++i] ?? "";
+					if (body.startsWith("\\")) continue;
+					if (body.startsWith("-")) oldLeft -= 1;
+					else if (body.startsWith("+")) newLeft -= 1;
+					else { oldLeft -= 1; newLeft -= 1; }
+				}
+				continue;
+			}
+			const next = lines[i + 1] ?? "";
+			if (!line.startsWith("--- ") || !next.startsWith("+++ ")) continue;
+			for (const header of [line, next]) {
+				const path = header.slice(4).split("\t")[0]?.trim().replace(/^[ab]\//, "");
+				if (path && path !== "/dev/null") paths.add(path);
+			}
+			i += 1;
+		}
+	}
+	return [...paths];
+}
+
+/** `apply_patch` reports the files it actually changed in `details.changedFiles`. */
+function resultChangedFiles(result: unknown): string[] {
+	const files = asRecord(asRecord(result)?.["details"])?.["changedFiles"];
+	return Array.isArray(files) ? files.filter((file): file is string => typeof file === "string" && file.trim().length > 0) : [];
+}
+
 function workspacePath(cwd: string, path: string): string {
 	const absolute = resolve(cwd, path);
 	const inside = relative(cwd, absolute);
@@ -222,7 +280,7 @@ export function createSessionEventMonitor(options: SessionEventMonitorOptions = 
 	class Observer implements SessionEventObserver {
 		private disposed = false;
 		private running = false;
-		private readonly tools = new Map<string, { name: string; path: string | undefined }>();
+		private readonly tools = new Map<string, { name: string; paths: readonly string[] }>();
 		private readonly questions = new Set<string>();
 		private timer: unknown;
 		private lastActivity = now();
@@ -246,7 +304,10 @@ export function createSessionEventMonitor(options: SessionEventMonitorOptions = 
 					const id = event["toolCallId"];
 					const name = event["toolName"];
 					if (typeof id === "string" && typeof name === "string") {
-						this.tools.set(id, { name: name.toLowerCase(), path: toolPath(event["args"]) });
+						const lower = name.toLowerCase();
+						const path = toolPath(event["args"]);
+						const paths = lower === "apply_patch" ? patchPaths(event["args"]) : path ? [path] : [];
+						this.tools.set(id, { name: lower, paths });
 					}
 					break;
 				}
@@ -254,8 +315,15 @@ export function createSessionEventMonitor(options: SessionEventMonitorOptions = 
 					const id = event["toolCallId"];
 					const tool = typeof id === "string" ? this.tools.get(id) : undefined;
 					if (typeof id === "string") this.tools.delete(id);
-					if (tool?.path && event["isError"] !== true && (tool.name === "write" || tool.name === "edit")) {
-						this.touch(workspacePath(this.cwd, tool.path));
+					if (!tool || event["isError"] === true) break;
+					if (tool.name === "write" || tool.name === "edit") {
+						for (const path of tool.paths) this.touch(workspacePath(this.cwd, path));
+					} else if (tool.name === "apply_patch") {
+						// Patch headers name both sides of a move; the result's
+						// changedFiles covers inputs the header parser cannot read.
+						const paths = new Set<string>();
+						for (const path of [...tool.paths, ...resultChangedFiles(event["result"])]) paths.add(workspacePath(this.cwd, path));
+						for (const path of paths) this.touch(path);
 					}
 					break;
 				}

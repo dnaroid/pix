@@ -1,24 +1,43 @@
 import assert from "node:assert/strict";
+import { appendFile, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
+import { createSupervisorBudget, createSupervisorBudgetUsage, SUPERVISOR_BUDGET_WINDOW_MS as WINDOW } from "../src/acp/supervisor-budget.js";
 import { createSupervisorWaker } from "../src/acp/supervisor-wake.js";
 import { createSessionEventMonitor, type SessionEvent, type SessionEventObserver } from "../src/acp/session-events.js";
-import type { ManagedSession } from "../src/acp/supervisor-store.js";
+import { DEFAULT_MANDATE, type ManagedSession, type SupervisorMandate } from "../src/acp/supervisor-store.js";
 
-function harness(options: { paused?: boolean; supervisor?: string | undefined } = {}) {
+function harness(options: { paused?: boolean; supervisor?: string | undefined; budgetTokens?: number } = {}) {
 	const timers = new Set<() => void>();
 	const queue: { id: string; text: string }[] = [];
-	let paused = options.paused ?? false;
+	let mandate: SupervisorMandate = { ...DEFAULT_MANDATE, ...(options.budgetTokens === undefined ? {} : { budgetTokens: options.budgetTokens }), paused: options.paused ?? false };
 	const supervisorSessionId = "supervisor" in options ? options.supervisor : "sup";
 	const sessions: Record<string, ManagedSession> = Object.fromEntries(["w1", "w2", "w3"].map((id) => [id,
 		{ item: { kind: "prompt" }, mode: "managed", registeredAt: 0, reworkRounds: 0 },
 	]));
 	let next = 0;
+	let now = WINDOW + 100;
+	let queries = 0;
+	const spend: { at: number; tokens: number; id: string }[] = [];
+	const stops: { used: number | null; limit: number }[] = [];
+	const registry = () => ({ version: 1 as const, ...(supervisorSessionId ? { supervisorSessionId } : {}), sessions: { ...sessions } });
+	const budget = createSupervisorBudget({
+		now: () => now,
+		usage: async (_cwd, ids, at) => {
+			queries += 1;
+			return spend.filter((point) => ids.has(point.id) && point.at >= at - WINDOW && point.at <= at)
+				.reduce((sum, point) => sum + point.tokens, 0);
+		},
+		escalate: async (_cwd, detail) => { stops.push(detail); },
+	});
 	const waker = createSupervisorWaker({
 		debounceMs: 10,
 		setTimer: (callback) => { timers.add(callback); return callback; },
 		clearTimer: (handle) => { timers.delete(handle as () => void); },
-		registryFor: async () => ({ version: 1, ...(supervisorSessionId ? { supervisorSessionId } : {}), sessions: { ...sessions } }),
-		paused: async () => paused,
+		registryFor: async () => registry(),
+		paused: async () => mandate.paused,
+		budgetBlocks: (cwd, registry) => budget.blocks(cwd, mandate, registry),
 		enqueue: async (_sup, text, replace) => {
 			const existing = queue.find((item) => item.id === replace?.id);
 			if (existing && replace) { existing.text = replace.text; return { itemId: existing.id, replaced: true }; }
@@ -41,7 +60,23 @@ function harness(options: { paused?: boolean; supervisor?: string | undefined } 
 		for (const callback of pending) callback();
 		await waker.whenIdle();
 	};
-	return { waker, queue, timers, fire, sessions, setPaused: (value: boolean) => { paused = value; } };
+	return {
+		waker, queue, timers, fire, sessions, stops, budget,
+		get queries() { return queries; },
+		setPaused: (paused: boolean) => { mandate = { ...mandate, paused }; },
+		status: () => budget.status("/p", mandate, registry()),
+		advance: (ms: number) => { now += ms; },
+		spend: (id: string, tokens: number) => { spend.push({ id, at: now, tokens }); },
+		async change(patch: { budgetTokens?: number | null; paused?: boolean }) {
+			await waker.updateAndRecheck("/p", async () => {
+				const previous = mandate;
+				const { budgetTokens, ...rest } = patch;
+				mandate = { ...mandate, ...rest, ...(budgetTokens == null ? {} : { budgetTokens }) };
+				if (budgetTokens === null) delete (mandate as { budgetTokens?: number }).budgetTokens;
+				return budget.mandateChanged("/p", previous, mandate, registry(), patch.paused === false);
+			});
+		},
+	};
 }
 
 const settled = (sessionId: string): SessionEvent => ({ type: "settled", sessionId, at: 1, stopReason: "end_turn", touchedFiles: ["a.ts"] });
@@ -51,6 +86,11 @@ const fileChanged = (sessionId: string, path = "src/a.ts"): SessionEvent => ({ t
 function edit(observer: SessionEventObserver, path: string) {
 	observer.event({ type: "tool_execution_start", toolCallId: "edit", toolName: "edit", args: { path } });
 	observer.event({ type: "tool_execution_end", toolCallId: "edit", isError: false });
+}
+
+function patch(observer: SessionEventObserver, input: string) {
+	observer.event({ type: "tool_execution_start", toolCallId: "patch", toolName: "apply_patch", args: { input } });
+	observer.event({ type: "tool_execution_end", toolCallId: "patch", isError: false });
 }
 
 test("several worker events produce one wake digest", async () => {
@@ -129,6 +169,148 @@ test("pause holds the wake but keeps the digest", async () => {
 	await h.fire();
 	assert.equal(h.queue.length, 1);
 	assert.match(h.queue[0]!.text, /w1:[\s\S]*w2:/);
+});
+
+test("without a token budget a wake never queries usage", async () => {
+	const h = harness();
+	h.spend("sup", 999);
+	h.waker.push("/p", settled("w1"));
+	await h.fire();
+	assert.equal(h.queue.length, 1);
+	assert.equal(h.queries, 0);
+	assert.deepEqual(await h.status(), {});
+});
+
+test("only the supervisor and currently managed sessions contribute to the budget", async () => {
+	const h = harness({ budgetTokens: 10 });
+	h.spend("sup", 3);
+	h.spend("w1", 6);
+	h.spend("w2", 100);
+	h.spend("w3", 100);
+	h.sessions.w2 = { ...h.sessions.w2!, mode: "manual" };
+	delete h.sessions.w3;
+	h.waker.push("/p", settled("w1"));
+	await h.fire();
+	assert.equal(h.queue.length, 1);
+	assert.deepEqual(await h.status(), { budgetTokens: 10, budgetUsedTokens: 9 });
+});
+
+test("at the limit holds and coalesces at/over-budget events; expiry requires an explicit resume", async () => {
+	const h = harness({ budgetTokens: 10 });
+	h.spend("sup", 10);
+	h.waker.push("/p", settled("w1"));
+	await h.fire();
+	h.spend("w2", 5);
+	h.waker.push("/p", stalled("w2"));
+	await h.fire();
+	await h.change({ paused: false }); // still over
+	assert.deepEqual(h.stops, [{ used: 10, limit: 10 }]);
+	assert.equal(h.queue.length, 0);
+	h.advance(WINDOW + 1);
+	h.waker.push("/p", settled("w3"));
+	await h.fire();
+	assert.deepEqual(await h.status(), { budgetTokens: 10, budgetUsedTokens: 0, budgetHeld: true });
+	assert.equal(h.timers.size, 0);
+	assert.equal(h.queue.length, 0);
+	await h.change({ paused: false });
+	await h.change({ paused: false });
+	assert.equal(h.queue.length, 1);
+	assert.match(h.queue[0]!.text, /w1:[\s\S]*w2:[\s\S]*w3:/);
+	assert.equal(h.stops.length, 1);
+});
+
+test("unrelated mandate edits and an insufficient raise do not release a hold; a raise or clear does", async () => {
+	for (const budgetTokens of [12, null]) {
+		const h = harness({ budgetTokens: 5 });
+		h.spend("w1", 11);
+		h.waker.push("/p", settled("w1"));
+		await h.fire();
+		await h.change({});
+		await h.change({ budgetTokens: 11 });
+		assert.deepEqual(h.stops, [{ used: 11, limit: 5 }]);
+		assert.equal(h.queue.length, 0);
+		await h.change({ budgetTokens });
+		assert.equal(h.queue.length, 1);
+		assert.equal((await h.status()).budgetHeld, undefined);
+	}
+});
+
+test("pause takes precedence, and clearing the budget does not bypass pause", async () => {
+	const h = harness({ paused: true, budgetTokens: 1 });
+	h.spend("sup", 1);
+	h.waker.push("/p", settled("w1"));
+	await h.fire();
+	assert.equal(h.queries, 0);
+	await h.change({ paused: false });
+	assert.equal(h.stops.length, 1);
+	await h.change({ paused: true });
+	await h.change({ budgetTokens: null });
+	assert.equal(h.queue.length, 0);
+	await h.change({ paused: false });
+	assert.equal(h.queue.length, 1);
+});
+
+test("dispose while held clears the debounce and prevents retry", async () => {
+	const h = harness({ budgetTokens: 1 });
+	h.spend("sup", 1);
+	h.waker.push("/p", settled("w1"));
+	await h.fire();
+	h.waker.push("/p", settled("w2"));
+	assert.equal(h.timers.size, 1);
+	h.waker.dispose();
+	h.budget.dispose();
+	assert.equal(h.timers.size, 0);
+	await h.change({ budgetTokens: null });
+	assert.equal(h.queue.length, 0);
+	assert.equal(h.stops.length, 1);
+});
+
+test("a saved hold survives adapter recreation and window expiry until Resume", async () => {
+	let saved: string | undefined;
+	let used = 10;
+	let stopCount = 0;
+	const deps = {
+		usage: async () => used,
+		readHold: async () => saved,
+		writeHold: async (_cwd: string, id: string | undefined) => { saved = id; },
+		escalate: async () => { stopCount++; },
+	};
+	const mandate = { ...DEFAULT_MANDATE, budgetTokens: 10 };
+	const registry = { version: 1 as const, supervisorSessionId: "sup", sessions: {} };
+	const first = createSupervisorBudget(deps);
+	assert.equal(await first.blocks("/p", mandate, registry), true);
+	first.dispose();
+	used = 0;
+	const next = createSupervisorBudget(deps);
+	assert.equal(await next.blocks("/p", mandate, registry), true);
+	assert.equal(stopCount, 1);
+	assert.equal((await next.mandateChanged("/p", mandate, mandate, registry, true)).retry, true);
+	assert.equal(await next.blocks("/p", mandate, registry), false);
+});
+
+test("JSONL usage tails handle expiry, append, forks, replacement and missing files", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "pix-supervisor-budget-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	const sup = join(dir, "sup.jsonl"), fork = join(dir, "fork.jsonl");
+	const at = WINDOW + 1000;
+	const entry = (id: string, timestamp: number, totalTokens: number) => JSON.stringify({ type: "message", id,
+		message: { role: "assistant", timestamp, usage: { totalTokens, input: 1, output: 1 } } });
+	const copied = entry("copied", at - WINDOW, 10);
+	await writeFile(sup, `${entry("expired", at - WINDOW - 1, 100)}\n${copied}\n${entry("fresh", at, 7)}`);
+	const usage = createSupervisorBudgetUsage(async (_cwd, ids) => [...ids].map(([id, until]) => [id === "fork" ? fork : sup, until] as const));
+	t.after(usage.dispose);
+	const ids = new Map([["sup", at], ["fork", at]]);
+	assert.equal(await usage.usage(dir, ids, at), 10, "unfinished line and uncreated file are ignored");
+	await appendFile(sup, "\n");
+	await writeFile(fork, `${copied}\n${entry("fork", at, 9)}\n`);
+	assert.equal(await usage.usage(dir, ids, at), 26, "totalTokens, including cache; copied ancestor counted once");
+	assert.equal(await usage.usage(dir, ids, at + 1), 16, "expiry without file changes");
+	assert.equal(await usage.usage(dir, new Map([["sup", at]]), at + 1), 7, "removed member excluded");
+	assert.equal(await usage.usage(dir, new Map([["sup", at - 1]]), at + 1), 0, "post-rotation usage excluded");
+	const replacement = join(dir, "replacement.jsonl");
+	await writeFile(replacement, `${entry("new", at, 3)}\n`);
+	await rename(replacement, sup);
+	assert.equal(await usage.usage(dir, ids, at + 1), 12);
 });
 
 test("dispose releases pending timers and ignores later events", async () => {
@@ -349,4 +531,21 @@ test("forget of a still-registered session changes nothing", async () => {
 	h.waker.forget("/p", "w1");
 	await h.waker.whenIdle();
 	assert.deepEqual(h.queue.map((item) => item.text), [before]);
+});
+
+test("apply_patch edits and moves conflict with another managed worker's edit", async (t) => {
+	const h = harness();
+	const monitor = createSessionEventMonitor();
+	t.after(() => { monitor.dispose(); h.waker.dispose(); });
+	monitor.subscribe((event) => h.waker.push("/p", event));
+	const w1 = monitor.observe("w1", "/p");
+	const w2 = monitor.observe("w2", "/p");
+	const w3 = monitor.observe("w3", "/p");
+	edit(w1, "src/a.ts");
+	patch(w2, "*** Begin Patch\n*** Update File: src/a.ts\n@@\n-x\n+y\n*** End Patch");
+	patch(w3, "*** Begin Patch\n*** Update File: src/old.ts\n*** Move to: src/a.ts\n*** End Patch");
+	await h.fire();
+	assert.equal(h.queue.length, 1);
+	assert.match(h.queue[0]!.text, /w2: file conflict with w1: src\/a\.ts/);
+	assert.match(h.queue[0]!.text, /w3: file conflict with w1: src\/a\.ts; file conflict with w2: src\/a\.ts/);
 });

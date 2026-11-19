@@ -354,8 +354,8 @@ export class AcpClient {
     return this.pix.planLaunches(request);
   }
 
-  openSupervisor(cwd: string): Promise<{ sessionId: string; created: boolean }> {
-    return this.pix.openSupervisor(cwd);
+  openSupervisor(cwd: string, fresh?: boolean): Promise<{ sessionId: string; created: boolean }> {
+    return this.pix.openSupervisor(cwd, fresh);
   }
 
   supervisorHandover(cwd: string, sessionId: string, supervised: boolean): Promise<{ supervised: boolean }> {
@@ -371,8 +371,9 @@ export class AcpClient {
     prompt: readonly ContentBlock[],
     displayText: string,
     fileImages: readonly PromptFileImage[] = [],
+    restoreSupervisorDigest?: string,
   ): Promise<{ disposition: "steering" | "auto"; itemId: string }> {
-    return this.pix.queueMessage(sessionId, prompt, displayText, fileImages);
+    return this.pix.queueMessage(sessionId, prompt, displayText, fileImages, restoreSupervisorDigest);
   }
 
   deferMessage(

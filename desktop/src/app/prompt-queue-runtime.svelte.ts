@@ -1,4 +1,5 @@
 import type { ContentBlock } from "@agentclientprotocol/sdk";
+import { SUPERVISOR_DIGEST_ID_PREFIX } from "../../../acp/src/acp/supervisor-contract";
 import type {
   AcpClient,
   PromptFileImage,
@@ -42,6 +43,7 @@ export function queuedMessageBlocks(message: QueuedUserMessage): ContentBlock[] 
 export function createPromptQueueRuntime(options: PromptQueueRuntimeOptions) {
   let queueItemsBySession = $state<Map<string, QueueState["items"]>>(new Map());
   const autoFlushInProgress = new Set<string>();
+  const autoFlushRequested = new Set<string>();
   const explicitSendHolds = new Map<string, Set<symbol>>();
 
   /** Hold the idle gap while a selected queued message replaces the current run. */
@@ -62,7 +64,8 @@ export function createPromptQueueRuntime(options: PromptQueueRuntimeOptions) {
     const next = new Map(queueItemsBySession);
     next.set(state.sessionId, [...state.items]);
     queueItemsBySession = next;
-    if (!options.isRunning(state.sessionId)) void flushAutoQueue(state.sessionId);
+    if (autoFlushInProgress.has(state.sessionId)) autoFlushRequested.add(state.sessionId);
+    else if (!options.isRunning(state.sessionId)) void flushAutoQueue(state.sessionId);
   }
 
   function handleQueueConsumed(sessionId: string, message: QueuedUserMessage): void {
@@ -108,10 +111,16 @@ export function createPromptQueueRuntime(options: PromptQueueRuntimeOptions) {
       ) {
         const message = await requestClient.takeAutoMessage(sessionId);
         if (!message) return;
+        const digestId = message.id.startsWith(SUPERVISOR_DIGEST_ID_PREFIX) ? message.id : undefined;
+        const blocks = queuedMessageBlocks(message);
+        const requeue = () => digestId
+          ? requestClient.queueMessage(sessionId, blocks, message.displayText, [], digestId)
+          : requestClient.queueMessage(sessionId, blocks, message.displayText);
         if (autoQueueSuppressed(sessionId)) {
           // An explicit send can acquire ownership while this request is in
           // flight. Preserve the removed payload without racing its prompt.
-          await requestClient.deferMessage(sessionId, queuedMessageBlocks(message), message.displayText);
+          if (digestId) await requeue();
+          else await requestClient.deferMessage(sessionId, blocks, message.displayText);
           return;
         }
         const transcriptMessageId = options.appendQueuedMessage(sessionId, message);
@@ -119,16 +128,12 @@ export function createPromptQueueRuntime(options: PromptQueueRuntimeOptions) {
           await options.runPromptRequest(
             requestClient,
             sessionId,
-            queuedMessageBlocks(message),
+            blocks,
             [],
             transcriptMessageId,
           );
         } catch (error) {
-          await requestClient.queueMessage(
-            sessionId,
-            queuedMessageBlocks(message),
-            message.displayText,
-          ).catch(() => undefined);
+          await requeue().catch(() => undefined);
           throw error;
         }
       }
@@ -136,6 +141,7 @@ export function createPromptQueueRuntime(options: PromptQueueRuntimeOptions) {
       if (requestClient === options.client() && sessionId === options.activeSessionId()) options.reportError(error);
     } finally {
       autoFlushInProgress.delete(sessionId);
+      if (autoFlushRequested.delete(sessionId) && requestClient === options.client()) void flushAutoQueue(sessionId);
     }
   }
 
@@ -146,12 +152,14 @@ export function createPromptQueueRuntime(options: PromptQueueRuntimeOptions) {
       queueItemsBySession = next;
     }
     autoFlushInProgress.delete(sessionId);
+    autoFlushRequested.delete(sessionId);
     explicitSendHolds.delete(sessionId);
   }
 
   function reset(): void {
     queueItemsBySession = new Map();
     autoFlushInProgress.clear();
+    autoFlushRequested.clear();
     explicitSendHolds.clear();
   }
 

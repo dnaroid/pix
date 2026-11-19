@@ -71,10 +71,11 @@ Zed (Agent Panel)  <--ACP JSON-RPC over stdio-->  pix-acp  <--JSONL RPC over std
   `settled`, `question`, `error`, `stalled` and `checklist` events for
   `PixAcpAgent.subscribeSessionEvents`. These events are not sent over the ACP
   protocol. Observers are disposed on teardown and forgotten on session delete.
-- Project supervisor phase 1, partial (decision [0077](../decisions/0077-project-supervisor-session.md)):
+- Project supervisor, implemented (decision [0077](../decisions/0077-project-supervisor-session.md)):
   private `pix/supervisor/open` (`src/acp/supervisor-contract.ts`,
   `src/acp/supervisor-service.ts`) opens or reuses one registered supervisor
-  session per project, recorded in `.pi/supervisor/registry.json`. Only that
+  session per project, recorded in `.pi/supervisor/registry.json`. `fresh: true`
+  replaces it with a new blank conversation (old ID kept in `previousSupervisors`). Only that
   session of a Pix Desktop client loads the `supervisor` extension
   (`PIX_SUPERVISOR_BRIDGE=1`, `src/extensions/supervisor.ts`); its read-only
   `status` and `read` ops answer over the correlated bridge in

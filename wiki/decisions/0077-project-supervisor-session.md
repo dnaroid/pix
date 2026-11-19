@@ -1,6 +1,6 @@
 # 0077 — Project supervisor session on autopilot
 
-- Status: accepted (design direction; phases 0–1 and partial phase 2 implemented: mandate UI, send/cancel/close/reopen/escalate with guards, startup reconciliation, user takeover; start not implemented)
+- Status: accepted (design direction; implemented: all plan phases 0–3; manual Desktop acceptance pending)
 - Recorded: 2026-11-17
 - Decided: 2026-11-17
 - Owner / approval evidence: user request in Pi session
@@ -59,8 +59,13 @@ an explicit user request for every action.
   is the user's standing authorization to start, rework, cancel and mark saved
   tasks done/failed. This replaces per-action confirmation only in the
   supervisor session. Hard limits: 5 concurrent managed sessions, 5 rework
-  rounds per item, a budget. When a limit is reached, the supervisor escalates
-  instead of retrying. A Pause control stops all new supervisor actions.
+  rounds per item, and an optional rolling 24-hour token ceiling on automatic
+  supervisor wakes. The budget uses all assistant tokens (including cache)
+  from the supervisor and currently managed sessions. At the ceiling, ACP
+  holds the digest and escalates in the mandate bar and diagnostics without
+  waking the model. Only explicit Resume or a sufficient increase or removal
+  of the ceiling releases a budget hold; Pause independently stops all new
+  supervisor actions. The wake budget does not gate worker `start` or `send`.
 - **Scope:** sessions the supervisor started, plus sessions the user hands over
   explicitly. Writing into a managed session switches it to manual mode until
   the user releases it.

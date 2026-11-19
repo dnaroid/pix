@@ -48,7 +48,7 @@ type DesktopCommandServicesOptions = {
   conversation: DesktopConversationServices;
   focusComposer: () => void | Promise<void>;
   setPromptText: (text: string) => void;
-  openSupervisor?: () => void | Promise<void>;
+  openSupervisor?: (fresh?: boolean) => void | Promise<void>;
 };
 
 export function createDesktopCommandServices(options: DesktopCommandServicesOptions) {

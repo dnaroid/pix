@@ -48,7 +48,11 @@ Make Pi/Pix slash commands discoverable and keyboard-first in Pix Desktop while 
 - `/clone` clones the current Pi branch and refreshes the persisted ACP-to-Pi session mapping.
 - `/copy` copies the complete plain text of the last assistant message. No assistant message and OS clipboard failures are distinct user-visible errors.
 - Intercepted built-ins are serialized with prompts so session mutations such as `/clone` cannot overlap another run.
-- Exact `/new` starts a fresh Desktop conversation and `/new_tab` opens one in a
+- Exact `/new` starts a fresh Desktop conversation. In the active project
+  supervisor conversation it runs the same fresh supervisor action as the
+  command palette entry, preserving supervisor management and the old chat (see
+  [project supervisor](../../work-management/project-supervisor.md)); in
+  ordinary sessions it opens the regular session start tab. `/new_tab` opens one in a
   new tab. `/resume [path]`, `/import [path]`, `/search [query]`,
   `/delete [query]`, `/jump [query]`, `/history [query]`, `/enhance [draft]`,
   `/fork [entry-id]`, `/model [ref]`, and `/thinking [level]` (or `/thought`)
@@ -107,6 +111,5 @@ request or overwrite another context's draft.
 
 - `/tree`, `/settings`, `/share`, `/trust`, `/login`, `/logout`, and `/bug` still require additional APIs or Desktop UI.
 - Desktop `/reload` relies on the private `pix/session/reload` extension RPC rather than a public Pi RPC reload command.
-- Desktop `/new` replaces the active ACP runtime; true `/new_tab` behavior needs a separate multi-runtime tab lifecycle.
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"efe7448d907a7f2853baecc13bd7ae63a77d2cf455788ca450cc55ae0d7e1964","checkedAt":"2026-10-31T02:08:39.124Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":62,"reportLanguage":"ru"} -->

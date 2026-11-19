@@ -66,6 +66,8 @@ export type SupervisorCloseOutcome = "done" | "failed";
 
 export interface SupervisorOpenRequest {
 	cwd: string;
+	/** Start a blank conversation without resetting project supervision. */
+	fresh?: boolean;
 }
 export interface SupervisorOpenResponse {
 	sessionId: string;
@@ -107,10 +109,13 @@ export function isSupervisorMutation(request: SupervisorToolRequest): request is
 }
 
 /** Supported mandate ranges; ACP clamps saved values into them, Desktop bounds its inputs. */
+export const SUPERVISOR_DIGEST_ID_PREFIX = "supervisor-digest:";
+
 export const SUPERVISOR_MANDATE_LIMITS = {
 	maxConcurrent: { min: 1, max: 20, default: 5 },
 	maxReworkRounds: { min: 0, max: 50, default: 5 },
 	stalledAfterMinutes: { min: 5, max: 60, default: 15 },
+	budgetTokens: { min: 1, max: Number.MAX_SAFE_INTEGER },
 } as const;
 
 /** Mandate fields Desktop may change; ACP clamps them to the supported ranges. */
@@ -120,6 +125,8 @@ export interface SupervisorMandatePatch {
 	maxConcurrent?: number;
 	maxReworkRounds?: number;
 	stalledAfterMinutes?: number;
+	/** Omit to keep the ceiling; null removes it. */
+	budgetTokens?: number | null;
 	/** Omit to keep the default; null removes it. */
 	workerModelRef?: string | null;
 	policy?: string;
@@ -135,6 +142,10 @@ export interface SupervisorMandateResponse {
 	maxConcurrent: number;
 	maxReworkRounds: number;
 	stalledAfterMinutes: number;
+	budgetTokens?: number;
+	/** Absent without a ceiling or when usage could not be read. */
+	budgetUsedTokens?: number;
+	budgetHeld?: true;
 	workerModelRef?: string;
 	policy: string;
 	/** Registry sessions the supervisor may act on. */
@@ -161,7 +172,8 @@ function record(value: unknown, message: string): Record<string, unknown> {
 export function parseSupervisorOpenRequest(value: unknown): SupervisorOpenRequest {
 	const row = record(value, "Invalid supervisor open request");
 	if (typeof row.cwd !== "string" || !row.cwd.trim() || row.cwd.length > MAX_CWD) throw new Error("Invalid supervisor workspace");
-	return { cwd: row.cwd };
+	if (row.fresh !== undefined && typeof row.fresh !== "boolean") throw new Error("Invalid supervisor fresh flag");
+	return { cwd: row.cwd, ...(row.fresh === true ? { fresh: true } : {}) };
 }
 
 export function parseSupervisorOpenResponse(value: unknown): SupervisorOpenResponse {
@@ -360,6 +372,13 @@ export function parseSupervisorMandateRequest(value: unknown): SupervisorMandate
 		if (typeof raw[key] !== "number" || !Number.isInteger(raw[key])) throw new Error(`Invalid supervisor mandate ${key}`);
 		patch[key] = raw[key];
 	}
+	if (raw.budgetTokens !== undefined) {
+		const budget = raw.budgetTokens;
+		if (budget !== null && (typeof budget !== "number" || !Number.isInteger(budget) || budget < 1)) {
+			throw new Error("Invalid supervisor mandate budgetTokens: expected a positive integer or null");
+		}
+		patch.budgetTokens = budget === null ? null : Math.min(budget, SUPERVISOR_MANDATE_LIMITS.budgetTokens.max);
+	}
 	if (raw.policy !== undefined) {
 		if (typeof raw.policy !== "string" || raw.policy.length > MAX_SUPERVISOR_POLICY) throw new Error("Invalid supervisor mandate policy");
 		patch.policy = raw.policy;
@@ -392,11 +411,16 @@ export function parseSupervisorMandateResponse(value: unknown): SupervisorMandat
 	if (ref !== undefined && (typeof ref !== "string" || ref.length === 0 || ref.length > MAX_MODEL_REF)) {
 		throw new Error("Invalid supervisor mandate response workerModelRef");
 	}
+	const budget = row.budgetTokens === undefined ? undefined : int("budgetTokens");
+	if (budget === 0 || (row.budgetHeld !== undefined && row.budgetHeld !== true)) throw new Error("Invalid supervisor mandate budget");
 	return {
 		enabled: row.enabled, paused: row.paused,
 		maxConcurrent: int("maxConcurrent"), maxReworkRounds: int("maxReworkRounds"), stalledAfterMinutes: int("stalledAfterMinutes"),
 		policy: row.policy, managed: int("managed"), manual: int("manual"), running: int("running"),
 		...(ref === undefined ? {} : { workerModelRef: ref }),
 		reworkRounds: int("reworkRounds"),
+		...(budget === undefined ? {} : { budgetTokens: budget }),
+		...(row.budgetUsedTokens === undefined ? {} : { budgetUsedTokens: int("budgetUsedTokens") }),
+		...(row.budgetHeld === true ? { budgetHeld: true } : {}),
 	};
 }

@@ -56,6 +56,7 @@ type DesktopPromptActionServicesOptions = {
   requestLocalTextInput: (message: string, title: string) => Promise<string | undefined>;
   navigation: ConversationNavigationRef;
   forkConversation: (entryId?: string) => Promise<void>;
+  supervisor: NonNullable<Parameters<typeof createPromptSubmit>[0]["supervisor"]>;
   openInteractiveTerminal: (command: string) => void | Promise<void>;
   openBtw?: (sessionId: string, question?: string) => void | Promise<void>;
   closeProjectSelector: () => void;
@@ -142,6 +143,7 @@ export function createDesktopPromptActionServices(options: DesktopPromptActionSe
     },
     promptRunning: options.prompt.runtime.isRunning,
     openSessionStartTab: options.transitions.draft.openStartTab,
+    supervisor: options.supervisor,
     enhancePromptDraft: options.conversation.enhancePromptDraft,
     importConversationPath: options.conversation.importConversationPath,
     chooseImportSession: options.conversation.chooseImportSession,

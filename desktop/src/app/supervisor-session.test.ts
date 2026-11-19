@@ -48,11 +48,27 @@ describe("project supervisor session action", () => {
     expect(client.openSupervisor).toHaveBeenCalledTimes(1);
   });
 
+  it("runs a fresh open after an ordinary open and shows only the replacement", async () => {
+    const { client, calls, action } = fixture();
+    const gate = deferred<{ sessionId: string; created: boolean }>();
+    client.openSupervisor.mockReturnValueOnce(gate.promise).mockResolvedValueOnce({ sessionId: "fresh", created: true });
+    const ordinary = action.open();
+    await Promise.resolve();
+    const fresh = action.open(true);
+    expect(action.open(true)).toBe(fresh);
+    expect(action.open()).toBe(fresh);
+    gate.resolve({ sessionId: "old", created: false });
+    await Promise.all([ordinary, fresh]);
+    expect(client.openSupervisor.mock.calls).toEqual([["/p"], ["/p", true]]);
+    expect(calls).toEqual(["refresh", "load:fresh", "tab:fresh"]);
+  });
+
   it("drops a stale reply after a workspace switch and reports only current errors", async () => {
     const { client, calls, action, setWorkspace } = fixture();
     const gate = deferred<{ sessionId: string; created: boolean }>();
     client.openSupervisor.mockReturnValueOnce(gate.promise);
     const pending = action.open();
+    await Promise.resolve();
     setWorkspace("/other");
     gate.resolve({ sessionId: "sup", created: true });
     await pending;
@@ -77,6 +93,8 @@ describe("project supervisor session action", () => {
     expect(sessionIsSupervisor({ sessionId: "b", cwd: "/p" })).toBe(false);
     expect(COMMAND_PALETTE_IDS).toContain("session.supervisor");
     expect(desktopCommandDefinition("session.supervisor").label).toBe("Open Project Supervisor");
+    expect(COMMAND_PALETTE_IDS).toContain("session.supervisorFresh");
+    expect(desktopCommandDefinition("session.supervisorFresh").label).toBe("New Project Supervisor Conversation");
   });
 
   it("app menu runs the palette command when available and otherwise explains instead of dropping the click", async () => {
