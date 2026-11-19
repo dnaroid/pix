@@ -3,11 +3,11 @@ import type { ProjectTreeEntry } from "./project-tree";
 // Keep aligned with the native project cleanup allowlists. Disposable containers
 // are canonical storage locations, but intentionally receive no visual accent.
 const durableDirectories = new Set([
-  "agents", "explanations", "file-history", "plans", "search", "skills", "task-attachments", "translations", "workspace.jsonc.lock",
+  "agents", "explanations", "file-history", "plans", "search", "skills", "supervisor", "task-attachments", "translations", "workspace.jsonc.lock",
 ]);
 const canonicalFiles = new Set([
   "AGENTS.md", "agent-model-overrides.json", "pi-tools-suite.jsonc",
-  "pix-desktop.jsonc", "pix.jsonc", "project-icon.gif", "project-icon.jpg",
+  "pix-desktop.jsonc", "pix.jsonc", "plan-launches.json", "project-icon.gif", "project-icon.jpg",
   "project-icon.png", "project-icon.svg", "project-icon.webp", "qa_auth.jsonc",
   "registry.json", "registry.jsonc", "registry-project-key", "project-id", "tasks.sqlite",
   "tasks.sqlite-wal", "tasks.sqlite-shm", "tasks.sqlite-journal", "todo-plan.json",

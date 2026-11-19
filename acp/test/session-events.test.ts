@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
 import {
 	countChecklist,
@@ -94,26 +94,28 @@ test("stalledAfterMs clamps to 5–60 minutes with a 15 minute default", () => {
 
 test("settled carries the stop reason and successful write/edit paths", () => {
 	const { events, monitor } = harness();
-	const observer = monitor.observe("s1", "/work/proj");
+	const cwd = resolve("/work/proj");
+	const outsidePath = resolve("/elsewhere/x.ts");
+	const observer = monitor.observe("s1", cwd);
 	observer.event({ type: "agent_start" });
 	observer.event({ type: "tool_execution_start", toolCallId: "t1", toolName: "Write", args: { file_path: "src/a.ts" } });
 	observer.event({ type: "tool_execution_end", toolCallId: "t1", toolName: "Write", isError: false });
-	observer.event({ type: "tool_execution_start", toolCallId: "t2", toolName: "edit", args: { path: "/work/proj/src/b.ts" } });
+	observer.event({ type: "tool_execution_start", toolCallId: "t2", toolName: "edit", args: { path: join(cwd, "src/b.ts") } });
 	observer.event({ type: "tool_execution_end", toolCallId: "t2", toolName: "edit", isError: true });
 	observer.event({ type: "tool_execution_start", toolCallId: "t3", toolName: "read", args: { path: "src/c.ts" } });
 	observer.event({ type: "tool_execution_end", toolCallId: "t3", toolName: "read", isError: false });
-	observer.event({ type: "tool_execution_start", toolCallId: "t4", toolName: "edit", args: { path: "/elsewhere/x.ts" } });
+	observer.event({ type: "tool_execution_start", toolCallId: "t4", toolName: "edit", args: { path: outsidePath } });
 	observer.event({ type: "tool_execution_end", toolCallId: "t4", toolName: "edit", isError: false });
 	observer.settled("end_turn");
 	assert.deepEqual(events.slice(0, -1), [
 		{ type: "file_changed", sessionId: "s1", at: 1_000, path: "src/a.ts" },
-		{ type: "file_changed", sessionId: "s1", at: 1_000, path: "/elsewhere/x.ts" },
+		{ type: "file_changed", sessionId: "s1", at: 1_000, path: outsidePath },
 	]);
 	const settled = events.at(-1) as Extract<SessionEvent, { type: "settled" }>;
 	assert.equal(settled.type, "settled");
 	assert.equal(settled.sessionId, "s1");
 	assert.equal(settled.stopReason, "end_turn");
-	assert.deepEqual(settled.touchedFiles, ["src/a.ts", "/elsewhere/x.ts"]);
+	assert.deepEqual(settled.touchedFiles, ["src/a.ts", outsidePath]);
 });
 
 test("touched files survive runtime replacement until forget, and are bounded", () => {

@@ -68,7 +68,7 @@ Zed (Agent Panel)  <--ACP JSON-RPC over stdio-->  pix-acp  <--JSONL RPC over std
   final unterminated records, and stream disposal/close.
 - In-process per-session lifecycle event monitor (`src/acp/session-events.ts`,
   decision [0077](../decisions/0077-project-supervisor-session.md) phase 0):
-  `settled`, `question`, `error`, `stalled` and `checklist` events for
+  `settled`, `file_changed`, `question`, `error`, `stalled` and `checklist` events for
   `PixAcpAgent.subscribeSessionEvents`. These events are not sent over the ACP
   protocol. Observers are disposed on teardown and forgotten on session delete.
 - Project supervisor, implemented (decision [0077](../decisions/0077-project-supervisor-session.md)):

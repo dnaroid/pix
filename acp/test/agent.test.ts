@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
-import { setImmediate } from "node:timers/promises";
+import { setImmediate as nextImmediate } from "node:timers/promises";
 import {
 	client,
 	methods,
@@ -86,6 +86,7 @@ import type {
 	AutocompleteResponse,
 } from "../src/acp/autocomplete.js";
 import { SessionMapStore } from "../src/acp/session-map.js";
+import type { SessionEvent } from "../src/acp/session-events.js";
 import { parseSupervisorMandateResponse, SUPERVISOR_QUESTION_RESOLVED_CHANNEL, SUPERVISOR_WORKER_PREAMBLE } from "../src/acp/supervisor-contract.js";
 import { PIX_SESSION_CATALOG_CHANGED_METHOD } from "../src/acp/session-catalog-contract.js";
 import { createSupervisorStore } from "../src/acp/supervisor-store.js";
@@ -6233,7 +6234,7 @@ async function waitFor(condition: () => boolean, timeoutMs = 1000): Promise<void
 
 test("session lifecycle events reach in-process subscribers and stop at teardown", async () => {
 	const harness = createTestAdapter();
-	const events: Array<{ type: string; sessionId: string; stopReason?: string; touchedFiles?: readonly string[] }> = [];
+	const events: SessionEvent[] = [];
 	const unsubscribe = harness.adapter.subscribeSessionEvents((event) => events.push(event));
 	try {
 		await connect(harness.adapter, async (cx) => {
@@ -6252,16 +6253,19 @@ test("session lifecycle events reach in-process subscribers and stop at teardown
 			pi.emit({ type: "agent_settled" });
 			const result = await pending as { stopReason: string };
 			assert.equal(result.stopReason, "end_turn");
-			assert.deepEqual(events.map(({ type, stopReason, touchedFiles }) => ({ type, stopReason, touchedFiles })),
-				[{ type: "settled", stopReason: "end_turn", touchedFiles: ["src/a.ts"] }]);
-			assert.equal(events[0]?.sessionId, sessionId);
+			assert.deepEqual(events.map(({ at: _at, ...event }) => event), [
+				{ type: "file_changed", sessionId, path: "src/a.ts" },
+				{ type: "settled", sessionId, stopReason: "end_turn", touchedFiles: ["src/a.ts"] },
+			]);
 			assert.deepEqual(harness.adapter.sessionTouchedFiles(sessionId), ["src/a.ts"]);
 
 			await cx.request("session/close", { sessionId });
 			// A retired runtime's late events never reach subscribers.
 			pi.emit({ type: "agent_start" });
+			pi.emit({ type: "tool_execution_start", toolCallId: "late", toolName: "Write", args: { file_path: "late.ts" } } as unknown as PiEvent);
+			pi.emit({ type: "tool_execution_end", toolCallId: "late", toolName: "Write", result: { content: [] }, isError: false } as unknown as PiEvent);
 			pi.emit({ type: "agent_settled" });
-			assert.equal(events.length, 1);
+			assert.equal(events.length, 2);
 		});
 	} finally {
 		unsubscribe();
@@ -6613,7 +6617,7 @@ test("project supervisor: Desktop mandate gates sends, and user takeover wins a 
 				assert.equal(await sendPreflight.promise, "managed");
 				// Drain the bridge's promise continuation while takeover still holds
 				// the lock. A send bypassing it would start reading the mandate now.
-				await setImmediate();
+				await nextImmediate();
 				assert.equal(earlyMandateReads, 0);
 				assert.equal(pi.promptCalls.length, 0);
 			} finally {
