@@ -190,7 +190,8 @@ mod tests {
 
     #[test]
     fn a_panicking_task_still_counts_as_finished() {
-        let tasks = vec![Box::new(|| panic!("stop failed")) as TeardownTask];
+        let task: TeardownTask = Box::new(|| panic!("stop failed"));
+        let tasks = vec![task];
         assert_eq!(run_with_deadline(tasks, Duration::from_secs(30)), 0);
     }
 }
