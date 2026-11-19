@@ -5,7 +5,6 @@ import {
 	SUPERVISOR_OPS,
 	SUPERVISOR_SEND_KINDS,
 	SUPERVISOR_TOOL,
-	parseSupervisorToolRequest,
 } from "../acp/supervisor-contract.js";
 
 /**
@@ -16,7 +15,7 @@ import {
  */
 const HOST = Symbol.for("pix.supervisor.request");
 
-type SupervisorHost = (input: { ownerSessionId: string; op: string } & Record<string, unknown>, signal?: AbortSignal) => Promise<unknown>;
+type SupervisorHost = (input: { ownerSessionId: string } & Record<string, unknown>, signal?: AbortSignal) => Promise<unknown>;
 
 export default function supervisorExtension(pi: ExtensionAPI): void {
 	pi.registerTool({
@@ -32,7 +31,7 @@ export default function supervisorExtension(pi: ExtensionAPI): void {
 			+ "op=send {sessionId, text, kind: rework|note} steers a busy session or queues a new turn (rework counts against maxReworkRounds; a new turn counts against maxConcurrent); "
 			+ "op=answer {sessionId, questionId, authority, rationale, selections} resolves the live worker questionnaire from read; never use send to answer it; "
 			+ "op=cancel {sessionId} stops the turn in flight; "
-			+ "op=close {sessionId, outcome: done|failed, summary} sets the linked task status and releases the session — done is refused unless the last turn ended with end_turn, no question is pending, the linked plan is fully checked and the final report has a verification section; "
+			+ "op=close {sessionId, outcome: done|failed, summary} sets the linked task status and releases the session — done is refused unless the last turn ended with end_turn, no question is pending, any linked plan has a non-empty, fully checked checklist and the final report has a verification section; "
 			+ "op=reopen {sessionId} reverts your own close: the session is managed again with its item and rework count, and its task returns to in-progress; "
 			+ "op=escalate {text, sessionId?, questionId?} records that you need the user's decision (allowed while paused); include both ids for worker questions. "
 			+ "Refusals are errors; nothing is queued for later.",
@@ -71,12 +70,12 @@ export default function supervisorExtension(pi: ExtensionAPI): void {
 		},
 		async execute(_id, params, signal, _update, ctx) {
 			try {
-				const request = parseSupervisorToolRequest(params);
 				const host = (globalThis as Record<symbol, unknown>)[HOST];
 				if (process.env.PI_SUBAGENT_AGENT_DIR || typeof host !== "function") {
 					throw new Error("supervisor is available only in the Pix Desktop project supervisor session.");
 				}
-				const response = await (host as SupervisorHost)({ ...request, ownerSessionId: ctx.sessionManager.getSessionId() }, signal);
+				// The ACP bridge validates and normalizes the raw tool arguments.
+				const response = await (host as SupervisorHost)({ ...params, ownerSessionId: ctx.sessionManager.getSessionId() }, signal);
 				return { content: [{ type: "text" as const, text: JSON.stringify(response) }], details: response };
 			} catch (error) {
 				const message = signal?.aborted ? "supervisor cancelled." : error instanceof Error ? error.message : "supervisor failed.";

@@ -64,9 +64,10 @@ an explicit user request for every action.
 - **Scope:** sessions the supervisor started, plus sessions the user hands over
   explicitly. Writing into a managed session switches it to manual mode until
   the user releases it.
-- **Completion:** worker final report plus saved plan checklist, behind
-  deterministic guards: final stop reason `end_turn`, no unchecked plan items,
-  no pending question, and a report section listing what was verified. Every
+- **Completion:** worker final report plus, when a plan is linked, its saved
+  checklist, behind deterministic guards: final stop reason `end_turn`, no
+  unchecked linked-plan items, no pending question, and a report section
+  listing what was verified. Every
   closure is journaled with its evidence and can be reopened.
 - **Shared working tree:** managed sessions run in the project tree in
   parallel. They follow rules injected into their prompt: no commits, no

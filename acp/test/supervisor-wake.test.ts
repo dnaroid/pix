@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createSupervisorWaker } from "../src/acp/supervisor-wake.js";
-import type { SessionEvent } from "../src/acp/session-events.js";
+import { createSessionEventMonitor, type SessionEvent, type SessionEventObserver } from "../src/acp/session-events.js";
 import type { ManagedSession } from "../src/acp/supervisor-store.js";
 
 function harness(options: { paused?: boolean; supervisor?: string | undefined } = {}) {
@@ -17,7 +17,7 @@ function harness(options: { paused?: boolean; supervisor?: string | undefined } 
 		debounceMs: 10,
 		setTimer: (callback) => { timers.add(callback); return callback; },
 		clearTimer: (handle) => { timers.delete(handle as () => void); },
-		registryFor: async () => ({ version: 1, ...(supervisorSessionId ? { supervisorSessionId } : {}), sessions }),
+		registryFor: async () => ({ version: 1, ...(supervisorSessionId ? { supervisorSessionId } : {}), sessions: { ...sessions } }),
 		paused: async () => paused,
 		enqueue: async (_sup, text, replace) => {
 			const existing = queue.find((item) => item.id === replace?.id);
@@ -28,6 +28,7 @@ function harness(options: { paused?: boolean; supervisor?: string | undefined } 
 		},
 	});
 	const fire = async () => {
+		await waker.whenIdle(); // edits resolve registry snapshots before scheduling a wake
 		const pending = [...timers];
 		timers.clear();
 		for (const callback of pending) callback();
@@ -38,6 +39,12 @@ function harness(options: { paused?: boolean; supervisor?: string | undefined } 
 
 const settled = (sessionId: string): SessionEvent => ({ type: "settled", sessionId, at: 1, stopReason: "end_turn", touchedFiles: ["a.ts"] });
 const stalled = (sessionId: string): SessionEvent => ({ type: "stalled", sessionId, at: 2, idleMs: 900_000 });
+const fileChanged = (sessionId: string, path = "src/a.ts"): SessionEvent => ({ type: "file_changed", sessionId, at: 3, path });
+
+function edit(observer: SessionEventObserver, path: string) {
+	observer.event({ type: "tool_execution_start", toolCallId: "edit", toolName: "edit", args: { path } });
+	observer.event({ type: "tool_execution_end", toolCallId: "edit", isError: false });
+}
 
 test("several worker events produce one wake digest", async () => {
 	const h = harness();
@@ -125,4 +132,126 @@ test("dispose releases pending timers and ignores later events", async () => {
 	assert.equal(h.timers.size, 0);
 	h.waker.push("/p", settled("w2"));
 	assert.equal(h.timers.size, 0);
+});
+
+test("successful normalized edits notify before settlement and deduplicate across runtime replacement", async (t) => {
+	const h = harness();
+	const monitor = createSessionEventMonitor();
+	t.after(() => { monitor.dispose(); h.waker.dispose(); });
+	monitor.subscribe((event) => h.waker.push("/p", event));
+	const w1 = monitor.observe("w1", "/p");
+	const w2 = monitor.observe("w2", "/p");
+	edit(w1, "src/a.ts");
+	edit(w1, "src/./a.ts");
+	edit(w2, "src/distinct.ts");
+	await h.fire();
+	assert.equal(h.queue.length, 0, "no self-conflict or wake on a non-overlap");
+	edit(w2, "/p/src/../src/a.ts");
+	await h.fire();
+	assert.equal(h.queue.length, 1);
+	assert.match(h.queue[0]!.text, /w2: file conflict with w1: src\/a\.ts/);
+	h.queue.length = 0;
+	edit(monitor.observe("w2", "/p"), "src/a.ts");
+	edit(w1, "src/a.ts");
+	await h.fire();
+	assert.equal(h.queue.length, 0, "neither edit order nor runtime replacement repeats the same conflict");
+});
+
+test("conflicts require two managed workers in one project when they edit", async () => {
+	const h = harness();
+	const w2 = h.sessions.w2!;
+	h.sessions.sup = w2; // even a registry entry cannot make the supervisor its own worker
+	h.sessions.w2 = { ...w2, mode: "manual" };
+	h.waker.push("/p", fileChanged("sup"));
+	h.waker.push("/p", fileChanged("not-managed"));
+	h.waker.push("/p", fileChanged("w2"));
+	h.sessions["not-managed"] = w2;
+	h.sessions.w2 = w2; // later ownership changes must not make earlier edits eligible
+	h.waker.push("/another-project", fileChanged("w3"));
+	h.waker.push("/p", fileChanged("w1"));
+	await h.fire();
+	assert.equal(h.queue.length, 0);
+	h.waker.push("/p/.", fileChanged("w2"));
+	await h.fire();
+	assert.match(h.queue[0]!.text, /w2: file conflict with w1: src\/a\.ts/);
+});
+
+test("different overlapping files and peers coalesce into one digest, even while paused", async () => {
+	const h = harness({ paused: true });
+	h.waker.push("/p", fileChanged("w1"));
+	h.waker.push("/p", fileChanged("w3", "src/b.ts"));
+	h.waker.push("/p", fileChanged("w2"));
+	h.waker.push("/p", fileChanged("w2", "src/b.ts"));
+	await h.fire();
+	assert.equal(h.queue.length, 0);
+	h.setPaused(false);
+	h.waker.push("/p", settled("w2"));
+	await h.fire();
+	assert.equal(h.queue.length, 1);
+	assert.match(h.queue[0]!.text, /file conflict with w1: src\/a\.ts; file conflict with w3: src\/b\.ts/);
+	h.waker.push("/p", fileChanged("w3"));
+	await h.fire();
+	assert.equal(h.queue.length, 1, "rewrites the still-queued digest");
+	assert.match(h.queue[0]!.text, /w3: file conflict with w1: src\/a\.ts; file conflict with w2: src\/a\.ts/);
+});
+
+test("conflicts lose eligibility if either worker leaves, and re-registration requires a fresh edit", async () => {
+	const h = harness();
+	const w1 = h.sessions.w1!;
+	h.waker.push("/p", fileChanged("w1"));
+	h.waker.push("/p", fileChanged("w2"));
+	await h.fire();
+	assert.match(h.queue[0]!.text, /file conflict/);
+	delete h.sessions.w1;
+	h.sessions.w1 = { ...w1, registeredAt: w1.registeredAt + 1 };
+	h.waker.push("/p", stalled("w3"));
+	await h.fire();
+	assert.equal(h.queue.length, 1);
+	assert.doesNotMatch(h.queue[0]!.text, /file conflict/, "a queued digest drops conflicts from the prior registration");
+	h.waker.push("/p", fileChanged("w1"));
+	await h.fire();
+	assert.match(h.queue[0]!.text, /w1: file conflict with w2/);
+	h.sessions.w2 = { ...h.sessions.w2!, mode: "manual" };
+	h.waker.push("/p", { type: "manual_takeover", sessionId: "w2", at: 4 });
+	await h.fire();
+	assert.doesNotMatch(h.queue[0]!.text, /file conflict/, "filter the peer, not just the line's worker");
+});
+
+test("manual takeover before delivery invalidates conflicts even if the worker is quickly handed back", async () => {
+	const h = harness();
+	const w1 = h.sessions.w1!;
+	h.waker.push("/p", fileChanged("w1"));
+	h.waker.push("/p", fileChanged("w2"));
+	h.sessions.w1 = { ...w1, mode: "manual" };
+	h.waker.push("/p", { type: "manual_takeover", sessionId: "w1", at: 4 });
+	h.waker.push("/p", fileChanged("w1"));
+	h.sessions.w1 = w1;
+	await h.fire();
+	assert.doesNotMatch(h.queue[0]!.text, /file conflict/);
+	h.waker.push("/p", fileChanged("w1"));
+	await h.fire();
+	assert.match(h.queue[0]!.text, /- w1:[^\n]*file conflict with w2/);
+});
+
+test("removing a peer before debounce suppresses a conflict-only wake", async () => {
+	const h = harness();
+	h.waker.push("/p", fileChanged("w1"));
+	h.waker.push("/p", fileChanged("w2"));
+	await h.waker.whenIdle();
+	assert.equal(h.timers.size, 1);
+	delete h.sessions.w1;
+	await h.fire();
+	assert.equal(h.queue.length, 0);
+});
+
+test("dispose invalidates an overlap still waiting on its registry snapshots", async () => {
+	const h = harness();
+	h.waker.push("/p", fileChanged("w1"));
+	h.waker.push("/p", fileChanged("w2"));
+	const idle = h.waker.whenIdle();
+	await Promise.resolve(); // enter the first snapshot await
+	h.waker.dispose();
+	await idle;
+	assert.equal(h.timers.size, 0);
+	assert.equal(h.queue.length, 0);
 });

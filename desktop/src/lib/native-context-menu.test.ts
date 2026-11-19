@@ -113,7 +113,9 @@ describe("native desktop context menu commands", () => {
       undefined, undefined, { canRename, open })[0]).toMatchObject({ enabled: false });
   });
   it("hands a session over to the supervisor only while the shown state still holds", async () => {
-    let state = { supervised: false, enabled: true };
+    let state: import("./session-supervision").SupervisionState = {
+      mode: undefined, supervisorAvailable: true, enabled: true,
+    };
     const setSupervised = vi.fn(async () => {});
     const actions = { canRename: () => true, open: vi.fn(), supervision: vi.fn(() => state), setSupervised };
     const target = context({ kind: "session", sessionId: "w" });
@@ -123,13 +125,19 @@ describe("native desktop context menu commands", () => {
     if (item && "action" in item) item.action?.("ignored");
     await Promise.resolve();
     expect(setSupervised).toHaveBeenCalledExactlyOnceWith("w", true);
-    state = { supervised: true, enabled: true };
+    state = { ...state, mode: "managed" };
     if (item && "action" in item) item.action?.("ignored");
     await Promise.resolve();
     expect(setSupervised).toHaveBeenCalledOnce();
     const back = nativeContextMenuItems(target, false, reportError, () => true, undefined, undefined, actions)
-      .find((entry) => "id" in entry && entry.id === "desktop.session.supervise");
+      .find((entry) => "id" in entry && entry.id === "desktop.session.take-back");
     expect(back).toMatchObject({ text: "Take Back from Supervisor" });
+    state = { ...state, mode: "manual" };
+    const manual = nativeContextMenuItems(target, false, reportError, () => true, undefined, undefined, actions);
+    expect(manual).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "desktop.session.supervise", enabled: true }),
+      expect.objectContaining({ id: "desktop.session.take-back", enabled: true }),
+    ]));
     actions.supervision.mockReturnValue(undefined as never);
     expect(nativeContextMenuItems(target, false, reportError, () => true, undefined, undefined, actions)
       .some((entry) => "id" in entry && entry.id === "desktop.session.supervise")).toBe(false);

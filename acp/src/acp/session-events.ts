@@ -10,6 +10,7 @@ import { SUPERVISOR_MANDATE_LIMITS } from "./supervisor-contract.js";
  *
  * - `settled`: the ACP run finished, with its stop reason and the files the
  *   session changed through successful write/edit tool calls so far;
+ * - `file_changed`: a successful write/edit, including repeat writes;
  * - `question`: the session waits on a `question` dialog;
  * - `error`: model, compaction, run or process failure;
  * - `stalled`: a running turn produced no event for `stalledAfterMinutes`,
@@ -41,6 +42,7 @@ interface SessionEventBase {
 }
 export type SessionEvent = SessionEventBase & (
 	| { readonly type: "settled"; readonly stopReason: StopReason; readonly touchedFiles: readonly string[] }
+	| { readonly type: "file_changed"; readonly path: string }
 	| { readonly type: "question"; readonly questionId: string }
 	| { readonly type: "error"; readonly source: SessionErrorSource; readonly message: string }
 	| { readonly type: "stalled"; readonly idleMs: number }
@@ -321,6 +323,7 @@ export function createSessionEventMonitor(options: SessionEventMonitorOptions = 
 				const oldest = touched.values().next().value;
 				if (oldest !== undefined) touched.delete(oldest);
 			}
+			this.emit({ type: "file_changed", path });
 			if (path.startsWith(PLANS_DIR) && path.toLowerCase().endsWith(".md")) this.refreshChecklist();
 		}
 

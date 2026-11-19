@@ -907,6 +907,10 @@ export class PixAcpAgent {
 				userPromptAt: (sessionId) => this.sessions.get(sessionId)?.activeRun?.userPromptAt,
 				cancel: (sessionId) => this.cancel(sessionId),
 				launch: (cwd, caller, item, modelRef) => this.launchSupervisorItem(cwd, caller, item, modelRef),
+				registered: (cwd, caller) => {
+					const supervisor = this.sessions.get(caller);
+					if (supervisor) this.notifySupervisorCatalogChanged(supervisor.client, cwd);
+				},
 				writeTaskStatus,
 			},
 		});
@@ -2668,6 +2672,13 @@ export class PixAcpAgent {
 		return { supervised };
 	}
 
+	private notifySupervisorCatalogChanged(client: ClientCaller, cwd: string): void {
+		if (this.disposed) return;
+		void client.notify(PIX_SESSION_CATALOG_CHANGED_METHOD, { cwd }).catch((error: unknown) => {
+			this.options.logger.warn(`supervisor catalog notification failed: ${stringifyUnknown(error)}`, { module: "supervisor" });
+		});
+	}
+
 	/** Run `operation` after every earlier supervisor-state change of the project. */
 	private supervisorExclusive<T>(cwd: string, operation: () => Promise<T>): Promise<T> {
 		const key = resolve(cwd);
@@ -2792,6 +2803,7 @@ export class PixAcpAgent {
 					return { ...current, sessions: { ...current.sessions, [sessionId]: { ...existing, mode: "manual" } } };
 				});
 				if (!changed) return;
+				this.notifySupervisorCatalogChanged(session.client, session.cwd);
 				await this.dropSupervisorDeliveries(session);
 				await this.supervisorStore.appendLedger(session.cwd, { kind: "manual_takeover", sessionId })
 					.catch((error: unknown) => this.options.logger.warn(`supervisor ledger append failed: ${stringifyUnknown(error)}`, { module: "supervisor" }));
@@ -3692,7 +3704,10 @@ export class PixAcpAgent {
 			const answer = await session.client.request("elicitation/create", elicitation);
 			// The session may have been closed while the user was thinking.
 			if (this.sessions.get(session.acpSessionId) !== session) return;
-			if (question && !session.liveQuestions.has(question.elicitationId)) return;
+			if (question && !session.liveQuestions.has(question.elicitationId)) {
+				this.options.logger.debug("Desktop questionnaire reply ignored: question no longer live", { module: "supervisor" });
+				return;
+			}
 			if (question && answer._meta?.["_pix/question-interrupted"] === true) {
 				interrupted = true;
 				return;

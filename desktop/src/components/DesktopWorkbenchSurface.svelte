@@ -8,6 +8,7 @@
   import PromptComposer from "./PromptComposer.svelte";
   import QueuedMessagesPanel from "./QueuedMessagesPanel.svelte";
   import SessionStartView from "./SessionStartView.svelte";
+  import SessionSupervisionBar from "./SessionSupervisionBar.svelte";
   import TranscriptPane from "./TranscriptPane.svelte";
   import SubagentViewerBanner from "./SubagentViewerBanner.svelte";
   import SupervisorMandateBar from "./SupervisorMandateBar.svelte";
@@ -37,6 +38,7 @@
     composer,
     managedSubagent,
     supervisorMandate = null,
+    sessionSupervision = null,
     preview,
     previewVisible,
     gitDiff,
@@ -64,6 +66,7 @@
     managedSubagent?: ComponentProps<typeof SubagentViewerBanner>;
     /** Mandate block shown only while the project supervisor session is active (0077). */
     supervisorMandate?: ComponentProps<typeof SupervisorMandateBar> | null;
+    sessionSupervision?: ComponentProps<typeof SessionSupervisionBar> | null;
     preview: ComponentProps<typeof PreviewPane> | null;
     previewVisible: boolean;
     gitDiff: ComponentProps<typeof GitDiffPane> | null;
@@ -104,13 +107,15 @@
       role="tabpanel"
       aria-labelledby={conversationLabelledBy}
     >
-      {#if errorBanner || supervisorMandate}
+      {#if errorBanner || supervisorMandate || sessionSupervision}
         <div class="row-start-1 min-w-0">
           {#if errorBanner}
             <ErrorBanner {...errorBanner} />
           {/if}
           {#if supervisorMandate}
             <SupervisorMandateBar {...supervisorMandate} />
+          {:else if sessionSupervision}
+            <SessionSupervisionBar {...sessionSupervision} />
           {/if}
         </div>
       {/if}

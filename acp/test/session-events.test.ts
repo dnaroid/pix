@@ -105,8 +105,12 @@ test("settled carries the stop reason and successful write/edit paths", () => {
 	observer.event({ type: "tool_execution_start", toolCallId: "t4", toolName: "edit", args: { path: "/elsewhere/x.ts" } });
 	observer.event({ type: "tool_execution_end", toolCallId: "t4", toolName: "edit", isError: false });
 	observer.settled("end_turn");
-	assert.deepEqual(events.map(({ type }) => type), ["settled"]);
-	const settled = events[0] as Extract<SessionEvent, { type: "settled" }>;
+	assert.deepEqual(events.slice(0, -1), [
+		{ type: "file_changed", sessionId: "s1", at: 1_000, path: "src/a.ts" },
+		{ type: "file_changed", sessionId: "s1", at: 1_000, path: "/elsewhere/x.ts" },
+	]);
+	const settled = events.at(-1) as Extract<SessionEvent, { type: "settled" }>;
+	assert.equal(settled.type, "settled");
 	assert.equal(settled.sessionId, "s1");
 	assert.equal(settled.stopReason, "end_turn");
 	assert.deepEqual(settled.touchedFiles, ["src/a.ts", "/elsewhere/x.ts"]);

@@ -221,6 +221,28 @@ test("a question escalation survives send and requires a later user prompt for t
 	assert.deepEqual(await s.ledger(), ["escalated", "sent", "answered"]);
 });
 
+test("a reissued questionnaire cannot bypass an unresolved escalation", async (t) => {
+	const s = await setup(t);
+	s.questions.set("w1", questionnaire);
+	const escalate = { op: "escalate", sessionId: "w1", questionId: "q1", text: "Need a product decision" } as const;
+	await s.handle(escalate);
+	s.questions.set("w1", { ...questionnaire, questionId: "q2" });
+	await s.handle(send("status update"));
+	assert.equal((await s.store.readRegistry(s.cwd)).sessions.w1?.escalation?.questionId, "q1");
+	await assert.rejects(s.handle({ ...answer, questionId: "q2" }), /was escalated/);
+	const relay = { ...answer, questionId: "q2", authority: "user" } as const;
+	s.setUserPromptAt(Number.MAX_SAFE_INTEGER);
+	await assert.rejects(s.handle(relay), /subsequent user prompt/);
+	await s.handle({ ...escalate, questionId: "q2" });
+	const escalation = (await s.store.readRegistry(s.cwd)).sessions.w1?.escalation;
+	assert.equal(escalation?.questionId, "q2");
+	s.setUserPromptAt(escalation!.at);
+	await assert.rejects(s.handle(relay), /subsequent user prompt/);
+	assert.deepEqual(s.answers, []);
+	s.setUserPromptAt(escalation!.at + 1);
+	assert.deepEqual(await s.handle(relay), { answered: true, questionId: "q2" });
+});
+
 test("supervisor send enforces maxConcurrent only when it would start a new turn", async (t) => {
 	const s = await setup(t, { mandate: { maxConcurrent: 1 }, sessions: { w1: managed(), busy: managed(), manual: managed({ mode: "manual" }) } });
 	s.live.set("busy", liveSession(true));
@@ -249,7 +271,9 @@ test("completion guards name every failing condition", () => {
 	assert.deepEqual(completionGuardFailures(goodDigest("w", { run: "running" }), undefined), ["a turn is still in flight"]);
 	assert.deepEqual(completionGuardFailures(goodDigest("w"), "cancelled"), ["last turn stop reason is cancelled, not end_turn"]);
 	assert.deepEqual(completionGuardFailures(goodDigest("w", { pendingQuestion: true }), "end_turn"), ["a question is pending"]);
-	assert.deepEqual(completionGuardFailures(goodDigest("w", { plan: undefined }), "end_turn"), ["no linked plan"]);
+	assert.deepEqual(completionGuardFailures(goodDigest("w", { plan: undefined }), "end_turn"), []);
+	assert.deepEqual(completionGuardFailures(goodDigest("w", { plan: undefined, planLookupFailed: true }), "end_turn"),
+		["could not determine whether a plan is linked"]);
 	assert.deepEqual(completionGuardFailures(goodDigest("w", { plan: { path: "p.md", progress: null } }), "end_turn"), ["plan p.md is unreadable"]);
 	assert.deepEqual(completionGuardFailures(goodDigest("w", { plan: { path: "p.md", progress: { completed: 0, total: 0 } } }), "end_turn"),
 		["plan p.md has no checklist items"]);
@@ -285,6 +309,22 @@ test("supervisor close writes the task, unregisters the session and journals evi
 	const closed = (await s.store.readLedger(s.cwd)).find((entry) => entry.sessionId === "w1");
 	assert.equal(closed?.kind, "closed");
 	assert.equal((closed?.detail as { evidence: { stopReason: string } }).evidence.stopReason, "end_turn");
+});
+
+test("supervisor closes a completed prompt session without inventing a task or plan", async (t) => {
+	const s = await setup(t, { sessions: { w1: managed({ item: { kind: "prompt" } }) } });
+	s.digests.set("w1", goodDigest("w1", { task: undefined, plan: undefined, pendingQuestion: true }));
+	const close = { op: "close", sessionId: "w1", outcome: "done", summary: "verified" } as const;
+	assert.deepEqual(await s.handle(close), { closed: false, failures: ["a question is pending"] });
+	assert.ok((await s.store.readRegistry(s.cwd)).sessions.w1);
+	s.digests.set("w1", goodDigest("w1", { task: undefined, plan: undefined }));
+	assert.deepEqual(await s.handle(close), { closed: true, outcome: "done" });
+	assert.deepEqual(s.taskWrites, []);
+	assert.deepEqual(s.released, ["w1"]);
+	assert.deepEqual((await s.store.readRegistry(s.cwd)).sessions, {});
+	const closed = (await s.store.readLedger(s.cwd)).at(-1);
+	assert.equal(closed?.kind, "closed");
+	assert.equal((closed?.detail as { evidence: { plan: unknown } }).evidence.plan, null);
 });
 
 test("a user takeover holding the lock wins over a racing supervisor send", async (t) => {

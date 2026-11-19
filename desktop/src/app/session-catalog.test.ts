@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ListSessionsResponse } from "@agentclientprotocol/sdk";
 import type { AcpClient } from "../lib/acp-client";
+import { buildTabSessions } from "../lib/session-tabs";
 import { createSessionCatalog } from "./session-catalog.svelte";
 import type { createSessionTabsState } from "./session-tabs-state.svelte";
+import { buildSessionWorkbenchTabs } from "./workbench-model";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -134,6 +136,36 @@ describe("native session catalog updates", () => {
     await first;
     await vi.waitFor(() => expect(f.catalog.sessions.map(s => s.sessionId)).toEqual(["fresh"]));
     expect(f.client.listSessions).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows a launched worker's managed marker when registration invalidates an in-flight launch refresh", async () => {
+    const stale = deferred<ListSessionsResponse>();
+    const fresh = deferred<ListSessionsResponse>();
+    const f = fixture(vi.fn()
+      .mockReturnValueOnce(stale.promise)
+      .mockReturnValueOnce(fresh.promise));
+    f.catalog.ensureProvisional("worker", "/workspace");
+    const tabs = () => buildSessionWorkbenchTabs({
+      sessions: buildTabSessions(f.catalog.sessions, [], ["worker"], [], "worker"),
+      draftSessionTabId: "draft", realSessionCount: 1,
+      pausedSessionIds: new Set(), runningSessionIds: new Set(["worker"]),
+      sessionActivityBySessionId: new Map(), pendingElicitationSessionIds: new Set(),
+      unseenCompletedSessionIds: new Set(), disabled: false,
+    });
+
+    const launchRefresh = f.catalog.refresh();
+    expect(tabs()[0]?.supervised).toBeUndefined();
+    f.catalog.nativeCatalogChanged("/workspace");
+    expect(f.client.listSessions).toHaveBeenCalledTimes(1);
+    stale.resolve(result("worker"));
+    await launchRefresh;
+    expect(f.client.listSessions).toHaveBeenCalledTimes(2);
+    expect(tabs()[0]?.supervised).toBeUndefined();
+
+    fresh.resolve({ sessions: [{ ...result("worker").sessions[0]!, _meta: { "pix.supervisorManaged": "managed" } }] });
+    await f.catalog.refresh(); // Join the follow-up already started by invalidation.
+    expect(f.client.listSessions).toHaveBeenCalledTimes(2);
+    expect(tabs()).toEqual([expect.objectContaining({ sessionId: "worker", running: true, supervised: true })]);
   });
 
   it("ignores notifications for old workspace or replaced ACP connection", async () => {

@@ -113,17 +113,18 @@ describe("manual supervisor handover", () => {
 
   it("offers handover only for ordinary sessions while a supervisor exists", () => {
     const h = handover([supervisor, { sessionId: "w" }, { sessionId: "m", _meta: { "pix.supervisorManaged": "manual" } }]);
-    expect(h.action.supervision("w")).toEqual({ supervised: false, enabled: true });
-    expect(h.action.supervision("m")).toEqual({ supervised: true, enabled: true });
+    expect(h.action.supervision("w")).toEqual({ mode: undefined, supervisorAvailable: true, enabled: true });
+    expect(h.action.supervision("m")).toEqual({ mode: "manual", supervisorAvailable: true, enabled: true });
     expect(h.action.supervision("sup")).toBeUndefined();
     expect(h.action.supervision("missing")).toBeUndefined();
     const none = handover([{ sessionId: "w" }, { sessionId: "m", _meta: { "pix.supervisorManaged": "manual" } }]);
-    expect(none.action.supervision("w")).toEqual({ supervised: false, enabled: false });
-    expect(none.action.supervision("m")).toEqual({ supervised: true, enabled: true });
+    expect(none.action.supervision("w")).toEqual({ mode: undefined, supervisorAvailable: false, enabled: true });
+    expect(none.action.supervision("m")).toEqual({ mode: "manual", supervisorAvailable: false, enabled: true });
   });
 
   it("calls ACP once per pending change, refreshes, and drops stale results", async () => {
-    const h = handover([supervisor, { sessionId: "w" }]);
+    const worker = { sessionId: "w", _meta: { "pix.supervisorManaged": "manual" } };
+    const h = handover([supervisor, worker]);
     let release!: () => void;
     h.client.supervisorHandover.mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve({ supervised: true }); }));
     const first = h.action.setSupervised("w", true);
@@ -138,6 +139,7 @@ describe("manual supervisor handover", () => {
     expect(h.errors).toHaveLength(1);
     h.client.supervisorHandover.mockImplementationOnce(async () => { h.setClient(null); throw new Error("late"); });
     await h.action.setSupervised("w", false);
+    expect(h.client.supervisorHandover).toHaveBeenLastCalledWith("/p", "w", false);
     expect(h.errors).toHaveLength(1);
   });
 });

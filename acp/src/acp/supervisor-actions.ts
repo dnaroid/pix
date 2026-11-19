@@ -28,6 +28,8 @@ export interface SupervisorActionRuntime {
 	 * prepended; resolves once the launch prompt is dispatched.
 	 */
 	launch(cwd: string, callerSessionId: string, item: SupervisorStartItem, modelRef: string | undefined): Promise<{ sessionId: string }>;
+	/** Invalidate Desktop's session catalog after the launched worker is registered. */
+	registered?(cwd: string, callerSessionId: string): void;
 	/** Set a saved task's status; false when the task does not exist. */
 	writeTaskStatus(cwd: string, taskId: string, status: "done" | "failed" | "in-progress"): Promise<boolean>;
 	/** The session left the registry (closed by the supervisor). */
@@ -59,11 +61,13 @@ export function completionGuardFailures(digest: SupervisorDigest, lastStopReason
 	else if (stopReason !== "end_turn") failures.push(`last turn stop reason is ${stopReason ?? "unknown"}, not end_turn`);
 	if (digest.pendingQuestion || digest.run === "question") failures.push("a question is pending");
 	const plan = digest.plan;
-	if (!plan) failures.push("no linked plan");
-	else if (!plan.progress) failures.push(`plan ${plan.path} is unreadable`);
-	else if (plan.progress.total === 0) failures.push(`plan ${plan.path} has no checklist items`);
-	else if (plan.progress.completed < plan.progress.total) {
-		failures.push(`plan ${plan.path} has ${plan.progress.total - plan.progress.completed} unchecked item(s)`);
+	if (digest.planLookupFailed) failures.push("could not determine whether a plan is linked");
+	if (plan) {
+		if (!plan.progress) failures.push(`plan ${plan.path} is unreadable`);
+		else if (plan.progress.total === 0) failures.push(`plan ${plan.path} has no checklist items`);
+		else if (plan.progress.completed < plan.progress.total) {
+			failures.push(`plan ${plan.path} has ${plan.progress.total - plan.progress.completed} unchecked item(s)`);
+		}
 	}
 	if (!digest.finalReport) failures.push("no final assistant report");
 	else if (!VERIFICATION_SECTION.test(digest.finalReport.text)) failures.push("final report has no verification section");
@@ -146,6 +150,7 @@ export function createSupervisorActions(deps: SupervisorActionDeps) {
 			sessions: { ...current.sessions, [sessionId]: current.sessions[sessionId]
 				?? { item: registered, mode: "managed", registeredAt: Date.now(), reworkRounds: 0, briefed: true } },
 		}));
+		runtime.registered?.(cwd, callerSessionId);
 		await journal(cwd, "started", sessionId, { item: registered, ...(modelRef ? { modelRef } : {}),
 			...(item.kind === "prompt" ? { text: clip(item.text) } : {}) });
 		return { started: true, sessionId, item: registered,
@@ -170,8 +175,7 @@ export function createSupervisorActions(deps: SupervisorActionDeps) {
 		const next = await store.updateRegistry(cwd, (current) => {
 			const existing = current.sessions[request.sessionId];
 			if (!existing) return current;
-			const questionId = existing.escalation?.questionId;
-			const updated = { ...(questionId && runtime.question?.(request.sessionId, questionId) ? existing : withoutEscalation(existing)), briefed: true };
+			const updated = { ...(existing.escalation?.questionId ? existing : withoutEscalation(existing)), briefed: true };
 			return { ...current, sessions: { ...current.sessions, [request.sessionId]: request.kind === "rework"
 				? { ...updated, reworkRounds: existing.reworkRounds + 1 } : updated } };
 		});
@@ -191,8 +195,8 @@ export function createSupervisorActions(deps: SupervisorActionDeps) {
 		const managed = managedSession(registry, sessionId);
 		const question = pendingQuestion(sessionId, questionId);
 		const escalation = managed.escalation;
-		if (authority === "mandate" && escalation?.questionId === questionId) {
-			throw new Error("This question was escalated; wait for the user's decision before answering");
+		if (authority === "mandate" && escalation?.questionId) {
+			throw new Error("A question was escalated for this session; wait for the user's decision, or escalate the new question id if the worker asked again");
 		}
 		if (authority === "user" && (escalation?.questionId !== questionId || (runtime.userPromptAt?.(callerSessionId) ?? 0) <= escalation.at)) {
 			throw new Error("User authority requires an escalation for this question and a subsequent user prompt in the supervisor session");

@@ -1017,6 +1017,15 @@
     refreshSessions: sessionCatalog.refresh,
     reportError,
   });
+  const sessionSupervisionBar = $derived.by(() => {
+    const sessionId = activeSessionId;
+    if (activeWorkbenchTab?.kind !== "session" || !sessionId) return null;
+    const supervision = supervisorHandover.supervision(sessionId);
+    return supervision ? {
+      supervision,
+      onSetSupervised: (supervised: boolean) => void supervisorHandover.setSupervised(sessionId, supervised),
+    } : null;
+  });
   onDestroy(sessionRename.cancel);
   const supervisorMandate = createSupervisorMandate({
     client: () => client,
@@ -1117,6 +1126,7 @@
     <DesktopWorkbenchSurface
       {...workbenchViewModel.props}
       supervisorMandate={supervisorMandateBar}
+      sessionSupervision={sessionSupervisionBar}
       bind:transcriptPane
       bind:transcriptContent
       bind:promptComposer

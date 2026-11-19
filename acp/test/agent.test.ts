@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
+import { setImmediate } from "node:timers/promises";
 import {
 	client,
 	methods,
@@ -87,6 +88,7 @@ import type {
 import { SessionMapStore } from "../src/acp/session-map.js";
 import { parseSupervisorMandateResponse, SUPERVISOR_QUESTION_RESOLVED_CHANNEL, SUPERVISOR_WORKER_PREAMBLE } from "../src/acp/supervisor-contract.js";
 import { PIX_SESSION_CATALOG_CHANGED_METHOD } from "../src/acp/session-catalog-contract.js";
+import { createSupervisorStore } from "../src/acp/supervisor-store.js";
 import type { PersistedDesktopQueues } from "../src/acp/queue-store.js";
 import type { DesktopForkSnapshot, DesktopForkChild } from "../src/acp/desktop-fork-snapshot.js";
 import type { Logger } from "../src/logging.js";
@@ -6392,14 +6394,16 @@ test("project supervisor: worker events wake the supervisor with one coalesced q
 	}
 });
 
-test("project supervisor: Desktop mandate gates sends, and a user message takes the session back", async (t) => {
+test("project supervisor: Desktop mandate gates sends, and user takeover wins a racing send", async (t) => {
 	const agentDir = mkdtempSync(join(tmpdir(), "pix-acp-supervisor-mandate-agent-"));
 	const cwd = mkdtempSync(join(tmpdir(), "pix-acp-supervisor-mandate-"));
 	t.after(() => Promise.all([rm(agentDir, { recursive: true, force: true }), rm(cwd, { recursive: true, force: true })]).then(() => undefined));
+	const store = createSupervisorStore();
 	const harness = createTestAdapter({
 		agentDir,
+		supervisorStore: store,
 		supervisorExtensionPath: "/opt/pix/supervisor.js",
-		supervisorWakeDebounceMs: 5,
+		supervisorWakeDebounceMs: 60_000,
 		loadDesktopQueues: async () => ({ auto: [], deferred: [] }),
 		saveDesktopQueues: async () => {},
 	});
@@ -6445,10 +6449,56 @@ test("project supervisor: Desktop mandate gates sends, and a user message takes 
 			assert.deepEqual(workerSession.autoUserMessages.map((item) => item.promptText), [`${SUPERVISOR_WORKER_PREAMBLE}\n\n[Supervisor rework] please add tests`]);
 			assert.equal((await cx.request("pix/supervisor/mandate", { cwd }) as Record<string, unknown>)["reworkRounds"], 1);
 
-			// The user types into the managed session: it turns manual before dispatch.
+			// Hold the real prompt's takeover inside ACP's project lock, before the
+			// registry write, and let the supervisor bridge preflight see "managed".
+			const takeoverEntered = Promise.withResolvers<void>();
+			const releaseTakeover = Promise.withResolvers<void>();
+			const sendPreflight = Promise.withResolvers<string | undefined>();
+			let takeoverHeld = false;
+			let observeSend = false;
+			let earlyMandateReads = 0;
+			const updateRegistry = store.updateRegistry;
+			const readRegistry = store.readRegistry;
+			const readMandate = store.readMandate;
+			t.mock.method(store, "updateRegistry", async (...args: Parameters<typeof updateRegistry>) => {
+				if (!takeoverHeld) return updateRegistry(...args);
+				takeoverEntered.resolve();
+				await releaseTakeover.promise;
+				return updateRegistry(...args);
+			});
+			t.mock.method(store, "readRegistry", async (...args: Parameters<typeof readRegistry>) => {
+				const snapshot = await readRegistry(...args);
+				if (observeSend) sendPreflight.resolve(snapshot.sessions[worker.sessionId]?.mode);
+				return snapshot;
+			});
+			t.mock.method(store, "readMandate", (...args: Parameters<typeof readMandate>) => {
+				if (takeoverHeld) earlyMandateReads += 1;
+				return readMandate(...args);
+			});
 			const pi = harness.clients[1]!;
+			let modeAtDispatch: string | undefined;
+			pi.promptHook = async () => { modeAtDispatch = (await readRegistry(cwd)).sessions[worker.sessionId]?.mode; };
+			takeoverHeld = true;
 			const pending = cx.request("session/prompt", { sessionId: worker.sessionId, prompt: [{ type: "text", text: "I'll take it from here" }] });
-			await waitFor(() => pi.promptCalls.length === 1);
+			let racingSend: ReturnType<typeof ask>;
+			try {
+				await takeoverEntered.promise;
+				observeSend = true;
+				racingSend = ask(send);
+				assert.equal(await sendPreflight.promise, "managed");
+				// Drain the bridge's promise continuation while takeover still holds
+				// the lock. A send bypassing it would start reading the mandate now.
+				await setImmediate();
+				assert.equal(earlyMandateReads, 0);
+				assert.equal(pi.promptCalls.length, 0);
+			} finally {
+				observeSend = false;
+				takeoverHeld = false;
+				releaseTakeover.resolve();
+			}
+			assert.match((await racingSend).error ?? "", /taken over by the user/);
+			await waitFor(() => modeAtDispatch !== undefined);
+			assert.equal(modeAtDispatch, "manual");
 			pi.emit({ type: "agent_start" });
 			pi.emit({ type: "agent_end", messages: [{ role: "assistant", content: [], stopReason: "stop" }], willRetry: false } as unknown as JsonAgentSessionEvent);
 			pi.emit({ type: "agent_settled" });
@@ -6456,11 +6506,11 @@ test("project supervisor: Desktop mandate gates sends, and a user message takes 
 			const registry = JSON.parse(await readFile(join(cwd, ".pi/supervisor/registry.json"), "utf8")) as { sessions: Record<string, { mode: string }> };
 			assert.equal(registry.sessions[worker.sessionId]?.mode, "manual");
 			assert.deepEqual(workerSession.autoUserMessages, [], "pending supervisor deliveries are dropped");
-			assert.match((await ask(send)).error ?? "", /taken over by the user/);
 			const counts = await cx.request("pix/supervisor/mandate", { cwd }) as Record<string, unknown>;
 			assert.deepEqual([counts["managed"], counts["manual"]], [0, 1]);
 			const ledger = await readFile(join(cwd, ".pi/supervisor/ledger.jsonl"), "utf8");
 			for (const kind of ["mandate_changed", "escalated", "sent", "manual_takeover"]) assert.match(ledger, new RegExp(`"kind":"${kind}"`));
+			assert.equal(ledger.match(/"kind":"sent"/gu)?.length, 1, "the racing send was never recorded or delivered");
 			assert.equal(harness.clients[0]!.promptCalls.length, 0);
 		});
 	} finally {
@@ -6603,24 +6653,38 @@ test("project supervisor: mandate saves, reads and clears the default worker mod
 	}
 });
 
-test("project supervisor: start asks Desktop to launch, registers the session managed and rejects a foreign receipt", async (t) => {
+test("project supervisor: start rejects a foreign receipt and invalidates Desktop's catalog after registration", async (t) => {
 	const agentDir = mkdtempSync(join(tmpdir(), "pix-acp-supervisor-start-agent-"));
 	const cwd = mkdtempSync(join(tmpdir(), "pix-acp-supervisor-start-"));
 	t.after(() => Promise.all([rm(agentDir, { recursive: true, force: true }), rm(cwd, { recursive: true, force: true })]).then(() => undefined));
 	const harness = createTestAdapter({
 		agentDir,
+		nativeSessionRevision: async () => "stable-test-catalog",
 		supervisorExtensionPath: "/opt/pix/supervisor.js",
 		supervisorWakeDebounceMs: 5,
 		loadDesktopQueues: async () => ({ auto: [], deferred: [] }),
 		saveDesktopQueues: async () => {},
 	});
 	const launches: Array<Record<string, unknown>> = [];
+	const catalogChanges: string[] = [];
 	let launched = "";
+	let readMarker: () => Promise<unknown>;
 	try {
 		await connectAs(harness.adapter, "pix-desktop", async (cx) => {
 			await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientCapabilities: {}, clientInfo: { name: "pix-desktop", version: "test" } });
 			await cx.request("pix/supervisor/open", { cwd });
 			const worker = await cx.request("session/new", { cwd, mcpServers: [] }) as { sessionId: string };
+			// Let the initial native scan notify once, so only registration can
+			// invalidate the catalog during the subsequent launch.
+			await cx.request("session/list", { cwd, _meta: { "pix.waitForDiscovery": true } });
+			await waitFor(() => catalogChanges.length > 0);
+			catalogChanges.length = 0;
+			readMarker = async () => {
+				const list = await cx.request("session/list", { cwd }) as { sessions: Array<{ sessionId: string; _meta?: Record<string, unknown> }> };
+				const row = list.sessions.find((session) => session.sessionId === worker.sessionId);
+				assert.ok(row, "Desktop can see the new session before registration");
+				return row._meta?.["pix.supervisorManaged"];
+			};
 			await cx.request("pix/supervisor/mandate", { cwd, patch: { enabled: true } });
 
 			const replies: Array<{ result?: any; error?: string }> = [];
@@ -6639,9 +6703,14 @@ test("project supervisor: start asks Desktop to launch, registers the session ma
 
 			launched = "foreign-session";
 			assert.match((await ask({ op: "start", text: "fix the flaky test" })).error ?? "", /not a work session of this project/);
+			assert.deepEqual(catalogChanges, [], "a failed launch never invalidates for registration");
 			launched = worker.sessionId;
 			const started = await ask({ op: "start", planPath: ".pi/plans/p.md" });
+			assert.equal(started.error, undefined);
 			assert.equal(started.result?.sessionId, worker.sessionId);
+			await waitFor(() => catalogChanges.length > 0);
+			assert.deepEqual(catalogChanges, [cwd]);
+			assert.equal(await readMarker(), "managed");
 			assert.deepEqual(launches.at(-1)?.["item"], { kind: "plan", path: ".pi/plans/p.md" });
 			assert.equal(launches.at(-1)?.["modelRef"], undefined, "no mandate default and no explicit model");
 			assert.equal(launches.at(-1)?.["sourceSessionId"], launches[0]?.["sourceSessionId"]);
@@ -6662,8 +6731,14 @@ test("project supervisor: start asks Desktop to launch, registers the session ma
 			assert.equal(after.sessions[worker.sessionId]?.mode, "managed");
 			assert.match(await readFile(join(cwd, ".pi/supervisor/ledger.jsonl"), "utf8"), /"kind":"started"/);
 		}, (app) => {
-			app.onRequest("pix/supervisor/start" as never, ((params: unknown) => params) as never, ((ctx: { params: Record<string, unknown> }) => {
+			app.onNotification(PIX_SESSION_CATALOG_CHANGED_METHOD as never, ((params: unknown) => params) as never,
+				(({ params }: { params: { cwd: string } }) => { catalogChanges.push(params.cwd); }) as never);
+			app.onRequest("pix/supervisor/start" as never, ((params: unknown) => params) as never, (async (ctx: { params: Record<string, unknown> }) => {
 				launches.push(ctx.params);
+				if (launched !== "foreign-session") {
+					assert.equal(await readMarker(), undefined, "Desktop's launch refresh can finish before returning its receipt");
+					assert.deepEqual(catalogChanges, [], "registration must not notify before Desktop returns its receipt");
+				}
 				return { sessionId: launched };
 			}) as never);
 		});

@@ -84,6 +84,7 @@ export interface SupervisorSessionSummary {
 	readonly run: RunState;
 	readonly last?: LastEvent;
 	readonly plan?: { readonly path: string; readonly progress: PlanProgress | null };
+	readonly planLookupFailed?: true;
 	readonly updatedAt?: string;
 }
 
@@ -124,14 +125,21 @@ export function createSupervisorService(deps: SupervisorServiceDeps): Supervisor
 		return live.running ? "running" : "idle";
 	}
 
-	async function plan(cwd: string, sessionId: string): Promise<SupervisorSessionSummary["plan"]> {
+	async function plan(cwd: string, sessionId: string, managed?: ManagedSession): Promise<Pick<SupervisorSessionSummary, "plan" | "planLookupFailed">> {
+		let path: string | undefined;
 		try {
-			const path = await deps.planFor(cwd, sessionId);
-			if (!path) return undefined;
-			return { path, progress: await readProgress(cwd, path) };
+			path = await deps.planFor(cwd, sessionId);
+		} catch (error) {
+			report(`supervisor plan lookup failed: ${errorMessage(error)}`);
+			return { planLookupFailed: true };
+		}
+		path ??= managed?.item.kind === "plan" ? managed.item.path : undefined;
+		if (!path) return {};
+		try {
+			return { plan: { path, progress: await readProgress(cwd, path) } };
 		} catch (error) {
 			report(`supervisor plan progress failed: ${errorMessage(error)}`);
-			return undefined;
+			return { plan: { path, progress: null } };
 		}
 	}
 
@@ -153,7 +161,7 @@ export function createSupervisorService(deps: SupervisorServiceDeps): Supervisor
 	): Promise<SupervisorSessionSummary> {
 		const task = tasks.get(sessionId);
 		const last = lastEvents.get(sessionId);
-		const linkedPlan = await plan(cwd, sessionId);
+		const linkedPlan = await plan(cwd, sessionId, managed);
 		return {
 			sessionId,
 			...(record?.title ? { title: record.title } : {}),
@@ -162,7 +170,7 @@ export function createSupervisorService(deps: SupervisorServiceDeps): Supervisor
 			...(task ? { task } : {}),
 			run: runState(sessionId),
 			...(last ? { last } : {}),
-			...(linkedPlan ? { plan: linkedPlan } : {}),
+			...linkedPlan,
 			...(record ? { updatedAt: record.updatedAt } : {}),
 		};
 	}
@@ -241,6 +249,7 @@ export function createSupervisorService(deps: SupervisorServiceDeps): Supervisor
 
 	return {
 		record(event) {
+			if (event.type === "file_changed") return; // raw input for conflict detection, not a lifecycle status
 			lastEvents.delete(event.sessionId);
 			lastEvents.set(event.sessionId, lastEventOf(event));
 			while (lastEvents.size > MAX_LAST_EVENTS) {

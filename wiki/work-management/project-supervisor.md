@@ -12,7 +12,7 @@ phase 0, the supervisor session with read-only `status`/`read`, debounced wakes,
 the pinned supervisor tab, manual handover (`pix/supervisor/handover`), the
 mandate header block (`pix/supervisor/mandate`), the mutating ops `start`,
 `send`, `answer`, `cancel`, `close` (with completion guards), `reopen` and `escalate`, the worker preamble, startup reconciliation, and user takeover.
-Not yet: the token budget and `conflict` events. See *State and lifetime*. The staged rollout is tracked in the project plan
+Not yet: the token budget. See *State and lifetime*. The staged rollout is tracked in the project plan
 `.pi/plans/project-supervisor.md`.
 
 [Work management](index.md)
@@ -99,18 +99,32 @@ decision outside its mandate.
 
 ## Managed sessions and handover
 
-- Each session record in ACP carries `managedBy: <supervisorSessionId>` and
-  `mode: managed | manual`. These are explicit metadata; names and titles are
-  presentation only.
-- **Hand over / Take back** actions on a session row and in the session view
-  change ownership. Handing over a busy session is allowed; the supervisor
-  receives it as an event.
+- Ownership lives in the project supervisor registry, not in session names or
+  titles. A registry entry has `mode: managed | manual`. ACP reports it as
+  `_meta["pix.supervisorManaged"]` in `session/list`; Desktop reads only that
+  marker.
+- **Automatic marker:** `start` registers the launched session as `managed`
+  with `briefed: true` (`acp/src/acp/supervisor-actions.ts`, registry update
+  after `runtime.launch`). No separate marker write is needed; the marker
+  follows the registry entry.
+- **Hand Over to Supervisor** (`pix/supervisor/handover`, `supervised: true`)
+  requires a registered supervisor. An existing entry flips to `managed`;
+  otherwise a `{ item: prompt, mode: managed, reworkRounds: 0 }` entry is
+  created without `briefed`. Sub-agent sessions and the supervisor itself are
+  refused.
+- **Take Back from Supervisor** (`supervised: false`) removes the registry entry.
+- Both run under the project supervisor lock and are idempotent: a call that
+  changes nothing writes no ledger entry. A change appends `handed_over` or
+  `released` to the ledger only. Neither emits a supervisor event nor wakes the
+  supervisor.
 - When the user sends a message into a managed session, it switches to
-  `manual` atomically, before that message is dispatched. The supervisor gets
-  `manual_takeover` and must not send there until the user releases it.
-  Supervisor sends that race with the takeover are rejected, not queued.
-- Closing or deleting a managed session removes it from the registry and
-  journals the event. The task's status is not changed automatically.
+  `manual` atomically, before that message is dispatched. The ledger gets
+  `manual_takeover`, and the supervisor gets that event and wakes. It must not
+  send there until the user releases it. Supervisor sends that race with the
+  takeover are rejected, not queued.
+- The `close` op removes the session from the registry and journals `closed`.
+  Deleting a managed session unregisters it and journals `closed_by_user`, with
+  no wake. The task's status is not changed automatically.
 
 ## Supervisor tool
 
@@ -128,7 +142,7 @@ hosts. It calls ACP through a correlated request bridge modelled on
 | `cancel` | Cancels the managed session's current turn. |
 | `close` | `{sessionId, outcome: done or failed, summary}`. Runs the completion guards, sets the task status, journals the evidence and unregisters the session. |
 | `reopen` | Restores a closed item to `in-progress` and re-registers its session. Refused if that session was deleted; run the item again with `start`. |
-| `escalate` | Posts a structured request to the user in the supervisor session and records an escalation on the item (it waits for the user; the next supervisor send clears it). Allowed while paused. |
+| `escalate` | Records a decision needed from the user; the supervisor asks in its reply. Include `{sessionId, questionId}` for a worker questionnaire. A generic escalation is cleared by the next `send`; a questionnaire escalation is not. Allowed while paused. |
 
 Each mutating op checks, inside ACP and atomically: the supervisor is not
 paused, the session is managed and in `managed` mode, limits allow the action,
@@ -148,8 +162,10 @@ involved.
   timeout bounds it. Waiting for the user is `question`, not `stalled`.
   `stalled` only notifies the supervisor; it never cancels the turn;
 - `checklist` — the linked plan's saved progress changed;
-- `conflict` — another managed session edited the same file (below);
-- `manual_takeover` / `released` / `handed_over` / `closed_by_user`.
+- `conflict` — another managed session in the same project edited the same file (below);
+- `manual_takeover` — a user message took a managed session. `handed_over`,
+  `released`, `closed` and `closed_by_user` are ledger entries only; they never
+  wake the supervisor.
 
 Events are coalesced per supervisor with a short debounce. An idle supervisor
 gets one wake turn with one digest. A busy supervisor gets the digest as a
@@ -165,19 +181,27 @@ longer registered are dropped. A session in `manual` mode keeps only its
 applies after this filtering. The filter affects wake digests only; the general
 event monitor and the ledger are unchanged.
 
+A `conflict` line is kept only while both sessions are still `managed` and
+their touch snapshots still match the ones that produced it. Conflict-only
+wakes use the same debounce, pause and queue as other events. A digest shows at
+most ten conflict details per worker, and one per retained pair and path.
+
 ## Completion guards
 
 `close outcome=done` is refused unless all of the following hold:
 
 1. the last turn ended with stop reason `end_turn`, and no turn is in flight;
 2. no question is pending;
-3. a linked plan exists and its saved checklist has `total > 0` and no
-   unchecked items;
+3. if a plan is linked, its saved checklist is readable, has `total > 0` and
+   no unchecked items. A session with no linked plan passes this guard. The
+   plan is the one recorded for the session's plan launch, or else the
+   registered plan item;
 4. the final assistant message contains a verification section (what was
    checked, and how).
 
-A refusal returns the failing guards; the supervisor sends rework or
-escalates. The ledger stores the evidence for every closure: turn id, stop
+A failed plan lookup is a refusal (`could not determine whether a plan is
+linked`), not proof that no plan exists. A refusal returns the failing guards;
+the supervisor sends rework or escalates. The ledger stores the evidence for every closure: turn id, stop
 reason, plan progress, touched files and report excerpt. `failed` needs a
 summary but no guards. Closures can be reverted with `reopen`.
 
@@ -187,10 +211,11 @@ summary but no guards. Closures can be reverted with `reopen`.
   no destructive git (`checkout`, `reset`, `stash`, `clean`, branch switches),
   no repository-wide formatting or mass rewrites, run only checks relevant to
   their scope, and expect other sessions' uncommitted changes in the tree.
-- ACP tracks the files each managed session touches through write/edit tool
-  calls. Overlapping paths between two managed sessions raise `conflict`.
-  Writes made through shell commands are not detected; this is a known gap,
-  not a guarantee.
+- ACP tracks the files each managed session touches through successful
+  write/edit tool calls. When two different managed sessions in the same
+  project touch the same path, the supervisor gets a `conflict` event. The
+  supervisor's own session is excluded. Writes made through shell commands are
+  not tracked; this is a known gap, not a guarantee.
 - Only the user commits. The supervisor may report which files belong to
   which item.
 
@@ -211,12 +236,13 @@ rationale.
   the matching Desktop dialog.
 - `authority=mandate` is the supervisor's own classification that the question
   is routine and within the saved policy. The tool instructions guide that
-  judgement; ACP does not verify it. A question that was escalated cannot be
-  answered with `mandate`.
+  judgement; ACP does not verify it. An unresolved questionnaire escalation
+  blocks `mandate` answers for that session, even if the old ID is stale.
 - Out-of-mandate questions are escalated with `escalate` and the `questionId`,
   and the worker keeps waiting. `authority=user` is accepted only for that
   escalated question, and only after a user message in the supervisor session
-  that arrived after the escalation. The `rationale` states the user's decision.
+  that arrived after the escalation. If the worker asks again with a new ID,
+  escalate that ID and obtain a new reply. The `rationale` states the user's decision.
 - Each answer is journaled as `answered` with its authority, rationale and
   selections. A legacy `send kind=answer` is refused.
 
@@ -234,8 +260,13 @@ rationale.
   (model/compaction/run/process), `stalled` and `checklist` to in-process
   subscribers (`PixAcpAgent.subscribeSessionEvents`). Session retirement emits
   nothing and disposes the observer's timer. Touched files are kept per session
-  id across runtime replacement and dropped on session delete. The `conflict`
-  event is still phase 3 work; `manual_takeover` is emitted by ACP (phase 2, below).
+  id across runtime replacement and dropped on session delete. Conflict detection
+  runs in `acp/src/acp/supervisor-wake.ts` from successful write/edit
+  completions (`file_changed`, which is not a lifecycle status). Conflict
+  history is in memory: it survives runtime replacement but not an adapter
+  restart, and keeps at most 500 recent paths per worker, dropping the oldest. A worker's
+  path history expires when it leaves managed registration. `manual_takeover` is
+  emitted by ACP (phase 2, below).
 - The storage layer exists (phase 0, done): `acp/src/acp/supervisor-store.ts`
   keeps `.pi/supervisor/mandate.json`, `registry.json` (atomic temp+rename,
   serialized per project, bounded to 200 sessions) and append-only
@@ -274,8 +305,8 @@ rationale.
   `maxReworkRounds`, and a send that would start a turn counts against
   `maxConcurrent`. `close done` is refused (ledger `close_refused`) unless no
   turn is in flight, the last stop reason is `end_turn`, no question is
-  pending, the linked plan has every item checked and the final report has a
-  verification section; on success ACP writes the task status in
+  pending, any linked plan is readable, non-empty and fully checked (a failed
+  lookup refuses) and the final report has a verification section; on success ACP writes the task status in
   `.pi/tasks.sqlite` (`supervisor-tasks.ts`), then unregisters the session and
   journals `closed` with evidence (including the item and rework count).
   `reopen` reverts a supervisor closure from that ledger entry: the session
@@ -367,10 +398,15 @@ session.
 - Events from several workers produce one wake. A busy supervisor gets one
   coalesced follow-up. Teardown releases timers and subscriptions.
 - `close done` is refused for each failing guard and succeeds when all hold.
-  The ledger contains the evidence.
+  A session with no linked plan closes without one; a failed plan lookup is
+  refused. The ledger contains the evidence.
 - A restart with a mid-turn worker yields an `interrupted` event and no
   duplicate session.
 - Worker sessions do not expose the `supervisor` tool or mandate text.
+- Two managed sessions that successfully write the same path produce one
+  `conflict` per pair and path in the digest. A `manual` session, the
+  supervisor's own session, a worker that left registration and a shell-only
+  write produce no conflict.
 
 ## Resolved questions (2026-11-17)
 

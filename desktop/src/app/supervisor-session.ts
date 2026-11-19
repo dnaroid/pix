@@ -1,6 +1,8 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { SessionInfo } from "@agentclientprotocol/sdk";
+import { SvelteSet } from "svelte/reactivity";
+import { supervisionActions, type SupervisionState } from "../lib/session-supervision";
 import { sessionIsSupervisor, sessionSupervisedMode } from "../lib/session-tabs";
 import { isSubagentSession } from "../lib/session-subagent-link";
 
@@ -59,11 +61,9 @@ type HandoverClient = {
   supervisorHandover(cwd: string, sessionId: string, supervised: boolean): Promise<{ supervised: boolean }>;
 };
 
-export type SupervisionState = { readonly supervised: boolean; readonly enabled: boolean };
-
 /**
  * Manual handover (0077): the user hands an ordinary conversation to the
- * project supervisor (registered as `manual`) or takes it back. ACP owns the
+ * project supervisor as `managed` or takes it back. ACP owns the
  * registry and ledger; Desktop only reflects the session-list marker.
  */
 export function createSupervisorHandover<C extends HandoverClient>(options: {
@@ -73,23 +73,25 @@ export function createSupervisorHandover<C extends HandoverClient>(options: {
   refreshSessions: () => Promise<void>;
   reportError: (error: unknown) => void;
 }) {
-  const pending = new Set<string>();
+  const pending = new SvelteSet<string>();
 
   /** Undefined when the session can never be supervised (sub-agent, supervisor itself, unknown). */
   function supervision(sessionId: string): SupervisionState | undefined {
     const sessions = options.sessions();
     const session = sessions.find((item) => item.sessionId === sessionId);
     if (!session || isSubagentSession(session) || sessionIsSupervisor(session)) return undefined;
-    const supervised = sessionSupervisedMode(session) !== undefined;
-    // Taking back is always allowed; handing over needs an existing supervisor.
-    const available = supervised || sessions.some(sessionIsSupervisor);
-    return { supervised, enabled: available && !pending.has(sessionId) && Boolean(options.client() && options.workspace()) };
+    return {
+      mode: sessionSupervisedMode(session),
+      supervisorAvailable: sessions.some(sessionIsSupervisor),
+      enabled: !pending.has(sessionId) && Boolean(options.client() && options.workspace()),
+    };
   }
 
   async function setSupervised(sessionId: string, supervised: boolean): Promise<void> {
     const client = options.client();
     const workspace = options.workspace();
-    if (!client || !workspace || pending.has(sessionId)) return;
+    const current = supervision(sessionId);
+    if (!client || !workspace || !current?.enabled || !supervisionActions(current).some((action) => action.supervised === supervised)) return;
     pending.add(sessionId);
     try {
       await client.supervisorHandover(workspace, sessionId, supervised);

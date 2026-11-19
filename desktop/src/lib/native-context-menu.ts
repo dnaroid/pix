@@ -8,6 +8,7 @@ import { selectPreviewText } from "./preview-text-selection";
 import { copyContextImage, openContextImage } from "./image-context-actions";
 import { gitRemoteLinkLabel, type GitRemoteEntryLink } from "./project-git-remote-link";
 import type { SelectionAssistTarget } from "./selection-assist-target";
+import { supervisionActions, type SupervisionState } from "./session-supervision";
 
 export interface ContextMenuPosition { x: number; y: number }
 export interface NativeContextMenu {
@@ -19,7 +20,7 @@ export interface SessionContextActions {
   canRename(sessionId: string): boolean;
   open(sessionId: string): void;
   /** Project-supervisor handover state; undefined hides the item. */
-  supervision?(sessionId: string): { readonly supervised: boolean; readonly enabled: boolean } | undefined;
+  supervision?(sessionId: string): SupervisionState | undefined;
   setSupervised?(sessionId: string, supervised: boolean): Promise<void>;
 }
 
@@ -115,16 +116,20 @@ export function nativeContextMenuItems(
     const supervision = sessionId ? sessionActions?.supervision?.(sessionId) : undefined;
     if (sessionActions?.setSupervised && sessionId && supervision) {
       const setSupervised = sessionActions.setSupervised;
-      items.push({
-        id: "desktop.session.supervise",
-        text: supervision.supervised ? "Take Back from Supervisor" : "Hand Over to Supervisor",
-        enabled: supervision.enabled,
-        action: run(async () => {
-          const current = sessionActions.supervision?.(sessionId);
-          // Act only if the state the user saw still holds.
-          if (current?.enabled && current.supervised === supervision.supervised) await setSupervised(sessionId, !supervision.supervised);
-        }),
-      });
+      for (const { supervised, label } of supervisionActions(supervision)) {
+        items.push({
+          id: supervised ? "desktop.session.supervise" : "desktop.session.take-back",
+          text: label,
+          enabled: supervision.enabled,
+          action: run(async () => {
+            const current = sessionActions.supervision?.(sessionId);
+            // Act only if the state the user saw still holds.
+            if (current?.enabled && current.mode === supervision.mode && (!supervised || current.supervisorAvailable)) {
+              await setSupervised(sessionId, supervised);
+            }
+          }),
+        });
+      }
     }
     const sessionFile = context.sessionFile;
     items.push({

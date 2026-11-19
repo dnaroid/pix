@@ -3,6 +3,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import supervisorExtension from "../src/extensions/supervisor.js";
 import {
 	parseSupervisorOpenRequest,
 	parseSupervisorStartRequest,
@@ -24,6 +26,40 @@ import { createSupervisorBridge, handleSupervisorResponse, installSupervisorHost
 import type { Logger } from "../src/logging.js";
 
 const logger: Logger = { debug() {}, info() {}, warn() {}, error() {} };
+
+test("supervisor start survives the extension and runtime bridge with its model override", async () => {
+	const host = Symbol.for("pix.supervisor.request");
+	const globals = globalThis as Record<symbol, unknown>;
+	const previous = globals[host];
+	const sessionManager = { getSessionId: () => "owner" };
+	let execute: Parameters<ExtensionAPI["registerTool"]>[0]["execute"] | undefined;
+	supervisorExtension({ registerTool: (tool) => { execute = tool.execute; } } as Pick<ExtensionAPI, "registerTool"> as ExtensionAPI);
+	assert.ok(execute);
+	const bridge = createSupervisorBridge({ sessionManager }, (event: { requestId: string; request: unknown }) => {
+		void forwardSupervisorRequest({
+			acpSessionId: "supervisor", cwd: "/project",
+			pi: { respondToSupervisor: async (requestId, response) => bridge.respond({ requestId, ...response }) },
+		}, event, async (_cwd, _caller, request) => request, () => true, logger);
+	});
+	globals[host] = bridge.request;
+	try {
+		const modelRef = "openai-codex/gpt-6.2-sol";
+		for (const [input, item] of [
+			[{ text: "handover" }, { kind: "prompt", text: "handover" }],
+			[{ text: "file conflicts" }, { kind: "prompt", text: "file conflicts" }],
+			[{ taskId: "t1" }, { kind: "task", taskId: "t1" }],
+			[{ planPath: ".pi/plans/p.md" }, { kind: "plan", path: ".pi/plans/p.md" }],
+		]) {
+			const result = await execute("start", { op: "start", ...input, modelRef }, undefined, undefined,
+				{ sessionManager } as Parameters<typeof execute>[4]);
+			assert.deepEqual(result.details, { op: "start", item, modelRef });
+		}
+	} finally {
+		bridge.dispose();
+		if (previous === undefined) delete globals[host];
+		else globals[host] = previous;
+	}
+});
 
 async function project(t: { after(fn: () => Promise<void>): void }): Promise<string> {
 	const cwd = await mkdtemp(join(tmpdir(), "pix-supervisor-"));
@@ -118,6 +154,30 @@ test("supervisor service answers only the registered supervisor and reports sess
 	await assert.rejects(service.handle(cwd, "sup", { op: "read", sessionId: "sup" }), /worker sessions/);
 	await assert.rejects(service.handle(cwd, "sup", { op: "read", sessionId: "child" }), /Unknown session/);
 	await assert.rejects(service.handle(cwd, "sup", { op: "read", sessionId: "missing" }), /Unknown session/);
+});
+
+test("supervisor digest distinguishes no plan from failed plan lookup and unreadable plan", async (t) => {
+	const cwd = await project(t);
+	const store = createSupervisorStore();
+	const worker = record("w", cwd);
+	let lookupFails = false;
+	const service = createSupervisorService({
+		store, listRecords: async () => [worker], getRecord: async () => worker,
+		live: () => ({ running: false, pendingQuestions: 0, messages: async () => [] }),
+		touchedFiles: () => [], readTaskLinks: async () => new Map(),
+		planFor: async () => { if (lookupFails) throw new Error("lookup failed"); return undefined; },
+		readPlanProgress: async () => { throw new Error("read failed"); },
+	});
+	const read = () => service.digest(cwd, "sup", "w");
+	assert.equal((await read()).plan, undefined);
+	lookupFails = true;
+	assert.equal((await read()).planLookupFailed, true);
+	lookupFails = false;
+	const path = ".pi/plans/p.md";
+	await store.updateRegistry(cwd, (current) => ({ ...current, sessions: {
+		w: { item: { kind: "plan", path }, mode: "managed", registeredAt: 1, reworkRounds: 0 },
+	} }));
+	assert.deepEqual((await read()).plan, { path, progress: null });
 });
 
 test("supervisor read returns a bounded digest from the live runtime or the saved transcript", async (t) => {
