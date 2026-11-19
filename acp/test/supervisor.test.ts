@@ -256,10 +256,13 @@ test("supervisor bridge correlates replies per runtime and drops late or foreign
 	assert.throws(() => bridge.request({ ownerSessionId: "owner", op: "status" }), /replaced/);
 });
 
-test("supervisor bridge times out without leaving pending requests", async () => {
+test("supervisor bridge times out without leaving pending requests", async (t) => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
 	const events: any[] = [];
 	const bridge = createSupervisorBridge({ sessionManager: { getSessionId: () => "owner" } }, (event: unknown) => events.push(event), 5);
-	await assert.rejects(bridge.request({ ownerSessionId: "owner", op: "status" }), /timed out/);
+	const rejected = assert.rejects(bridge.request({ ownerSessionId: "owner", op: "status" }), /timed out/);
+	t.mock.timers.tick(5);
+	await rejected;
 	bridge.respond({ requestId: events[0].requestId, result: 1 }); // late reply is ignored
 });
 
