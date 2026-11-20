@@ -66,7 +66,7 @@ describe("activity icon trail", () => {
     expect(activityIcon("unknown_a")).toBe(activityIcon("unknown_b"));
     const names = ["read", "shell", "ast_grep", "ast_apply", "apply_patch", "codemode", "project_search",
       "project_tasks", "todo", "session", "subagents", "question", "compress", "web_search", "web_fetch", "wiki_conflicts", "skill", "thinking",
-      "shell_output", "shell_jobs", "shell_kill", "lookup"];
+      "shell_output", "shell_jobs", "shell_kill", "lookup", "supervisor"];
     for (const name of ["repo_audit", "repo_knowledge", "repo_context", "repo_inspect", "repo_ast",
       "repo_search", "repo_structure", "repo_architecture", "repo_deps", "repo_ask", "repo_explain",
       "read_file", "task", "agent", "brainstorm",
@@ -80,7 +80,7 @@ describe("activity icon trail", () => {
 
   it.each([
     ["shell_output", "logs"], ["shell_jobs", "list-tree"],
-    ["shell_kill", "octagon-x"], ["lookup", "scan-eye"],
+    ["shell_kill", "octagon-x"], ["lookup", "scan-eye"], ["supervisor", "radar"],
   ])("renders the dedicated %s icon, including namespaced labels", (name, icon) => {
     expect(activityIcon(`functions.${name}`)).toBe(activityIcon(name));
     const html = header([tool(name, name)]);

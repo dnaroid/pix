@@ -19,6 +19,7 @@ import BookAlert from "@lucide/svelte/icons/book-alert";
 import GraduationCap from "@lucide/svelte/icons/graduation-cap";
 import ListChecks from "@lucide/svelte/icons/list-checks";
 import ListTodo from "@lucide/svelte/icons/list-todo";
+import Radar from "@lucide/svelte/icons/radar";
 import Bot from "@lucide/svelte/icons/bot";
 import MessageCircleQuestion from "@lucide/svelte/icons/message-circle-question-mark";
 import Minimize2 from "@lucide/svelte/icons/minimize-2";
@@ -51,6 +52,7 @@ const iconGroups: readonly (readonly [readonly string[], typeof Brain])[] = [
   [["skill"], GraduationCap],
   [["todo"], ListChecks],
   [["project_tasks"], ListTodo],
+  [["supervisor"], Radar],
   [["subagents"], Bot],
   [["question"], MessageCircleQuestion],
   [["compress"], Minimize2],
