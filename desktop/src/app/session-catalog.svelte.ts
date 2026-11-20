@@ -39,11 +39,12 @@ export function createSessionCatalog(options: SessionCatalogOptions) {
     );
   }
 
-  async function listForRestore(
+  async function listAndApply(
     requestClient: AcpClient,
     requestWorkspace: string,
     requestGeneration: number,
   ): Promise<ListSessionsResponse | null> {
+    let requestedTabs = options.tabs.sessionTabsForProject(requestWorkspace) ?? [];
     let response = await requestClient.listSessions(requestWorkspace);
     if (!responseIsCurrent(requestClient, requestWorkspace, requestGeneration)) return null;
     const savedTabs = options.tabs.sessionTabsForProject(requestWorkspace) ?? [];
@@ -51,9 +52,21 @@ export function createSessionCatalog(options: SessionCatalogOptions) {
     if (savedTabs.some((id) => !available.has(id))) {
       // A fast map snapshot can precede native discovery. Never persist its
       // omissions as closed tabs before reconciliation succeeds.
+      requestedTabs = savedTabs;
       response = await requestClient.listSessions(requestWorkspace, { waitForDiscovery: true });
     }
-    return responseIsCurrent(requestClient, requestWorkspace, requestGeneration) ? response : null;
+    if (!responseIsCurrent(requestClient, requestWorkspace, requestGeneration)) return null;
+
+    // The request cannot confirm that tabs opened after it began are gone.
+    // Keep their local catalog entries until a later list can reconcile them.
+    const requested = new Set(requestedTabs);
+    const listed = new Set(response.sessions.map((session) => session.sessionId));
+    const currentTabs = new Set(options.tabs.sessionTabsForProject(requestWorkspace) ?? []);
+    const newer = sessions.filter(({ sessionId, cwd }) => cwd === requestWorkspace
+      && currentTabs.has(sessionId) && !requested.has(sessionId) && !listed.has(sessionId));
+    const reconciled = newer.length ? { ...response, sessions: [...newer, ...response.sessions] } : response;
+    applyResponse(reconciled);
+    return reconciled;
   }
 
   function flushNativeRefresh(): void {
@@ -84,10 +97,7 @@ export function createSessionCatalog(options: SessionCatalogOptions) {
     const requestGeneration = ++generation;
     initialListings += 1;
     try {
-      const response = await listForRestore(requestClient, requestWorkspace, requestGeneration);
-      if (!response) return null;
-      applyResponse(response);
-      return response;
+      return await listAndApply(requestClient, requestWorkspace, requestGeneration);
     } catch (error) {
       if (responseIsCurrent(requestClient, requestWorkspace, requestGeneration)) options.reportError(error);
       return null;
@@ -124,11 +134,8 @@ export function createSessionCatalog(options: SessionCatalogOptions) {
     const existing = refreshRequest;
     if (existing && existing.client === requestClient && existing.workspace === requestWorkspace) return existing.promise;
     const requestGeneration = ++generation;
-    const promise = listForRestore(requestClient, requestWorkspace, requestGeneration)
-      .then((response) => {
-        if (!response) return;
-        applyResponse(response);
-      })
+    const promise = listAndApply(requestClient, requestWorkspace, requestGeneration)
+      .then(() => undefined)
       .catch((error) => {
         if (!responseIsCurrent(requestClient, requestWorkspace, requestGeneration)) return;
         options.reportError(error);

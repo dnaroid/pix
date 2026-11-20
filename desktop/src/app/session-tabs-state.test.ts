@@ -46,6 +46,38 @@ describe("session tabs state persistence", () => {
       .toEqual(["second", "active"]);
   });
 
+  it("keeps three worker tabs when a catalog response predates two launches", async () => {
+    const workspace = "/project";
+    const info = (sessionId: string) => ({ sessionId, cwd: workspace });
+    const first = [info("supervisor"), info("worker-1")];
+    const tabs = createSessionTabsState();
+    tabs.setSessionTabIds(new Map([[workspace, ["supervisor"]]]));
+    let resolveAuthoritative!: (response: { sessions: ReturnType<typeof info>[] }) => void;
+    const authoritative = new Promise<{ sessions: ReturnType<typeof info>[] }>((resolve) => { resolveAuthoritative = resolve; });
+    const listSessions = vi.fn()
+      .mockResolvedValueOnce({ sessions: first })
+      .mockResolvedValueOnce({ sessions: [info("supervisor")] })
+      .mockReturnValueOnce(authoritative);
+    const client = { listSessions } as unknown as AcpClient;
+    const catalog = createSessionCatalog({ client: () => client, workspace: () => workspace, tabs, reportError: vi.fn() });
+    await catalog.listNow();
+    tabs.show("worker-1");
+    const refresh = catalog.refresh();
+    await vi.waitFor(() => expect(listSessions).toHaveBeenLastCalledWith(workspace, { waitForDiscovery: true }));
+
+    for (const worker of ["worker-2", "worker-3"]) {
+      catalog.ensureProvisional(worker, workspace);
+      tabs.show(worker);
+    }
+    resolveAuthoritative({ sessions: first });
+    await refresh;
+
+    const expected = ["supervisor", "worker-1", "worker-2", "worker-3"];
+    expect(tabs.sessionTabsForProject(workspace)).toEqual(expected);
+    expect(buildTabSessions(catalog.sessions, tabs.restoredIds, tabs.locallyOpenedIds, tabs.closedIds, "worker-3")
+      .map(s => s.sessionId)).toEqual(expected);
+  });
+
   it.each([false, true])("keeps restored Desktop tabs across refresh and navigation (selected: %s)", (selected) => {
     const tabs = createSessionTabsState();
     const sessions = ["old", "new"].map((sessionId) => ({ sessionId, cwd: "/project" }));
