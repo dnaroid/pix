@@ -168,6 +168,7 @@
     {#key observer?.sessionId}
     <RuntimeStatusBarItems
       status={runtimeStatus}
+      currentModelRef={modelThinking.currentModel?.ref ?? null}
       currentModelProvider={modelThinking.currentModel?.provider}
       {sessionUsage}
       loadingSessionUsage={sessionUsageRefreshing}

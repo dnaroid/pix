@@ -132,7 +132,7 @@ describe("Status bar click surfaces", () => {
     expect(source("UsageLimitBars")).toContain("<QuotaResetCalendar {window} {now}");
     expect(source("RuntimeStatusBarItems")).toContain('=> item.label === "H" || item.label === "W"');
     expect(source("RuntimeStatusBarItems")).toContain("<ModelUsageDonut models={donutModels}");
-    expect(source("RuntimeStatusBarItems")).toContain("displayModelUsage(status, now)");
+    expect(source("RuntimeStatusBarItems")).toContain("displayModelUsage(status, now, currentModelRef)");
     expect(source("RuntimeStatusBarItems")).not.toContain('aria-label="Model quota"');
     expect(source("RuntimeStatusBarItems")).not.toContain("<p>Cached quota from the last successful refresh");
     expect(source("RuntimeStatusBarItems")).not.toContain("<p>{limitTitle(label, window)}</p>");

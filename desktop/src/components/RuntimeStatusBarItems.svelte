@@ -47,6 +47,7 @@
 
   let {
     status,
+    currentModelRef,
     currentModelProvider,
     sessionUsage,
     loadingSessionUsage = false,
@@ -62,6 +63,7 @@
     onOpenSubagentSession,
   }: {
     status?: RuntimeStatus;
+    currentModelRef: string | null;
     /** Provider of the currently selected session model, not the historical usage total. */
     currentModelProvider?: string;
     sessionUsage?: SessionUsageReport;
@@ -109,10 +111,7 @@
     };
   });
   const contextLegend = $derived(contextLegendItems());
-  // Quota usage wins while the provider quota is the freshest observation;
-  // an API-key header snapshot pushed after a mid-session auth switch (or a
-  // quota left over from a previous model) must not stay hidden behind it.
-  const modelUsage = $derived(displayModelUsage(status, now));
+  const modelUsage = $derived(displayModelUsage(status, now, currentModelRef));
   const usageAccountLabel = $derived(shortModelUsageAccountLabel(modelUsage?.accountEmail));
   const usageWindowItems = $derived(usageWindows());
   // Account quota rows show remaining balances; the weekly row integrates

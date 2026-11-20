@@ -266,9 +266,17 @@ export function liveModelUsage(
  * credential switched mid-session — or the quota describes a previous model —
  * so the stale quota must not hide the fresh header snapshot.
  */
-export function displayModelUsage(status: RuntimeStatus | undefined, now = Date.now()): ModelUsageStatus | undefined {
-  const quota = liveModelUsage(status?.modelUsage, now);
-  const header = status?.headerUsage;
+export function displayModelUsage(
+  status: RuntimeStatus | undefined,
+  now = Date.now(),
+  activeModelRef?: string | null,
+): ModelUsageStatus | undefined {
+  // The status bar supplies the active route (null when unknown). Provider
+  // summaries omit it because they intentionally aggregate across routes.
+  const matches = (usage: ModelUsageStatus | undefined) =>
+    activeModelRef === undefined || usage?.modelKey === activeModelRef;
+  const quota = matches(status?.modelUsage) ? liveModelUsage(status?.modelUsage, now) : undefined;
+  const header = matches(status?.headerUsage) ? status?.headerUsage : undefined;
   if (!quota || !header) return quota ?? header;
   return header.updatedAt > quota.updatedAt ? header : quota;
 }

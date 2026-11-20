@@ -3,9 +3,9 @@ import { render } from "svelte/server";
 import type { RuntimeStatus } from "../lib/acp-client";
 import RuntimeStatusBarItems from "./RuntimeStatusBarItems.svelte";
 
-function markup(status?: RuntimeStatus): string {
+function markup(status?: RuntimeStatus, currentModelRef: string | null = "test", sessionUsageAvailable = false): string {
   return render(RuntimeStatusBarItems, {
-    props: { status, onOpenSessionUsage: () => {} },
+    props: { status, currentModelRef, sessionUsageAvailable, onOpenSessionUsage: () => {} },
   }).body;
 }
 
@@ -13,6 +13,7 @@ function waitingMarkup(status?: RuntimeStatus): string {
   return render(RuntimeStatusBarItems, {
     props: {
       status,
+      currentModelRef: "test",
       onOpenSessionUsage: () => {},
       quotaWaitIndicator: { label: "Hourly limit reached · retry in 1h 12m", onReopen: () => {} },
     },
@@ -23,6 +24,35 @@ const base: RuntimeStatus = { sessionId: "test", modelUsageRefresh: "ready" };
 
 describe("runtime status fixed telemetry slots", () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it("hides the previous provider’s quota on a model switch without hiding session Usage", () => {
+    const openai = "openai-codex/gpt-6.2-sol";
+    const claude = "pi-claude-code-provider/opus";
+    const hourly = { resetAt: Date.now() + 3_600_000, windowSeconds: 18_000, remainingPercent: 62 };
+    const previous: RuntimeStatus = { ...base, modelUsage: { modelKey: openai, provider: "openai", updatedAt: Date.now(), hourly } };
+    expect(markup(previous, openai, true)).toContain("width: 62%");
+    const switched = markup(previous, claude, true);
+    expect(switched).not.toContain("quota-status-slots");
+    expect(switched).toContain("usage-status-slots");
+    expect(markup(previous, null, true)).not.toContain("quota-status-slots");
+    const refreshed: RuntimeStatus = { ...base, modelUsage: { modelKey: claude, provider: "anthropic", updatedAt: Date.now(), hourly: { ...hourly, remainingPercent: 41 } } };
+    expect(markup(refreshed, claude, true)).toContain("width: 41%");
+  });
+
+  it("ignores a newer quota from another route when the active model has header usage", () => {
+    const active = "anthropic/claude-opus-4-6";
+    const now = Date.now();
+    const window = { resetAt: now + 60_000, windowSeconds: 60, remainingPercent: 42 };
+    const status: RuntimeStatus = {
+      ...base,
+      modelUsage: { modelKey: "pi-claude-code-provider/opus", provider: "anthropic", updatedAt: now, hourly: { ...window, remainingPercent: 62 } },
+      headerUsage: { modelKey: active, provider: "anthropic", updatedAt: now - 1, rateWindows: [{ ...window, label: "TPM" }] },
+    };
+    const html = markup(status, active);
+    expect(html).toContain("width: 42%");
+    expect(html).not.toContain("width: 62%");
+    expect(markup({ ...status, modelUsage: undefined }, "anthropic/claude-sonnet-4-6")).not.toContain("quota-status-slots");
+  });
 
   it("anchors all compact quota fills to the right without reversing context", () => {
     const quota = { resetAt: Date.now() + 86_400_000, windowSeconds: 604800 };

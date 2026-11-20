@@ -552,7 +552,7 @@ describe("desktop visual regressions", () => {
   it("shows the single rate-limit window label beside the percentage without hover", () => {
     // The collapsed API-key rate window (RPM/ITPM/OTPM/TPM) keeps a visible
     // label even as the only indicator; OAuth H/W labels stay as they were.
-    expect(runtimeStatusSource).toContain("displayModelUsage(status, now)");
+    expect(runtimeStatusSource).toContain("displayModelUsage(status, now, currentModelRef)");
     expect(runtimeStatusSource).toContain("limitingRateWindow(modelUsage)");
     expect(runtimeStatusSource).toContain('{#if label === "R"}');
     expect(runtimeStatusSource).toContain('<span class="truncate leading-3 text-muted-foreground">{modelUsageWindowLabel(label, window)}</span>');
