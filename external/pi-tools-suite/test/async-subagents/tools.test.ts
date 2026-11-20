@@ -82,6 +82,7 @@ const originalPiSubagentsMaxResultBytes = process.env.PI_SUBAGENTS_MAX_RESULT_BY
 const originalUltrawork = process.env.ULTRAWORK;
 const originalUltraworkAuto = process.env.ULTRAWORK_AUTO;
 const originalPixAcpSessionStateBridge = process.env.PIX_ACP_SESSION_STATE_BRIDGE;
+const originalHome = process.env.HOME;
 
 function tempDir(): string {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "async-subagents-tools-test-"));
@@ -95,6 +96,10 @@ function writeFile(filePath: string, content = ""): void {
 }
 
 beforeEach(() => {
+	// Never read the developer's ~/.config/pi/pi-tools-suite.jsonc: user role
+	// model overrides (e.g. a Claude provider) would route spawns through
+	// owned launch instead of the fake pi script.
+	process.env.HOME = tempDir();
 	delete process.env.ASYNC_SUBAGENTS_ROUTING;
 	delete process.env.PI_SUBAGENTS_ROUTING;
 	delete process.env.ASYNC_SUBAGENTS_MAX_CONCURRENT;
@@ -229,6 +234,8 @@ afterEach(async () => {
 	else process.env.ULTRAWORK_AUTO = originalUltraworkAuto;
 	if (originalPixAcpSessionStateBridge === undefined) delete process.env.PIX_ACP_SESSION_STATE_BRIDGE;
 	else process.env.PIX_ACP_SESSION_STATE_BRIDGE = originalPixAcpSessionStateBridge;
+	if (originalHome === undefined) delete process.env.HOME;
+	else process.env.HOME = originalHome;
 	routerResponseText = '{"routes":[]}';
 	routerCompleteMock.mockClear();
 	for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });

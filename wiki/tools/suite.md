@@ -1292,6 +1292,8 @@ npm run test:async-subagents-selection-e2e
 npm run test:e2e
 ```
 
+Deterministic tests isolate developer-local state. `test/async-subagents/tools.test.ts` runs each test with a temporary `HOME`, so a user's `~/.config/pi/pi-tools-suite.jsonc` role models cannot route spawns during tests. `test/project-search-task-sync.test.ts` clears the inherited Pix host markers `PIX_ACP_SESSION_STATE_BRIDGE`, `PIX_QUESTION_RPC_BRIDGE`, and `PIX_CONFIG_PROFILE`, because the suite diagnostics singleton caches its first sink.
+
 ### Prompt evaluations
 
 Prompt evaluations are opt-in because they call a real model. They cover model-facing behavior that deterministic tests cannot prove: tool selection for `todo` and `compress`, async-subagent delegation/lifecycle boundaries, default internal role routing, ultrawork classification, and DCP summary retention. They are intentionally excluded from `npm test`.

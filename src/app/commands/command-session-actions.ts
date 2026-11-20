@@ -12,6 +12,7 @@ import {
 import { getIdleRuntime, getRuntime, parsePathArgument } from "./command-runtime.js";
 import { logOperationFailure } from "../logging/operation-errors.js";
 import { createId } from "../id.js";
+import { reportRuntimeDiagnostics } from "../session/runtime-diagnostics.js";
 import { runProcess } from "../process.js";
 import { copyTextToClipboard } from "../screen/clipboard.js";
 import { formatAccountUsageReport, queryAccountUsageReport } from "../model/model-usage-status.js";
@@ -481,10 +482,7 @@ export class SessionCommandActions {
 			),
 		});
 		if (runtime.modelFallbackMessage) this.host.addEntry({ id: createId("system"), kind: "system", text: runtime.modelFallbackMessage });
-		for (const diag of runtime.diagnostics ?? []) {
-			const kind = diag.type === "error" ? "error" as const : "system" as const;
-			this.host.addEntry({ id: createId("system"), kind, text: `[${diag.type}] ${diag.message}` });
-		}
+		reportRuntimeDiagnostics(runtime, (entry) => this.host.addEntry(entry), "replacement");
 		this.host.setSessionStatus(runtime.session);
 	}
 

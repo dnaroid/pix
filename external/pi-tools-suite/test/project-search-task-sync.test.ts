@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterAll, afterEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
@@ -18,6 +18,18 @@ const config: CommitEmbeddingConfig = { provider: "ollama", model: "fake/task-sy
   queryPrefix: "", documentPrefix: "", baseUrl: "http://127.0.0.1:19999" };
 const roots: string[] = [];
 const workers: SavedTaskEmbeddingSync[] = [];
+// The suite diagnostics singleton caches its first resolved sink. Inherited Pix
+// host markers (running inside a Pix session) would enable reporting in earlier
+// tests and bind the real Pix logger before the redaction test injects its sink.
+const PIX_HOST_ENV = ["PIX_ACP_SESSION_STATE_BRIDGE", "PIX_QUESTION_RPC_BRIDGE", "PIX_CONFIG_PROFILE"] as const;
+const originalPixHostEnv = Object.fromEntries(PIX_HOST_ENV.map(name => [name, process.env[name]]));
+for (const name of PIX_HOST_ENV) delete process.env[name];
+afterAll(() => {
+  for (const name of PIX_HOST_ENV) {
+    const value = originalPixHostEnv[name];
+    if (value === undefined) delete process.env[name]; else process.env[name] = value;
+  }
+});
 afterEach(async () => { await Promise.all(workers.splice(0).map(worker => worker.stop())); await removeDirsWithRetry(roots); });
 
 function fixture(count = 1) {

@@ -77,6 +77,14 @@ actual JavaScript exceptions and unhandled rejections still reach the logger.
   durations are logged without session messages or filenames; cancellation
   appears as an `aborted` flag in the debug completion record, not as a
   warning for unprocessed files.
+- **TUI runtime diagnostics** emit `session:runtime-diagnostic` (module
+  `session.lifecycle`) for each non-info runtime diagnostic reported at startup
+  and after session replacement (resume, fork, new, switch, clone, import).
+  Errors log at error level and other diagnostics at warn level; info
+  diagnostics are not logged. Records contain only `diagnosticType` and
+  `phase` (`startup` or `replacement`) plus project/session context; the
+  diagnostic message is shown in the transcript only. Desktop/ACP does not use
+  this path.
 - **ACP explicit indexing** emits `search:index-completed` (info) and
   `search:index-incomplete` (warn), scoped to the workspace, including Git
   Commits passes. Records contain only source, completion flag, counts (when

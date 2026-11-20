@@ -11,6 +11,7 @@ import { logOperationFailure } from "../logging/operation-errors.js";
 import { scheduleQuestionRecovery } from "../../bundled-extensions/question/recovery.js";
 import { stringifyUnknown } from "../rendering/message-content.js";
 import { collectStartupAvailabilityIssues } from "../cli/startup-checks.js";
+import { reportRuntimeDiagnostics } from "./runtime-diagnostics.js";
 import type { AppOptions, Entry, PixExtensionUIContext, SessionActivity } from "../types.js";
 
 export type AppSessionLifecycleHost = {
@@ -122,10 +123,7 @@ export class AppSessionLifecycleController {
 			if (runtime.modelFallbackMessage) {
 				this.host.addEntry({ id: createId("system"), kind: "system", text: runtime.modelFallbackMessage });
 			}
-			for (const diag of runtime.diagnostics ?? []) {
-				const kind = diag.type === "error" ? "error" as const : "system" as const;
-				this.host.addEntry({ id: createId("system"), kind, text: `[${diag.type}] ${diag.message}` });
-			}
+			reportRuntimeDiagnostics(runtime, (entry) => this.host.addEntry(entry), "startup");
 			this.host.setSessionStatus(runtime.session);
 			this.host.setSessionActivity(runtime.session.isStreaming ? "running" : "idle");
 			this.host.render();
@@ -233,6 +231,7 @@ export class AppSessionLifecycleController {
 		this.host.syncUserSessionEntryMetadata();
 		if (isCancelled()) return;
 		if (message) this.host.addEntry({ id: createId("system"), kind: "system", text: message });
+		reportRuntimeDiagnostics(runtime, (entry) => this.host.addEntry(entry), "replacement");
 		this.host.setSessionStatus(session);
 		this.host.setSessionActivity(session.isStreaming ? "running" : "idle");
 		this.host.render();
