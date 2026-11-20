@@ -55,7 +55,9 @@ test("confirm maps to a boolean property and folds the message body in", () => {
 		OPTIONS,
 	);
 	assert.equal(elicitation?.message, "Clear session?\n\nAll messages will be lost.");
-	assert.deepEqual(formSchema(elicitation).properties?.value, { type: "boolean", title: "Clear session?" });
+	assert.deepEqual(formSchema(elicitation).properties?.value, {
+		type: "boolean", title: "Clear session?", _meta: { "_pix/ui-kind": "confirm" },
+	});
 	assert.deepEqual(formSchema(elicitation)?.required, ["value"]);
 });
 

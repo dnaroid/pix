@@ -213,6 +213,9 @@ export function createRegistryStore(options: RegistryStoreOptions) {
         const error = next.error ?? next.projectIssue;
         if (error) options.reportError(new Error(error));
       }
+      if ((request.action === "pull-resources" || request.action === "push-resources") && next.error) {
+        diagnostics.warn(`registry:action-failed:${request.action}`, new Error(next.error));
+      }
       if (request.action === "pull-project") reloadLocalProjectState(request.scope, workspace);
     } catch (error) {
       diagnostics.warn(`registry:action-failed:${request.action}`, error);
@@ -349,6 +352,8 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     get actionId() { return actionId; },
     get activity() {
       if (waitingForSync) return "Action queued — waiting for background registry sync to finish.";
+      if (actionId === "pull-resources") return "Pulling registry updates…";
+      if (actionId === "push-resources") return "Pushing resource changes…";
       if (syncInFlight()) return "Registry is syncing in the background. Selected actions will wait for it to finish.";
       return null;
     },

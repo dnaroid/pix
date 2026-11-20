@@ -530,6 +530,7 @@ export type DesktopRegistryActionRequest = { readonly cwd: string } & (
 	| { readonly action: "set-agent-model"; readonly type: "agent"; readonly name: string; readonly model: string }
 	| { readonly action: "reset-agent-model"; readonly type: "agent"; readonly name: string }
 	| { readonly action: "refresh" | "configure" | "project-key" | "push-project-resources" | "keep-project-key" | "migrate-project-key" }
+	| { readonly action: "pull-resources" | "push-resources" }
 	| {
 		readonly action: "install" | "update" | "push" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope";
 		readonly type: DesktopRegistryResourceType;
@@ -901,7 +902,7 @@ export function parseDesktopRegistryActionRequest(value: unknown): DesktopRegist
 		}
 		return { ...workspace, action: value.action, type: "agent", name: value.name, model: value.model };
 	}
-	if (value.action === "refresh" || value.action === "configure" || value.action === "project-key" || value.action === "push-project-resources" || value.action === "keep-project-key" || value.action === "migrate-project-key") {
+	if (value.action === "refresh" || value.action === "configure" || value.action === "project-key" || value.action === "push-project-resources" || value.action === "keep-project-key" || value.action === "migrate-project-key" || value.action === "pull-resources" || value.action === "push-resources") {
 		return { ...workspace, action: value.action };
 	}
 	if (["install", "update", "push", "uninstall", "remove", "make-local", "tags", "toggle-scope"].includes(value.action)) {

@@ -2,8 +2,29 @@ import type { RegistryContext, RegistryExecutor } from "./context.js";
 import { loadRuntimeConfig } from "./config.js";
 import { ensureRegistryCache, resolveProjectKey } from "./git.js";
 import { assertPublicationDirectories } from "./publication-location.js";
-import { pushResourceWithRuntime } from "./resources.js";
+import { pushResourceWithRuntime, updateResourceWithRuntime } from "./resources.js";
 import { collectStatuses } from "./status.js";
+
+/** Explicit catalog batch. The caller holds the checkout lock for the entire batch. */
+export async function syncInstalledResources(executor: RegistryExecutor, ctx: RegistryContext, direction: "pull" | "push"): Promise<void> {
+	const runtime = loadRuntimeConfig(ctx.cwd);
+	await ensureRegistryCache(executor, runtime);
+	const statuses = await collectStatuses(executor, ctx.cwd, runtime);
+	const desired = direction === "pull" ? "update-available" : "local-changes";
+	const silent: RegistryContext = { ...ctx, hasUI: false };
+	const sync = direction === "pull" ? updateResourceWithRuntime : pushResourceWithRuntime;
+	// Use only fresh, installed publications. A failure keeps earlier successes
+	// and leaves remaining items for a retry; never prompt to overwrite.
+	for (const { type, name, kind, local, remote } of statuses) {
+		if (kind !== desired || !local || !remote) continue;
+		const scoped = {
+			...runtime,
+			publicationScope: remote.publicationScope ?? "global" as const,
+			...(remote.projectKey ? { projectKey: remote.projectKey } : {}),
+		};
+		await sync(executor, silent, scoped, type, name);
+	}
+}
 
 /** Explicit bulk push under the checkout lock; never touches Global publications. */
 export async function pushProjectResourceChanges(executor: RegistryExecutor, ctx: RegistryContext): Promise<void> {

@@ -4,7 +4,7 @@ export interface ElicitationField {
   key: string;
   label: string;
   description?: string;
-  type: "string" | "input" | "editor" | "select" | "boolean";
+  type: "string" | "input" | "editor" | "select" | "boolean" | "confirm";
   options: string[];
   value: string | boolean;
 }
@@ -48,7 +48,7 @@ export function parseElicitation(request: CreateElicitationRequest): Elicitation
       key,
       label,
       ...(description ? { description } : {}),
-      type: "boolean",
+      type: metadata["_pix/ui-kind"] === "confirm" ? "confirm" : "boolean",
       options: [],
       value: Boolean(property.default),
     };

@@ -679,6 +679,47 @@ test("resource background saving preserves companions, private edits, scope togg
 	assert.equal(fs.existsSync(path.join(seed, "projects", "alpha", "agents", "author.md")), false);
 });
 
+test("Installed bulk actions pull and push existing Global and Project publications without touching conflicts or missing copies", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
+	const { root, project, remote, seed, h } = await scopeFixture();
+	const local = (file: string) => path.join(project, ".pi", file);
+	const scopedSkill = "skills/scoped/SKILL.md";
+	fs.mkdirSync(path.dirname(local(scopedSkill)), { recursive: true });
+	fs.writeFileSync(local(scopedSkill), "---\ndescription: Scoped\n---\nOriginal\n");
+	assert.equal((await act(project, { action: "push", type: "skill", name: "scoped" }, h.ctx)).error, undefined);
+	assert.equal((await act(project, { action: "install", type: "skill", name: "demo" }, h.ctx)).error, undefined);
+	git(seed, ["pull", "--ff-only", "origin", "main"]);
+	const globalSkill = "skills/demo/SKILL.md";
+	const projectSkill = `projects/alpha/${scopedSkill}`;
+	for (const file of [globalSkill, projectSkill]) fs.appendFileSync(path.join(seed, file), "Remote update\n");
+	git(seed, ["commit", "-am", "Update both publications"]);
+	git(seed, ["push"]);
+	const pulled = await act(project, { action: "pull-resources" }, h.ctx);
+	assert.equal(pulled.error, undefined);
+	for (const file of [globalSkill, scopedSkill]) {
+		assert.match(fs.readFileSync(local(file), "utf8"), /Remote update/);
+		fs.appendFileSync(local(file), "Local update\n");
+	}
+	assert.equal(fs.existsSync(local("agents/reviewer.md")), false);
+	const pushed = await act(project, { action: "push-resources" }, h.ctx);
+	assert.equal(pushed.error, undefined);
+	for (const file of [globalSkill, projectSkill]) {
+		assert.match(git(root, ["--git-dir", remote, "show", `main:${file}`]), /Local update/);
+	}
+	git(seed, ["pull", "--ff-only", "origin", "main"]);
+	fs.appendFileSync(path.join(seed, globalSkill), "Conflicting remote edit\n");
+	git(seed, ["commit", "-am", "Conflicting remote edit"]);
+	git(seed, ["push"]);
+	fs.appendFileSync(local(globalSkill), "Conflicting local edit\n");
+	fs.rmSync(path.dirname(local(scopedSkill)), { recursive: true });
+	for (const action of ["pull-resources", "push-resources"] as const) {
+		const snapshot = await act(project, { action }, h.ctx);
+		assert.equal(snapshot.error, undefined);
+		assert.equal(item(snapshot, "skill:demo").status, "diverged");
+		assert.equal(item(snapshot, "skill:scoped").status, "missing-local");
+	}
+	assert.deepEqual(h.confirmations, []);
+});
+
 test("bulk push syncs only changed Project publications, preserving Global, conflicts, unpublished and project state", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
 	const { root, project, remote, seed, h } = await scopeFixture();
 	const skills = path.join(project, ".pi", "skills");

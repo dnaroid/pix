@@ -16,6 +16,25 @@ function formRequest(sessionId = "session-1"): CreateElicitationRequest {
 }
 
 describe("elicitation notification ownership", () => {
+  it.each([true, false])("answers a confirmation directly (accepted=%s)", async (accepted) => {
+    const store = createElicitationStore({ cancelQuestionImageOperation: vi.fn(), activeSessionId: () => "session-1" });
+    const response = store.request({
+      ...formRequest(),
+      requestedSchema: {
+        type: "object",
+        properties: { value: { type: "boolean", _meta: { "_pix/ui-kind": "confirm" } } },
+        required: ["value"],
+      },
+    });
+    const pending = store.pendingBySession.get("session-1");
+    if (pending?.kind !== "form") throw new Error("Expected confirmation form");
+    expect(pending.field.type).toBe("confirm");
+    store.answerForm(pending, accepted);
+    await expect(response).resolves.toEqual(accepted
+      ? { action: "accept", content: { value: true } }
+      : { action: "cancel" });
+  });
+
   function questionRequest(elicitationId = "question-1"): CreateElicitationRequest {
     return { mode: "_pix.question", sessionId: "session-1", message: "Which scope?",
       elicitationId, version: 1, questions: [{ id: "scope", label: "Scope", prompt: "Which scope?", choices: [

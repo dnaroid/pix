@@ -1,5 +1,7 @@
 <script lang="ts">
   import { emptyStateClass } from "../lib/status-text";
+  import ArrowDownToLine from "@lucide/svelte/icons/arrow-down-to-line";
+  import ArrowUpFromLine from "@lucide/svelte/icons/arrow-up-from-line";
   import Bot from "@lucide/svelte/icons/bot";
   import Database from "@lucide/svelte/icons/database";
   import FolderGit2 from "@lucide/svelte/icons/folder-git-2";
@@ -82,6 +84,22 @@
     return searchRegistryItems(filtered, query);
   });
   const remoteBusy = $derived(remoteDisabled || actionId !== null);
+  const bulkActions = $derived([
+    {
+      action: "pull-resources",
+      label: "Pull all",
+      title: "Apply available Registry updates to installed skills and agents",
+      icon: ArrowDownToLine,
+      count: installedItems.filter((item) => item.local && item.remote && item.status === "update-available").length,
+    },
+    {
+      action: "push-resources",
+      label: "Push all",
+      title: "Push local edits to existing Project and Global publications",
+      icon: ArrowUpFromLine,
+      count: installedItems.filter((item) => item.local && item.remote && item.status === "local-changes").length,
+    },
+  ] as const);
 
   function typeLabel(type: RegistryResourceType): string {
     if (type === "skill") return "Skill";
@@ -219,6 +237,22 @@
       onChange={(value) => filter = value as RegistryFilter}
     />
   </div>
+  {#if catalogSection === "installed" && snapshot?.configured}
+    <div class="flex flex-wrap gap-1.5" role="group" aria-label="Bulk Registry actions">
+      {#each bulkActions as { action, label, title, icon: Icon, count } (action)}
+        <button
+          type="button"
+          class="inline-flex h-7 items-center gap-1.5 rounded-md border border-input bg-panel-strong px-2 text-xs font-medium hover:bg-panel-hover disabled:opacity-40"
+          title={`${title}. Search and filters do not limit this action; conflicts are skipped.`}
+          disabled={remoteBusy || loading || count === 0}
+          onclick={() => onAction({ action }, action)}
+        >
+          <Icon class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          {label} <span class="font-mono tabular-nums text-muted-foreground">{count}</span>
+        </button>
+      {/each}
+    </div>
+  {/if}
 </div>
 
 <div class="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-1.5">

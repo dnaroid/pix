@@ -158,7 +158,7 @@ export function createElicitationStore(options: ElicitationStoreOptions) {
     remove(active);
     active.resolve(accepted
       ? { action: "accept", content: {
-          [active.field.key]: active.field.value,
+          [active.field.key]: active.field.type === "confirm" ? true : active.field.value,
         } }
       : { action: "cancel" });
   }

@@ -6,7 +6,7 @@ import { withRegistryCache } from "./cache-lock.js";
 import type { RegistryContext, RegistryExecutor } from "./context.js";
 import { collectRegistryDiff } from "./diff-service.js";
 import { registryExecutor } from "./executor.js";
-import { ensureRegistryCache, resolveProjectKey, resourceRevision } from "./git.js";
+import { ensureRegistryCache, resourceRevision } from "./git.js";
 import { editResourceTags } from "./metadata.js";
 import { SKILL_FILE, type RegistryUiSnapshot } from "./model.js";
 import { pathExists, projectResourcePath, registryResourcePath, validateName } from "./paths.js";
@@ -17,7 +17,7 @@ import { collectRegistryUiSnapshot } from "./status.js";
 import { publishResourceTags } from "./tag-publication.js";
 import { selectPublicationRuntime } from "./publication-location.js";
 import { togglePublicationScope } from "./publication-scope.js";
-import { pushProjectResourceChanges, syncProjectResources } from "./project-resource-sync.js";
+import { pushProjectResourceChanges, syncInstalledResources, syncProjectResources } from "./project-resource-sync.js";
 import { setAgentModelOverride } from "./agent-models.js";
 
 async function configure(ctx: RegistryContext): Promise<void> {
@@ -142,6 +142,8 @@ export class DesktopRegistryService {
 					case "keep-project-key": await keepProjectKey(ctx); break;
 					case "migrate-project-key": await migrateProjectKey(executor, ctx); break;
 					case "push-project-resources": await pushProjectResourceChanges(executor, ctx); break;
+					case "pull-resources": await syncInstalledResources(executor, ctx, "pull"); break;
+					case "push-resources": await syncInstalledResources(executor, ctx, "push"); break;
 					case "install": await installResource(executor, ctx, request.type, request.name); break;
 					case "update": await updateResource(executor, ctx, request.type, request.name); break;
 					case "push": await pushResource(executor, ctx, request.type, request.name); break;

@@ -85,7 +85,11 @@ export function toElicitationRequest(
 				enum: [...request.options],
 			});
 		case "confirm":
-			return formElicitation(request, options, { type: "boolean", title: request.title });
+			return formElicitation(request, options, {
+				type: "boolean",
+				title: request.title,
+				_meta: { [PIX_INPUT_KIND_META]: "confirm" },
+			});
 		case "input":
 			return formElicitation(request, options, {
 				type: "string",

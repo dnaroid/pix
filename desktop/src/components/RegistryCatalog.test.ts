@@ -17,6 +17,20 @@ function catalog(snapshot?: RegistrySnapshot, loading = false, commands = contex
 }
 
 describe("RegistryCatalog session skills", () => {
+  it("counts only installed, published, one-sided changes in the bulk actions", () => {
+    const html = catalog({
+      version: 1, configured: true, branch: "main", checkedAt: "now",
+      items: (["update-available", "update-available", "local-changes", "diverged", "missing-local", "local-only"] as const)
+        .map((status, index) => ({
+          id: `skill:${index}`, type: "skill", name: `example-${index}`, status,
+          statusLabel: status, icon: "·", local: status !== "missing-local",
+          remote: status !== "local-only", actions: [],
+        })),
+    });
+    expect(html).toMatch(/Pull all\s*<span[^>]*>2<\/span>/);
+    expect(html).toMatch(/Push all\s*<span[^>]*>1<\/span>/);
+  });
+
   it("renders all session skills even when only one is in the Registry", () => {
     const html = catalog({
       version: 1, configured: true, branch: "main", checkedAt: "now",

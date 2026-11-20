@@ -66,6 +66,13 @@ status: active
 - **Save to project registry** explicitly publishes an unpublished project copy
   in the Project namespace. Pushes to existing publications retain their scope.
   Existing collision/conflict protection applies.
+- **Installed** offers **Pull all** and **Push all** with workspace-wide counts
+  independent of search and type filters. Pull updates installed skills and
+  agents with `update-available`; Push sends `local-changes` to their existing
+  Project or Global publications. Neither action installs missing copies,
+  creates publications, resolves conflicts, or syncs project artifacts. The
+  service selects targets from fresh status under the checkout lock and stops
+  on the first error, keeping earlier successful changes for a safe retry.
 - The Registry Activity Bar local-changes menu offers **Sync project changes to
   Registry** ([decision 0027](../../decisions/0027-sidebar-reason-actions.md)).
   One workspace-scoped `push-project-resources` action freshly selects installed
@@ -82,8 +89,9 @@ status: active
   Project definitions appear only for the matching project key; Global remains
   visible everywhere. Initial publication is Project-scoped; Global requires
   the visibility toggle.
-  The toggle requires a project key and confirmation, moves published bytes in
-  one Git commit/push, and never changes or republishes local copies/edits.
+  The toggle requires a project key and confirmation. In Desktop, **Confirm**
+  is sufficient; there is no checkbox. The action moves published bytes in one
+  Git commit/push and never changes or republishes local copies/edits.
   Provenance moves with the publication while retaining the local baseline and
   any pending remote update. Legacy provenance without a scope means Global.
 - Resource sync state compares published bytes, not path revisions alone. A
