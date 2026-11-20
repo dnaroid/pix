@@ -21,6 +21,7 @@ type SessionCoordinatorRef = {
 
 type DesktopConversationServicesOptions = {
   beginMessageEdit?: ConversationBranchActionsOptions["beginMessageEdit"];
+  refreshPromptSessionEntry: NonNullable<ConversationBranchActionsOptions["refreshPromptSessionEntry"]>;
   client: () => AcpClient | null;
   state: ActiveSessionState;
   workspace: () => string;
@@ -77,6 +78,7 @@ export function createDesktopConversationServices(options: DesktopConversationSe
 
   const branches = createConversationBranchActions({
     beginMessageEdit: options.beginMessageEdit,
+    refreshPromptSessionEntry: options.refreshPromptSessionEntry,
     client: options.client,
     state: options.state,
     workspace: options.workspace,

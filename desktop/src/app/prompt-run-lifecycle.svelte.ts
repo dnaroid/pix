@@ -32,6 +32,7 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
   const runGenerationBySessionId = new Map<string, number>();
   const cancellationBySessionId = new Map<string, { requested: boolean }>();
   const cancelSnapshotWaits = new Map<number, () => void>();
+  const promptEntryLookups = new Map<string, { rowId: string; refresh: () => Promise<void> | undefined }>();
   // Never reuse an owner generation after clearSession/reset while old requests settle.
   let nextRunGeneration = 0;
 
@@ -128,12 +129,12 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
         && generation(sessionId) === runGeneration && requestClient === options.client();
       let bound = false;
       let earlyBindingClosed = false;
+      let notificationBindingFailed = false;
       let snapshotPending: Promise<void> | undefined;
       let updatePending = false;
-      // Notifications are only a wakeup: identity comes from the live Pi branch,
-      // never from streamed text or visible transcript offsets. Coalesce chunks
-      // while a snapshot is in flight; retry if persistence lagged that snapshot.
-      const bindDuringPrompt = () => {
+      // Notifications and explicit actions only wake this lookup. Identity comes
+      // from the live Pi branch, never from streamed text or transcript offsets.
+      const bindDuringPrompt = (): Promise<void> | undefined => {
         if (!transcriptMessageId || !before || bound || earlyBindingClosed || !isCurrent()) return;
         updatePending = true;
         if (snapshotPending) return snapshotPending;
@@ -149,18 +150,24 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
             }
           }
         })().catch((error) => {
-          if (!earlyBindingClosed && isCurrent()) options.reportError(error);
-          // Keep the settlement fallback, but do not retry failures per chunk.
-          earlyBindingClosed = true;
+          if (!notificationBindingFailed && !earlyBindingClosed && isCurrent()) options.reportError(error);
+          // An explicit message action can retry; avoid a retry per stream chunk.
+          notificationBindingFailed = true;
+          updatePending = false;
         }).finally(() => {
           snapshotPending = undefined;
-          if (updatePending) void bindDuringPrompt();
+          if (updatePending) return bindDuringPrompt();
         });
         return snapshotPending;
       };
+      if (transcriptMessageId && before) {
+        promptEntryLookups.set(sessionId, { rowId: transcriptMessageId, refresh: bindDuringPrompt });
+      }
       let promptError: unknown;
       try {
-        const response = await requestClient.prompt(sessionId, blocks, fileImages, bindDuringPrompt);
+        const response = await requestClient.prompt(sessionId, blocks, fileImages, () => {
+          if (!notificationBindingFailed) return bindDuringPrompt();
+        });
         stopReason = response.stopReason;
       } catch (error) {
         promptError = error;
@@ -191,6 +198,7 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
         cancelSnapshotWaits.delete(runGeneration);
         if (promptRunsBySessionId.get(sessionId) !== tracked) return;
         promptRunsBySessionId.delete(sessionId);
+        promptEntryLookups.delete(sessionId);
         if (generation(sessionId) === runGeneration && requestClient === options.client()) {
           options.onRequestSettled?.(sessionId);
         }
@@ -203,6 +211,11 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
       });
     promptRunsBySessionId.set(sessionId, tracked);
     return tracked;
+  }
+
+  async function refreshPromptSessionEntry(sessionId: string, rowId: string): Promise<void> {
+    const lookup = promptEntryLookups.get(sessionId);
+    if (lookup?.rowId === rowId) await lookup.refresh();
   }
 
   async function runPromptRequestWithResult(
@@ -259,6 +272,7 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
       runningSessionIds = next;
     }
     promptRunsBySessionId.delete(sessionId);
+    promptEntryLookups.delete(sessionId);
     promptEndedAtBySessionId.delete(sessionId);
     runGenerationBySessionId.delete(sessionId);
     // Any late result is already invalidated by deleting its generation.
@@ -269,6 +283,7 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
     cancelSnapshotWaits.clear();
     runningSessionIds = new Set();
     promptRunsBySessionId.clear();
+    promptEntryLookups.clear();
     promptEndedAtBySessionId.clear();
     runGenerationBySessionId.clear();
     cancellationBySessionId.clear();
@@ -286,6 +301,7 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
     finishRunAndFlush,
     runPromptRequest,
     runPromptRequestWithResult,
+    refreshPromptSessionEntry,
     cancelActivePrompt,
     endedAt,
     clearEndedAt,

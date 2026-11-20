@@ -79,6 +79,7 @@ export function createPromptRuntime(options: PromptRuntimeOptions) {
     refreshQueueState: queue.refreshQueueState,
     runPromptRequest: runs.runPromptRequest,
     runPromptRequestWithResult: runs.runPromptRequestWithResult,
+    refreshPromptSessionEntry: runs.refreshPromptSessionEntry,
     flushAutoQueue: queue.flushAutoQueue,
     holdAutoQueue: queue.holdAutoQueue,
     cancelActivePrompt: runs.cancelActivePrompt,

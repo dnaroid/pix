@@ -31,6 +31,23 @@ export function createUserMessageContextActions(
       const entryId = message.messageId.slice(replayPrefix.length);
       if (entryId) return entryId;
     }
+
+    // The menu can be clicked before a stream wakeup binds the local row, or
+    // can be holding its pre-binding snapshot. Only the owning prompt may
+    // query the branch for this row; never infer a target from its text/index.
+    const workspace = options.workspace();
+    const currentRow = () => options.state.transcriptFor(sessionId)?.items.find(
+      (item) => item.type === "message" && item.role === "user" && item.id === message.id,
+    );
+    const current = currentRow();
+    if (current?.type === "message" && current.sessionEntryId) return current.sessionEntryId;
+    if (options.refreshPromptSessionEntry) {
+      await options.refreshPromptSessionEntry(sessionId, message.id);
+      if (requestClient === options.client() && sessionId === options.state.sessionId && workspace === options.workspace()) {
+        const refreshed = currentRow();
+        if (refreshed?.type === "message" && refreshed.sessionEntryId) return refreshed.sessionEntryId;
+      }
+    }
     throw new Error("This message's session entry is not available yet. Wait for the prompt to finish or reload the conversation.");
   }
 

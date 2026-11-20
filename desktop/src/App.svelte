@@ -441,6 +441,7 @@
 
   const conversationServices = createDesktopConversationServices({
     client: () => client,
+    refreshPromptSessionEntry: promptRuntime.refreshPromptSessionEntry,
     state: activeSessionState,
     workspace: () => workspace,
     operationRunning: () => operationRunning,

@@ -45,6 +45,7 @@ async function fixture() {
   const fork = vi.fn(async () => {});
   const actions = createUserMessageContextActions({
     client: () => activeClient, state, workspace: () => "/project", reportError,
+    refreshPromptSessionEntry: runs.refreshPromptSessionEntry,
   } as unknown as ConversationBranchActionsOptions, fork);
   const pending = runs.runPromptRequest(client, "source", [], [], "local:1");
   const update = await started.promise;
@@ -56,13 +57,68 @@ async function fixture() {
 }
 
 describe("in-flight prompt entry binding", () => {
+  it("forks on demand before any stream wakeup, without waiting for settlement", async () => {
+    const f = await fixture();
+    f.branchUserMessages.mockResolvedValue([old, submitted, steering]);
+    await f.actions.runUserMessageContextAction(f.state.transcript.items[0] as MessageItem, "fork-new-tab");
+    expect(f.fork).toHaveBeenCalledExactlyOnceWith("submitted", { keepSourceOpen: true });
+    expect(f.runs.isRunning("source")).toBe(true);
+    expect(f.client.cancel).not.toHaveBeenCalled();
+    expect(f.reportError).not.toHaveBeenCalled();
+    await f.finish();
+  });
+
+  it("retries a failed stream lookup on an explicit fork but does not bind a different row", async () => {
+    const f = await fixture();
+    const row = f.state.transcript.items[0] as MessageItem;
+    f.branchUserMessages.mockRejectedValueOnce(new Error("snapshot failed"))
+      .mockResolvedValue([old, submitted, steering]);
+    await f.update();
+    await f.actions.runUserMessageContextAction({ ...row, id: "local:other" }, "fork-new-tab");
+    expect(f.branchUserMessages).toHaveBeenCalledTimes(2);
+    expect(f.fork).not.toHaveBeenCalled();
+    await f.actions.runUserMessageContextAction(row, "fork-new-tab");
+    expect(f.fork).toHaveBeenCalledExactlyOnceWith("submitted", { keepSourceOpen: true });
+    expect(f.runs.isRunning("source")).toBe(true);
+    await f.finish();
+  });
+
+  it("coalesces a fork click with a stream lookup but rechecks if that snapshot predates persistence", async () => {
+    const f = await fixture();
+    const snapshot = deferred<ForkMessage[]>();
+    f.branchUserMessages.mockReturnValueOnce(snapshot.promise).mockResolvedValue([old, submitted]);
+    const streamLookup = f.update();
+    const fork = f.actions.runUserMessageContextAction(f.state.transcript.items[0] as MessageItem, "fork-new-tab");
+    expect(f.branchUserMessages).toHaveBeenCalledTimes(2);
+    snapshot.resolve([old]);
+    await Promise.all([streamLookup, fork]);
+    expect(f.branchUserMessages).toHaveBeenCalledTimes(3);
+    expect(f.fork).toHaveBeenCalledExactlyOnceWith("submitted", { keepSourceOpen: true });
+    expect(f.reportError).not.toHaveBeenCalled();
+    await f.finish();
+  });
+
+  it("does not fork in the newly selected tab when an explicit lookup resolves late", async () => {
+    const f = await fixture();
+    const snapshot = deferred<ForkMessage[]>();
+    f.branchUserMessages.mockReturnValueOnce(snapshot.promise);
+    const action = f.actions.runUserMessageContextAction(f.state.transcript.items[0] as MessageItem, "fork-new-tab");
+    f.state.setSessionId("other");
+    snapshot.resolve([old, submitted]);
+    await action;
+    expect(f.fork).not.toHaveBeenCalled();
+    expect(f.reportError).not.toHaveBeenCalled();
+    await f.finish();
+  });
+
   it("forks the exact submitted entry before settlement despite duplicate text and later steering", async () => {
     const f = await fixture();
+    const menuRow = f.state.transcript.items[0] as MessageItem;
     f.branchUserMessages.mockResolvedValue([old, submitted, steering]);
     await f.update();
     expect(f.runs.isRunning("source")).toBe(true);
     expect(f.bindPromptSessionEntry).toHaveBeenCalledExactlyOnceWith("source", "local:1", "submitted");
-    await f.actions.runUserMessageContextAction(f.state.transcript.items[0] as MessageItem, "fork-new-tab");
+    await f.actions.runUserMessageContextAction(menuRow, "fork-new-tab");
     expect(f.fork).toHaveBeenCalledExactlyOnceWith("submitted", { keepSourceOpen: true });
     expect(f.client.cancel).not.toHaveBeenCalled();
     await f.update();

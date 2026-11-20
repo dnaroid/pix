@@ -6,6 +6,7 @@ import type { ActiveSessionState } from "./active-session-state.svelte";
 
 export type ConversationBranchActionsOptions = {
   beginMessageEdit?: (entryId: string, message: MessageItem) => void;
+  refreshPromptSessionEntry?: (sessionId: string, rowId: string) => Promise<void>;
   client: () => AcpClient | null;
   state: ActiveSessionState;
   workspace: () => string;
