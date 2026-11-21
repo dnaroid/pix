@@ -12,7 +12,7 @@ import { verifySessionBoundaryIndexPath } from "./session-boundary-paths.js";
 import { readTaskVectors, taskIndexTransaction, type TaskIndexTransaction } from "./task-index.js";
 import type { SemanticEmbeddingConfig } from "./config.js";
 import { compatibleEmbeddingMetadata, embeddingMetadata, SearchCacheCompatibilityError } from "./embedding-cache.js";
-import { beginWrite, claimWork, safeDirectory, safeFile, sourceDirectories } from "./source-work.js";
+import { beginWrite, claimWork, readReady, safeDirectory, safeFile, sourceDirectories } from "./source-work.js";
 import { importLegacySettings } from "./settings-migration.js";
 import { recordCoverage } from "./source-coverage.js";
 
@@ -83,6 +83,7 @@ export class SearchIndexStore {
     signal.throwIfAborted();
     const db = new DatabaseSync(path, { readOnly: true });
     try {
+      await readReady(db, signal);
       db.exec("PRAGMA busy_timeout=5; BEGIN");
       if (!db.prepare("SELECT name FROM sqlite_master WHERE name='documents'").get()) return emptyIndex();
       const cache = await loadConnection(db, signal, config?.dimension, documents);
@@ -102,7 +103,8 @@ export class SearchIndexStore {
     }
     signal.throwIfAborted();
     const db = new DatabaseSync(path, { readOnly: true });
-    try { return await loadSessionTitleVectors(db, signal, config); }
+    try {
+      await readReady(db, signal); return await loadSessionTitleVectors(db, signal, config); }
     finally { db.close(); }
   }
 
@@ -116,7 +118,8 @@ export class SearchIndexStore {
     }
     signal.throwIfAborted();
     const db = new DatabaseSync(filename, { readOnly: true });
-    try { return await readTaskVectors(db, signal, config); }
+    try {
+      await readReady(db, signal); return await readTaskVectors(db, signal, config); }
     finally { db.close(); }
   }
 
@@ -129,7 +132,8 @@ export class SearchIndexStore {
     }
     signal.throwIfAborted();
     const db = new DatabaseSync(path, { readOnly: true });
-    try { return await readSessionBoundaryState(db, signal); }
+    try {
+      await readReady(db, signal); return await readSessionBoundaryState(db, signal); }
     finally { db.close(); }
   }
 
@@ -142,7 +146,8 @@ export class SearchIndexStore {
     }
     signal.throwIfAborted();
     const db = new DatabaseSync(path, { readOnly: true });
-    try { return sessionBoundaryHits(db, query, signal); }
+    try {
+      await readReady(db, signal); return sessionBoundaryHits(db, query, signal); }
     finally { db.close(); }
   }
 

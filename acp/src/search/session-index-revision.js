@@ -46,9 +46,9 @@ export async function readSessionIndexRevision(root, signal) {
   signal.throwIfAborted();
   const filename = sourcePath(root, "sessions");
   if (!await lstat(filename).catch(e => { if (e.code !== "ENOENT") throw e; })) return { present: false, index: digest(["sessions-logical-v1", "absent"]) };
-  const db = await openDatabase(filename, { readOnly: true });
+  const db = await openDatabase(filename, { readOnly: true, signal });
   try {
-    db.exec("PRAGMA busy_timeout=0; PRAGMA query_only=ON; PRAGMA trusted_schema=OFF; BEGIN");
+    db.exec("PRAGMA query_only=ON; PRAGMA trusted_schema=OFF; BEGIN");
     const available = tables(db);
     const stored = db.prepare("SELECT type,sql FROM sqlite_master WHERE name=?").get(TABLE);
     if (stored && (stored.type !== "table" || normalize(stored.sql) !== normalize(definition))) throw new Error("Unsafe session revision");

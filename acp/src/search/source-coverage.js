@@ -40,9 +40,9 @@ export function recordCoverage(db, digest, keep, now = Date.now()) {
 export async function readCoverage(filename, signal) {
   signal?.throwIfAborted();
   if (!await lstat(filename).catch(error => { if (error.code !== "ENOENT") throw error; })) return undefined;
-  const db = await openDatabase(filename, { readOnly: true });
+  const db = await openDatabase(filename, { readOnly: true, signal });
   try {
-    db.exec("PRAGMA busy_timeout=0; PRAGMA query_only=ON; PRAGMA trusted_schema=OFF; BEGIN");
+    db.exec("PRAGMA query_only=ON; PRAGMA trusted_schema=OFF; BEGIN");
     const table = db.prepare("SELECT type,sql FROM sqlite_master WHERE name=?").get(TABLE);
     if (!table) return undefined;
     if (table.type !== "table" || normalize(table.sql) !== normalize(DEFINITION)) throw new Error("Unsafe source coverage");

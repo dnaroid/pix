@@ -183,6 +183,10 @@ the production controller. Receipts contain only opaque digests, completion flag
 and timestamps; run records also retain state and sanitized counts (not document
 text, secrets, PID-based kill targets or raw provider errors). Reopening requires
 a new metadata observation, never trusts the old timestamp alone.
+Search index reads wait out transient peer-writer and WAL-recovery locks
+asynchronously: each read connection uses a 5 ms SQLite busy timeout plus
+cancellable retries for up to 250 ms, then fails with a busy error. Writers keep
+their 600 ms acquisition budget.
 For Code/Knowledge, bounded read-only transactions validate the schema and read
 file hashes plus vector keys and lengths (not vector payloads). Before/after
 logical snapshots fence concurrent changes. Generation, completion timestamps,

@@ -11,7 +11,10 @@ export function globalSearchDirectory(): string;
 export function sourceDirectories(root: string, source: WorkSource): string[];
 export function safeFile(filename: string): Promise<void>;
 export function safeDirectory(directory: string): Promise<void>;
-export function openDatabase(filename: string, options?: { readOnly?: boolean }): Promise<SqlDatabase>;
+export const READ_BUSY_TIMEOUT_MS: number;
+export const READ_BUSY_BUDGET_MS: number;
+export function readReady<T extends { exec(sql: string): unknown; prepare(sql: string): { get(...args: never[]): unknown } }>(db: T, signal?: AbortSignal, budget?: number): Promise<T>;
+export function openDatabase(filename: string, options?: { readOnly?: boolean; signal?: AbortSignal }): Promise<SqlDatabase>;
 export function ensureWorkSchema(db: SqlDatabase): void;
 export function beginWrite(db: SqlDatabase, signal: AbortSignal, budget?: number): Promise<void>;
 export function claimWork(db: SqlDatabase, signal: AbortSignal, options?: { id?: string; retry?: boolean; ttl?: number; waitMs?: number }): Promise<{

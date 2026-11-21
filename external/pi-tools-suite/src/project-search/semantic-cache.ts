@@ -3,6 +3,7 @@ import { lstat, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { listIndexedSessions } from "./session-chunks.mjs";
+import { readReady } from "./source-work.mjs";
 import { withTaskDatabase } from "../project-tasks/storage.js";
 import { validSearchVector, type SemanticSearchOptions } from "./semantic-provider.js";
 import { commitIdentity, type CommitEmbeddingConfig } from "./semantic-commit-provider.js";
@@ -53,10 +54,14 @@ async function openCachedIndex(root: string, source: "tasks" | "sessions"): Prom
   if ("Bun" in globalThis) {
     const driver = "bun:sqlite";
     const { Database } = await import(driver);
-    return new Database(filename, { readonly: true }) as unknown as ReadonlyDatabase;
+    return ready(new Database(filename, { readonly: true }) as unknown as ReadonlyDatabase);
   }
   const { DatabaseSync } = await import("node:sqlite");
-  return new DatabaseSync(filename, { readOnly: true }) as unknown as ReadonlyDatabase;
+  return ready(new DatabaseSync(filename, { readOnly: true }) as unknown as ReadonlyDatabase);
+}
+/** Bounded async wait for transient peer-writer/WAL-recovery locks before the first read. */
+async function ready(db: ReadonlyDatabase): Promise<ReadonlyDatabase> {
+  try { return await readReady(db); } catch (error) { db.close(); throw error; }
 }
 
 function schemaCompatible(db: ReadonlyDatabase, namespace: "task" | "session", config: CommitEmbeddingConfig): boolean {

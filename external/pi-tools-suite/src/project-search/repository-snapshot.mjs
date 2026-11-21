@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { lstat } from "node:fs/promises";
 import { checkStorage, validateNativeStore } from "./native-store.mjs";
 import { VECTOR_DEFINITIONS } from "./native-vector-store.mjs";
-import { sourcePath } from "./source-work.mjs";
+import { readReady, sourcePath } from "./source-work.mjs";
 
 const hash = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const normalize = sql => sql.replace(/[\s;"`\[\]]/g, "").toLowerCase();
@@ -27,7 +27,8 @@ export async function readRepositorySnapshot(root, source, signal) {
     db = new DatabaseSync(filename, { readOnly: true });
   }
   try {
-    db.exec("PRAGMA busy_timeout=0; PRAGMA query_only=ON; PRAGMA trusted_schema=OFF; BEGIN");
+    await readReady(db, signal);
+    db.exec("PRAGMA query_only=ON; PRAGMA trusted_schema=OFF; BEGIN");
     const meta = validateNativeStore(db, root);
     const files = new Map();
     for (const row of db.prepare("SELECT path,hash FROM pix_native_files ORDER BY path LIMIT 10001").iterate()) {

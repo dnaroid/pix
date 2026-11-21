@@ -50,7 +50,7 @@ export async function automaticWorkPaused(root, source, signal) {
     if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("Unsafe search directory");
   }
   if (!await fileInfo(filename)) return false;
-  const db = await openDatabase(filename, { readOnly: true });
+  const db = await openDatabase(filename, { readOnly: true, signal });
   try {
     signal.throwIfAborted();
     if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name='pix_search_work'").get()) return false;
@@ -95,19 +95,41 @@ export async function safeDirectory(directory) {
   const info = await lstat(directory);
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("Unsafe search directory");
 }
-export async function openDatabase(filename, { readOnly = false } = {}) {
+/** Connection-level wait is tiny: node:sqlite/bun:sqlite block the event loop
+ * while SQLite's busy handler sleeps. Longer waits are async retries. */
+export const READ_BUSY_TIMEOUT_MS = 5;
+export const READ_BUSY_BUDGET_MS = 250;
+/** Wait out transient WAL recovery/checkpoint and peer-writer locks before the
+ * first read, asynchronously and bounded. Leaves the short busy timeout set. */
+export async function readReady(db, signal, budget = READ_BUSY_BUDGET_MS) {
+  const deadline = Date.now() + budget;
+  db.exec(`PRAGMA busy_timeout=${READ_BUSY_TIMEOUT_MS}`);
+  while (true) {
+    signal?.throwIfAborted();
+    try { db.prepare("SELECT count(*) FROM sqlite_master").get(); return db; }
+    catch (e) {
+      if (!/locked|busy/i.test(e?.message ?? "") || Date.now() >= deadline) throw e;
+      await delay(15, undefined, signal ? { signal } : undefined);
+    }
+  }
+}
+async function ready(db, signal) {
+  try { return await readReady(db, signal); }
+  catch (e) { db.close(); throw e; }
+}
+export async function openDatabase(filename, { readOnly = false, signal } = {}) {
   await safeFile(filename);
   if (readOnly) {
-    if ("Bun" in globalThis) { const { Database } = await import("bun:sqlite"); return new Database(filename, { readonly: true }); }
-    const { DatabaseSync } = await import("node:sqlite"); return new DatabaseSync(filename, { readOnly: true });
+    if ("Bun" in globalThis) { const { Database } = await import("bun:sqlite"); return ready(new Database(filename, { readonly: true }), signal); }
+    const { DatabaseSync } = await import("node:sqlite"); return ready(new DatabaseSync(filename, { readOnly: true }), signal);
   }
   try {
     const handle = await open(filename, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
     await handle.close();
   } catch (e) { if (e.code !== "EEXIST") throw e; }
   await safeFile(filename);
-  if ("Bun" in globalThis) { const { Database } = await import("bun:sqlite"); return new Database(filename, { create: false, readwrite: true }); }
-  const { DatabaseSync } = await import("node:sqlite"); return new DatabaseSync(filename);
+  if ("Bun" in globalThis) { const { Database } = await import("bun:sqlite"); return ready(new Database(filename, { create: false, readwrite: true }), signal); }
+  const { DatabaseSync } = await import("node:sqlite"); return ready(new DatabaseSync(filename), signal);
 }
 export function ensureWorkSchema(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS pix_search_work (

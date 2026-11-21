@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
+import { readReady } from "./source-work.js";
 
 const MAX_BYTES = 64 * 1024 * 1024;
 const TASK_SCHEMA = "CREATE TABLE tasks (id TEXT PRIMARY KEY, payload TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, position INTEGER NOT NULL DEFAULT 0)";
@@ -32,7 +33,8 @@ export async function taskSnapshot(filename, signal) {
     db = new DatabaseSync(filename, { readOnly: true });
   }
   try {
-    db.exec("PRAGMA busy_timeout=0; PRAGMA query_only=ON; PRAGMA trusted_schema=OFF; BEGIN;");
+    await readReady(db, signal);
+    db.exec("PRAGMA query_only=ON; PRAGMA trusted_schema=OFF; BEGIN;");
     if (db.prepare("PRAGMA user_version").get()?.user_version !== 1) throw new Error("Unsupported task store");
     const table = db.prepare("SELECT type,sql FROM sqlite_master WHERE name='tasks'").get();
     if (table?.type !== "table" || normalize(table.sql) !== normalize(TASK_SCHEMA)) throw new Error("Invalid tasks table");
