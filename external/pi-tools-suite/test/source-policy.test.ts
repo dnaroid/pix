@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { mkdir, mkdtemp, readFile, rm, symlink, link, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -132,10 +133,20 @@ test("native knowledge defaults off, retains its cache when disabled, and reuses
   expect((await indexNative(root, { operation: "index", source: "knowledge" })).complete).toBe(false);
   await writeSourcePolicy(root, "knowledge", true);
   expect((await searchNative(root, query)).hits).toHaveLength(1);
-  const cache = join(root, ".pi/search/knowledge.sqlite"), before = await readFile(cache);
-  await writeSourcePolicy(root, "knowledge", false);
-  expect((await searchNative(root, query)).hits).toEqual([]);
-  expect(await readFile(cache)).toEqual(before);
+  const cache = join(root, ".pi/search/knowledge.sqlite");
+  const db = new Database(cache, { create: false });
+  try {
+    // Drain enabled indexing writes and keep the connection open so another
+    // connection's deferred close cannot trigger a last-close checkpoint.
+    expect(db.query("PRAGMA wal_checkpoint(TRUNCATE)").get()).toMatchObject({ busy: 0 });
+    const before = await readFile(cache);
+    const wal = `${cache}-wal`;
+    expect(existsSync(wal) ? (await readFile(wal)).length : 0).toBe(0);
+    await writeSourcePolicy(root, "knowledge", false);
+    expect((await searchNative(root, query)).hits).toEqual([]);
+    expect(await readFile(cache)).toEqual(before);
+    expect(existsSync(wal) ? (await readFile(wal)).length : 0).toBe(0);
+  } finally { db.close(); }
   await writeSourcePolicy(root, "knowledge", true);
   expect((await searchNative(root, query)).hits).toHaveLength(1);
 });
