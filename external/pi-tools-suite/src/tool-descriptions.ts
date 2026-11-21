@@ -193,8 +193,8 @@ export const WEB_SEARCH_TOOL_DESCRIPTIONS = {
 		name: "web_search",
 		label: "web-search",
 		description:
-			"Search the web for real-time information through Ollama, with automatic configured Tavily fallback. Credentials come from /web-credentials or environment variables. Supports per-call timeout_ms and PI_WEB_SEARCH_TIMEOUT_MS.",
-		promptSnippet: "Search the web for current or real-time information through Ollama, with Tavily fallback when configured.",
+			"Search the web for real-time information through Ollama, falling back to Tavily (when configured) and then keyless Brave Search. Credentials come from /web-credentials or environment variables. Supports per-call timeout_ms and PI_WEB_SEARCH_TIMEOUT_MS.",
+		promptSnippet: "Search the web for current or real-time information through Ollama, with Tavily and keyless Brave Search fallbacks.",
 		promptGuidelines: [
 			"Use web_search only for current public web information; keep queries focused and set max_results only when useful.",
 			"Never include secrets, tokens, or private repository data; do not use web_search for repo-local discovery—use project_search or file/search tools.",
@@ -204,8 +204,8 @@ export const WEB_SEARCH_TOOL_DESCRIPTIONS = {
 		name: "web_fetch",
 		label: "web-fetch",
 		description:
-			"Fetch and extract text content from a web page URL through Ollama, with automatic configured Tavily Extract fallback. Credentials come from /web-credentials or environment variables. Supports per-call timeout_ms and PI_WEB_SEARCH_TIMEOUT_MS.",
-		promptSnippet: "Fetch and extract text from a specific URL through Ollama, with Tavily Extract fallback when configured.",
+			"Fetch a public HTTP(S) page directly and extract readable Markdown locally. No API key is required. Supports per-call timeout_ms and PI_WEB_SEARCH_TIMEOUT_MS.",
+		promptSnippet: "Read a public URL and extract Markdown locally, without a web API provider.",
 		promptGuidelines: [
 			"Use web_fetch for user-provided URLs or web_search results needing deeper reading; never pass secret/private-credential URLs, and use read for local files.",
 		],

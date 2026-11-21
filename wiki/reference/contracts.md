@@ -48,7 +48,7 @@ implementation reference; native project search indexes Code and Knowledge.
 | Spec | Topic |
 |------|-------|
 | [openai-codex-usage-refresh](../providers/openai-codex-usage-refresh.md) | OpenAI Codex usage-token refresh (host-side quota indicator) |
-| [web-search-tavily-fallback](../tools/web-search-tavily-fallback.md) | Web search/extract via Ollama with Tavily fallback |
+| [web-search-tavily-fallback](../tools/web-search-tavily-fallback.md) | Web search via Ollama, Tavily and keyless Brave Search fallbacks; `web_fetch` as direct public-page fetch with local Markdown extraction |
 | [todo-thinking-model-overrides](../work-management/todos/todo-thinking-model-overrides.md) | Per-model todo thinking overrides |
 | [todo-clear-session-replay](../work-management/todos/todo-clear-session-replay.md) | Persist todo clear in session replay |
 | [project-agents-dir](../tools/agents/project-agents-dir.md) | Project-local sub-agent roles from `.pi/agents/*.md` |

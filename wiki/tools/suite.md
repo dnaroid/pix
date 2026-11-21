@@ -85,7 +85,7 @@ saved-provider safeguards.
 - `todo` — `todo` tool, `/todos`, `/todos-persist`, `/todos-scope`, and `/todos-clear` (also `/todos clear`); supports parent/subtask hierarchy, blockers, ready-task filtering, deferred out-of-scope items, batch operations, JSON/Markdown import/export, automatic clearing when all visible todos are completed, and optional project persistence via `/todos persist on` or `/todos-persist on`; clean Pi TUI sessions also show the active plan as a native widget, while Pix presentation remains renderer-owned; localization/i18n has been removed
 - `model-tools` — model-specific tool aliases such as Claude/GLM-style `Read` / `Edit` / `Write` / `Bash` / `Grep` / `Glob` / `LS`, GPT/Codex-style `shell`, and model-gated `apply_patch`. `/shell-workdir allow <path>`, `list`, and `revoke <path>` manage canonical extra workdir roots for the current session only; user-level `"restrictShellWorkdir": false` removes the workdir boundary; see [the shell workdir contract](../operations/shell-workdir-session-grants.md).
 - `usage` — `/usage` command and startup hint for read-only AI quota checks across OpenAI, Zhipu AI, Z.ai, and Google Antigravity, including Antigravity quota by model
-- `web-search` — `web_search` and `web_fetch` tools migrated from `@ollama/pi-web-search`; uses local Ollama by default or the official Ollama cloud API when an API key is configured, supports Tavily Search/Extract fallback, provides `/web-credentials` for secure user-level key storage, honors `OLLAMA_HOST`, supports request timeouts via `timeout_ms` / `PI_WEB_SEARCH_TIMEOUT_MS`, and reports provider-specific errors
+- `web-search` — `web_search` and `web_fetch` tools migrated from `@ollama/pi-web-search`; uses local Ollama by default or the official Ollama cloud API when an API key is configured, supports Tavily Search and keyless Brave Search HTML fallbacks for `web_search`, fetches public pages directly with local HTML-to-Markdown extraction for `web_fetch`, provides `/web-credentials` for secure user-level key storage, honors `OLLAMA_HOST`, supports request timeouts via `timeout_ms` / `PI_WEB_SEARCH_TIMEOUT_MS`, and reports provider-specific errors
 - `dcp` — Dynamic Context Pruning ported from `opencode-dynamic-context-pruning` for the Pi SDK: explicit `compress` tool with range and message modes, `/dcp` commands (context, stats, sweep, manual, decompress, recompress, compress), same-call overlap validation, recoverable compressed-block rollups, grouped message-mode skip diagnostics, stable raw-message anchors when available, protected user/tool preservation, deduplication, error purging, and context nudges; clean Pi TUI sessions show a native context-capacity map driven by live SDK occupancy and the cached prepared DCP classification, while Pix keeps its existing renderer/Desktop visualization
 - `prompt-commands` — user slash-command builder: `/prompt-commands` opens a CRUD menu for saved prompt-backed slash commands, stores them under `promptCommands` in `~/.config/pi/pi-tools-suite.jsonc`, reloads after edits, and runs each saved prompt as a normal user message
 - Resource Registry is Desktop-only and runs directly in the Pix ACP service; tools-suite no longer registers `/registry` or a TUI Registry module. Existing `resourceRegistry` JSONC settings remain compatible with Desktop.
@@ -1195,15 +1195,17 @@ The default source is `OPENCODE_AUTH_CONTENT`, `OPENCODE_DATA_DIR/auth.json`, or
 
 ## Web search
 
-`src/web-search` registers two Ollama-first tools and the `/web-credentials` setup command:
+`src/web-search` registers `web_search` (Ollama-first, then optional Tavily, then keyless Brave Search HTML), `web_fetch` (direct public-page fetch with local Markdown extraction), and the `/web-credentials` setup command:
 
 - `web_search` posts `{ query, max_results }` and returns formatted title/URL/snippet results plus structured `details.results`.
-- `web_fetch` posts `{ url }` and returns extracted page text plus title/link metadata.
-- `/web-credentials` can set, inspect, or clear stored Ollama and Tavily API keys. Notifications and status output never display key values.
+- `web_fetch` takes `{ url }`, fetches a direct public HTTP(S) page over Node HTTP(S) with a `Pix-Reader` user agent and a Markdown-preferring `Accept` header, retries once with a browser user agent after a 403, 429 or 503 response, passes Markdown responses through, and otherwise extracts Markdown locally from HTML with page chrome (ads, sidebars, navigation boxes, link bars and similar) removed (parse5 parses HTML only). Output is `Title:`, `URL:` (final URL) and `Content:` sections. It never uses Ollama, Tavily, rdrr, or site APIs; it rejects URLs with embedded credentials, non-public addresses (checked at connection time, including redirects), PDFs and other unsupported types, and responses over 1 MiB.
+- `/web-credentials` can set, inspect, or clear stored Ollama and Tavily API keys; these keys apply to `web_search` only. Notifications and status output never display key values.
 
-Without an Ollama API key, both tools default to `http://localhost:11434/api/experimental/...`; set `OLLAMA_HOST` to point at another Ollama instance. With an Ollama API key and no explicit `OLLAMA_HOST`, they use the official `https://ollama.com/api/web_search` and `/api/web_fetch` endpoints with bearer authentication. Requests time out after 30 seconds by default. Override globally with `PI_WEB_SEARCH_TIMEOUT_MS` or per call with `timeout_ms` (maximum 120000 ms). Tool results include `host`, `timeoutMs`, and truncation metadata in `details`.
+Without an Ollama API key, `web_search` defaults to `http://localhost:11434/api/experimental/web_search`; set `OLLAMA_HOST` to point at another Ollama instance. With an Ollama API key and no explicit `OLLAMA_HOST`, it uses the official `https://ollama.com/api/web_search` endpoint with bearer authentication. Requests time out after 30 seconds by default. Override globally with `PI_WEB_SEARCH_TIMEOUT_MS` or per call with `timeout_ms` (maximum 120000 ms). Tool results include `host`, `timeoutMs`, and truncation metadata in `details`; `web_fetch` results use `provider: "local"`, and its timeout bounds the whole fetch, download and extraction.
 
-Configure a Tavily key to enable automatic fallback for both tools. Ollama remains the primary provider; if any Ollama request or response fails, `web_search` retries through `https://api.tavily.com/search` and `web_fetch` retries through `https://api.tavily.com/extract`. The Tavily key is sent only in Tavily's bearer authorization header and is never accepted as a tool parameter or included in result details. Fallback results set `details.provider` to `tavily` and include the primary Ollama error under `details.fallbackFrom`; ordinary results set `details.provider` to `ollama`.
+Configure a Tavily key to enable automatic fallback for `web_search`. Ollama remains the primary provider; if any Ollama request or response fails, `web_search` retries through `https://api.tavily.com/search`. `web_fetch` has no fallback provider. The Tavily key is sent only in Tavily's bearer authorization header and is never accepted as a tool parameter or included in result details. Tavily results set `details.provider` to `tavily`, Brave results to `brave`, and ordinary Ollama results to `ollama`. Fallback results include the first provider failure under `details.fallbackFrom` and every earlier failure, in order, under `details.failures`.
+
+The keyless Brave Search fallback needs no key and runs only after Ollama (and Tavily, when configured) fail. It fetches `https://search.brave.com/search?q=<query>&source=web` through the system `curl` binary (no shell), parses the returned HTML locally, and caps the response at 4 MiB. This is best-effort parsing of a public page, not a documented API.
 
 The recommended interactive setup is:
 
@@ -1225,7 +1227,7 @@ export OLLAMA_API_KEY="..."
 export TAVILY_API_KEY="tvly-..."
 ```
 
-The timeout applies independently to each provider attempt, so a failed Ollama request followed by Tavily can take up to roughly twice the configured timeout. Tavily Search fallback uses basic search and clamps `max_results` to Tavily's documented maximum of 20. Tavily Extract does not return page title/link metadata, so fallback uses the requested URL as the title and reports no links.
+For `web_search`, the timeout applies independently to each provider attempt, so a failed Ollama request followed by Tavily and Brave can take up to roughly three times the configured timeout (two without a Tavily key). Tavily Search fallback uses basic search and clamps `max_results` to Tavily's documented maximum of 20.
 
 Troubleshooting:
 
@@ -1238,8 +1240,16 @@ Troubleshooting:
 | `invalid JSON` / `unexpected response` | Check the Ollama version and the raw endpoint behavior; the tool reports the bad response shape instead of failing with a generic parser error. |
 | `Tavily ... rejected TAVILY_API_KEY` | Update the Tavily key through `/web-credentials` or `TAVILY_API_KEY`. |
 | `Tavily ... limit was exceeded` | Check Tavily usage/plan limits in the Tavily dashboard. |
+| `Brave Search rate limit was exceeded (HTTP 429)` | Brave throttles the keyless fallback; wait and retry, or configure Tavily. |
+| `Brave Search returned an unrecognized page (possible CAPTCHA or layout change)` | Brave served a CAPTCHA or changed layout; open https://search.brave.com in a browser to confirm. |
+| `curl is not installed` | Install the system `curl` binary; the Brave fallback requires it. |
+| `web_fetch requires a public HTTP(S) URL` | Pass an `http:`/`https:` URL without username or password. |
+| `web_fetch ... private` / `127.0.0.1`-style blocked address | The target resolves to a private network; `web_fetch` does not fetch it. |
+| `No readable content found` / `web_fetch failed` | The page may need JavaScript, block automated access, be empty, or use an unsupported type; open it in a browser to confirm. |
+| `Page exceeds the 1 MiB limit` / `Server ignored uncompressed content request` | `web_fetch` reads at most 1 MiB of uncompressed content; use a smaller page. |
+| `web_fetch request timed out` | Increase per-call `timeout_ms` or `PI_WEB_SEARCH_TIMEOUT_MS`. |
 
-Do not send secrets, tokens, private repository text, or credential-bearing URLs through these tools; Ollama may query external web services to satisfy the request.
+Do not send secrets, tokens, private repository text, or credential-bearing URLs through these tools. `web_search` sends its query to Ollama and, on fallback, Tavily and Brave Search; `web_fetch` requests the given URL directly from this machine.
 
 ## Layout
 

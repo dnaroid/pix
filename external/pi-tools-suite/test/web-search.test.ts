@@ -34,7 +34,12 @@ function restoreEnv(name: "OLLAMA_HOST" | "OLLAMA_API_KEY" | "PI_WEB_SEARCH_TIME
 }
 
 async function registeredWebSearch() {
-	const { __setSpawnForTests, default: webSearch } = await import("../src/web-search/index.js");
+	const { __setSpawnForTests, __setBraveTransportForTests, default: webSearch } = await import("../src/web-search/index.js");
+	// Route the curl-based Brave transport through the fetch mock.
+	__setBraveTransportForTests(async (url, signal) => {
+		const response = await globalThis.fetch(url, { signal });
+		return { status: response.status, body: await response.text() };
+	});
 	__setSpawnForTests(((command: string, ...rest: any[]) => {
 		const args = Array.isArray(rest[0]) ? [...rest[0]] : [];
 		const options = (Array.isArray(rest[0]) ? rest[1] : rest[0]) as childProcess.SpawnOptions | undefined;
@@ -228,30 +233,6 @@ describe("web-search tools", () => {
 		});
 	});
 
-	test("web_fetch returns content/link metadata", async () => {
-		mockFetch(async () =>
-			new Response(
-				JSON.stringify({
-					title: "Example",
-					content: "Hello from the page",
-					links: ["https://example.com/a", "https://example.com/b"],
-				}),
-				{ status: 200 },
-			));
-
-		const result = await (await registeredTools()).web_fetch.execute("call-1", { url: "https://example.com" });
-
-		expect(result.content[0]?.text).toContain("Title: Example");
-		expect(result.content[0]?.text).toContain("Links found: 2");
-		expect(result.details).toMatchObject({
-			title: "Example",
-			contentBytes: 19,
-			linkCount: 2,
-			host: "http://localhost:11434",
-			timeoutMs: 30_000,
-		});
-		});
-
 	test("web_search falls back to Tavily after an Ollama error", async () => {
 		process.env.TAVILY_API_KEY = "tvly-test-secret";
 		const requests: Array<{ url: string; authorization?: string; body: Record<string, unknown> }> = [];
@@ -298,44 +279,75 @@ describe("web-search tools", () => {
 		});
 	});
 
-	test("web_fetch falls back to Tavily Extract after an Ollama error", async () => {
-		process.env.TAVILY_API_KEY = "tvly-test-secret";
-		const targetUrl = "https://steamcommunity.com/sharedfiles/filedetails/?id=3038261866";
-		const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+	test("web_search falls back to keyless Brave Search HTML when Ollama fails and no Tavily key exists", async () => {
+		const requests: Array<{ url: string; authorization?: string }> = [];
+		const braveHtml = `<html><body><main><section id="mixed-main">
+			<div class="snippet svelte-x" data-pos="0" data-type="web"><a href="https://example.com/one"><div class="title search-snippet-title" title="First &amp; best">First</div></a>
+				<div class="generic-snippet"><div class="content">Snippet <strong>one</strong></div></div></div>
+			<div class="snippet svelte-x" data-pos="1" data-type="web"><a href="https://example.com/two"><div class="title">Second</div></a></div>
+			<div class="snippet svelte-x" data-pos="2" data-type="web"><a href="https://example.com/three"><div class="title">Third</div></a></div>
+		</section></main></body></html>`;
 		mockFetch(async (url, init) => {
-			requests.push({ url: String(url), body: JSON.parse(String(init?.body)) as Record<string, unknown> });
-
-			if (String(url).includes("localhost")) {
-				return new Response("upstream unavailable", { status: 503 });
-			}
-
-			return new Response(
-				JSON.stringify({
-					results: [{ url: targetUrl, raw_content: "# Steam Workshop\n\nExtracted by Tavily" }],
-					failed_results: [],
-				}),
-				{ status: 200 },
-			);
+			requests.push({ url: String(url), authorization: new Headers(init?.headers).get("Authorization") ?? undefined });
+			if (String(url).includes("localhost")) return new Response("limit", { status: 429 });
+			return new Response(braveHtml, { status: 200, headers: { "Content-Type": "text/html" } });
 		});
 
-		const result = await (await registeredTools()).web_fetch.execute("call-1", { url: targetUrl });
+		const result = await (await registeredTools()).web_search.execute("call-1", { query: "pi news", max_results: 2 });
 
 		expect(requests).toHaveLength(2);
-		expect(requests[1]).toEqual({
-			url: "https://api.tavily.com/extract",
-			body: { urls: [targetUrl], extract_depth: "basic", format: "markdown" },
-		});
-		expect(result.content[0]?.text).toContain("Extracted by Tavily");
+		expect(requests[1]?.url).toBe("https://search.brave.com/search?q=pi+news&source=web");
+		expect(requests[1]?.authorization).toBeUndefined();
+		expect(result.content[0]?.text).toContain("1. First & best\n   URL: https://example.com/one\n   Snippet one");
+		expect(result.content[0]?.text).not.toContain("Third");
 		expect(result.details).toMatchObject({
-			provider: "tavily",
-			host: "https://api.tavily.com",
-			title: targetUrl,
-			linkCount: 0,
-			fallbackFrom: {
-				provider: "ollama",
-				error: expect.stringContaining("HTTP 503"),
-			},
+			provider: "brave",
+			host: "https://search.brave.com",
+			resultCount: 2,
+			fallbackFrom: { provider: "ollama", error: expect.stringContaining("HTTP 429") },
 		});
+	});
+
+	test("web_search tries Brave after Tavily and reports all three failures on a CAPTCHA page", async () => {
+		process.env.TAVILY_API_KEY = "tvly-must-not-leak";
+		const urls: string[] = [];
+		mockFetch(async (url) => {
+			urls.push(String(url));
+			if (String(url).includes("localhost")) return new Response("primary failed", { status: 500 });
+			if (String(url).includes("tavily")) return new Response("{}", { status: 432 });
+			return new Response("<html><body>Please solve the captcha</body></html>", { status: 200 });
+		});
+
+		try {
+			await (await registeredTools()).web_search.execute("call-1", { query: "latest pi" });
+			throw new Error("Expected web_search to reject");
+		} catch (error) {
+			const message = (error as Error).message;
+			expect(message).toContain("Ollama web_search failed");
+			expect(message).toContain("Tavily search fallback also failed");
+			expect(message).toContain("Brave Search fallback also failed");
+			expect(message).toContain("possible CAPTCHA");
+			expect(message).not.toContain("tvly-must-not-leak");
+		}
+		expect(urls.map((url) => new URL(url).host)).toEqual(["localhost:11434", "api.tavily.com", "search.brave.com"]);
+	});
+
+	test("web_fetch rejects unsupported targets and honours cancellation without using search providers", async () => {
+		process.env.OLLAMA_API_KEY = "search-ollama-key";
+		process.env.TAVILY_API_KEY = "search-tavily-key";
+		const requests: string[] = [];
+		mockFetch(async (url) => {
+			requests.push(String(url));
+			throw new Error("Unexpected provider call");
+		});
+		const { web_fetch: tool } = await registeredTools();
+		for (const url of ["file:///tmp/page", "https://user:pass@1.1.1.1/"]) {
+			await expectRejectsWithMessage(tool.execute("call-1", { url }), "public HTTP(S) URL without embedded credentials");
+		}
+		await expectRejectsWithMessage(tool.execute("call-2", { url: "http://127.0.0.1/" }), "private or reserved");
+		await expectRejectsWithMessage(tool.execute("call-3", { url: "https://example.com" }, AbortSignal.abort()), "was cancelled");
+		expect(requests).toEqual([]);
+		expect(spawnCalls).toEqual([]);
 	});
 
 	test("reports Ollama auth errors with signin guidance", async () => {
@@ -362,26 +374,6 @@ describe("web-search tools", () => {
 		}
 	});
 
-	test("reports a Tavily Extract failed_result", async () => {
-		process.env.TAVILY_API_KEY = "tvly-test-secret";
-		const targetUrl = "https://example.com/private-page";
-		mockFetch(async (url) => {
-			if (String(url).includes("localhost")) return new Response("primary failed", { status: 500 });
-			return new Response(
-				JSON.stringify({
-					results: [],
-					failed_results: [{ url: targetUrl, error: "Access denied by origin" }],
-				}),
-				{ status: 200 },
-			);
-		});
-
-		await expectRejectsWithMessage(
-			(await registeredTools()).web_fetch.execute("call-1", { url: targetUrl }),
-			"Access denied by origin",
-		);
-	});
-
 	test("does not start a Tavily fallback after parent cancellation", async () => {
 		process.env.TAVILY_API_KEY = "tvly-test-secret";
 		const controller = new AbortController();
@@ -403,7 +395,7 @@ describe("web-search tools", () => {
 	test("reports invalid JSON instead of leaking a generic parser error", async () => {
 		mockFetch(async () => new Response("not json", { status: 200 }));
 
-		await expectRejectsWithMessage((await registeredTools()).web_fetch.execute("call-1", { url: "https://example.com" }), "invalid JSON");
+		await expectRejectsWithMessage((await registeredTools()).web_search.execute("call-1", { query: "latest pi" }), "invalid JSON");
 	});
 
 	test("starts local Ollama and retries after connection refused", async () => {
@@ -442,21 +434,19 @@ describe("web-search tools", () => {
 			if (urls.length < 3) return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
 			return new Response(
 				JSON.stringify({
-					title: "Example",
-					content: "Ready now",
-					links: [],
+					results: [{ title: "Ready now", url: "https://example.com" }],
 				}),
 				{ status: 200 },
 			);
 		});
 
-		const result = await (await registeredTools()).web_fetch.execute("call-1", { url: "https://example.com" });
+		const result = await (await registeredTools()).web_search.execute("call-1", { query: "latest pi" });
 
 		expect(spawnCalls).toHaveLength(0);
 		expect(urls).toEqual([
-			"http://localhost:11434/api/experimental/web_fetch",
-			"http://localhost:11434/api/experimental/web_fetch",
-			"http://localhost:11434/api/experimental/web_fetch",
+			"http://localhost:11434/api/experimental/web_search",
+			"http://localhost:11434/api/experimental/web_search",
+			"http://localhost:11434/api/experimental/web_search",
 		]);
 		expect(result.content[0]?.text).toContain("Ready now");
 	});
@@ -486,6 +476,6 @@ describe("web-search tools", () => {
 				);
 			}));
 
-		await expectRejectsWithMessage((await registeredTools()).web_fetch.execute("call-1", { url: "https://example.com", timeout_ms: 1 }), "timed out after 1ms");
+		await expectRejectsWithMessage((await registeredTools()).web_search.execute("call-1", { query: "latest pi", timeout_ms: 1 }), "timed out after 1ms");
 	});
 });

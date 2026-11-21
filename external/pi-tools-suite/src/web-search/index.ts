@@ -9,6 +9,8 @@ import { Type } from "typebox";
 
 import { WEB_SEARCH_TOOL_DESCRIPTIONS } from "../tool-descriptions";
 import { suiteDiagnostics } from "../lib/suite-diagnostics.js";
+import { BRAVE_SEARCH_HEADERS, BRAVE_SEARCH_HOST, braveSearchUrl, parseBraveSearchHtml } from "./brave-search.js";
+import { downloadPublicPage, parsePublicPageUrl } from "./public-page.js";
 
 let spawnImpl: typeof spawn = spawn;
 
@@ -22,23 +24,28 @@ interface SearchResponse {
 	results: SearchResult[];
 }
 
-interface FetchResponse {
-	title: string;
-	content: string;
-	links?: string[];
-}
+type Provider = "ollama" | "tavily" | "brave";
 
-type Operation = "Search" | "Fetch";
-type Provider = "ollama" | "tavily";
+interface ProviderFailure {
+	provider: Provider;
+	error: string;
+}
 
 interface ProviderResponse<T> {
 	data: T;
 	provider: Provider;
 	host: string;
-	fallbackFrom?: {
-		provider: "ollama";
-		error: string;
-	};
+	/** Primary provider failure when a fallback answered. */
+	fallbackFrom?: ProviderFailure;
+	/** Every provider failure before the successful one, in order. */
+	failures?: ProviderFailure[];
+}
+
+interface SearchAttempt<T> {
+	provider: Provider;
+	label: string;
+	host: string;
+	request: () => Promise<T>;
 }
 
 interface OllamaTarget {
@@ -57,6 +64,8 @@ const DEFAULT_OLLAMA_HOST = "http://localhost:11434";
 const OLLAMA_CLOUD_HOST = "https://ollama.com";
 const OLLAMA_API_KEY_ENV = "OLLAMA_API_KEY";
 const OLLAMA_API_KEYS_URL = "https://ollama.com/settings/keys";
+const OLLAMA_ENDPOINT = "web_search";
+const TAVILY_ENDPOINT = "search";
 const TAVILY_API_HOST = "https://api.tavily.com";
 const TAVILY_API_KEY_ENV = "TAVILY_API_KEY";
 const TAVILY_API_KEYS_URL = "https://app.tavily.com/home";
@@ -138,8 +147,8 @@ function resolveOllamaTarget(): OllamaTarget {
 	};
 }
 
-function ollamaRequestUrl(target: OllamaTarget, endpoint: "web_search" | "web_fetch"): string {
-	const apiPath = target.host === OLLAMA_CLOUD_HOST ? `/api/${endpoint}` : `/api/experimental/${endpoint}`;
+function ollamaRequestUrl(target: OllamaTarget): string {
+	const apiPath = target.host === OLLAMA_CLOUD_HOST ? `/api/${OLLAMA_ENDPOINT}` : `/api/experimental/${OLLAMA_ENDPOINT}`;
 	return `${target.host}${apiPath}`;
 }
 
@@ -308,26 +317,14 @@ function isAbortError(error: unknown): boolean {
 	return error instanceof Error && (error.name === "AbortError" || errorIncludes(error, "ABORT_ERR"));
 }
 
-function endpointName(operation: Operation): "web_search" | "web_fetch" {
-	return operation === "Search" ? "web_search" : "web_fetch";
-}
-
-function operationNoun(operation: Operation): "search" | "fetch" {
-	return operation === "Search" ? "search" : "fetch";
-}
-
-function tavilyEndpoint(operation: Operation): "search" | "extract" {
-	return operation === "Search" ? "search" : "extract";
-}
-
 function formatErrorBody(body: string): string {
 	const normalized = body.trim().replace(/\s+/g, " ");
 	if (!normalized) return "";
 	return normalized.length > MAX_ERROR_BODY_CHARS ? `${normalized.slice(0, MAX_ERROR_BODY_CHARS)}…` : normalized;
 }
 
-function createHttpError(response: Response, operation: Operation, host: string, body: string): Error {
-	const apiName = endpointName(operation);
+function createHttpError(response: Response, host: string, body: string): Error {
+	const apiName = OLLAMA_ENDPOINT;
 	const bodySuffix = formatErrorBody(body);
 	const withBody = bodySuffix ? ` Response: ${bodySuffix}` : "";
 
@@ -345,7 +342,7 @@ function createHttpError(response: Response, operation: Operation, host: string,
 	if (response.status === 404 || response.status === 405) {
 		return new OllamaEndpointUnavailableError(
 			`Ollama ${apiName} endpoint is not available at ${host} (HTTP ${response.status}). ` +
-				`Update Ollama and make sure experimental web ${operationNoun(operation)} is enabled.${withBody}`,
+				`Update Ollama and make sure experimental web search is enabled.${withBody}`,
 			response.status,
 		);
 	}
@@ -361,7 +358,7 @@ function isEndpointUnavailable(error: unknown): boolean {
 	return error instanceof OllamaEndpointUnavailableError;
 }
 
-async function waitForEndpointReady<T>(request: () => Promise<T>, host: string, operation: Operation, timeoutMs: number, signal: AbortSignal | undefined): Promise<T> {
+async function waitForEndpointReady<T>(request: () => Promise<T>, host: string, timeoutMs: number, signal: AbortSignal | undefined): Promise<T> {
 	const startupTimeoutMs = resolveOllamaStartupTimeoutMs(timeoutMs);
 	const deadline = Date.now() + startupTimeoutMs;
 	let lastError: unknown;
@@ -379,26 +376,26 @@ async function waitForEndpointReady<T>(request: () => Promise<T>, host: string, 
 
 	throw lastError instanceof Error
 		? lastError
-		: new Error(`Ollama ${endpointName(operation)} endpoint at ${host} did not become ready within ${startupTimeoutMs}ms.`);
+		: new Error(`Ollama ${OLLAMA_ENDPOINT} endpoint at ${host} did not become ready within ${startupTimeoutMs}ms.`);
 }
 
-async function readJsonResponse<T>(response: Response, operation: Operation, host: string): Promise<T> {
+async function readJsonResponse<T>(response: Response, host: string): Promise<T> {
 	const body = await response.text().catch(() => "");
 
-	if (!response.ok) throw createHttpError(response, operation, host, body);
-	if (!body.trim()) throw new Error(`Ollama ${endpointName(operation)} API at ${host} returned an empty response.`);
+	if (!response.ok) throw createHttpError(response, host, body);
+	if (!body.trim()) throw new Error(`Ollama ${OLLAMA_ENDPOINT} API at ${host} returned an empty response.`);
 
 	try {
 		return JSON.parse(body) as T;
 	} catch (error) {
 		const parseMessage = error instanceof Error ? error.message : String(error);
 		const bodySuffix = formatErrorBody(body);
-		throw new Error(`Ollama ${endpointName(operation)} API at ${host} returned invalid JSON: ${parseMessage}.${bodySuffix ? ` Body: ${bodySuffix}` : ""}`);
+		throw new Error(`Ollama ${OLLAMA_ENDPOINT} API at ${host} returned invalid JSON: ${parseMessage}.${bodySuffix ? ` Body: ${bodySuffix}` : ""}`);
 	}
 }
 
-function normalizeOllamaError(error: unknown, operation: Operation, host: string, timeoutMs: number, timedOut: boolean, parentSignal: AbortSignal | undefined): Error {
-	const apiName = endpointName(operation);
+function normalizeOllamaError(error: unknown, host: string, timeoutMs: number, timedOut: boolean, parentSignal: AbortSignal | undefined): Error {
+	const apiName = OLLAMA_ENDPOINT;
 
 	if (timedOut) {
 		return new Error(
@@ -431,12 +428,12 @@ function normalizeOllamaError(error: unknown, operation: Operation, host: string
 	return error instanceof Error ? error : new Error(String(error));
 }
 
-async function postOllamaJson<T>(target: OllamaTarget, endpoint: "web_search" | "web_fetch", body: Record<string, unknown>, operation: Operation, signal: AbortSignal | undefined, timeoutMs: number, retryEndpointUnavailable = true): Promise<T> {
+async function postOllamaJson<T>(target: OllamaTarget, body: Record<string, unknown>, signal: AbortSignal | undefined, timeoutMs: number, retryEndpointUnavailable = true): Promise<T> {
 	const { host } = target;
 	const requestSignal = createRequestSignal(signal, timeoutMs);
 
 	try {
-		const response = await fetch(ollamaRequestUrl(target, endpoint), {
+		const response = await fetch(ollamaRequestUrl(target), {
 			method: "POST",
 			headers: {
 				...(target.apiKey ? { Authorization: `Bearer ${target.apiKey}` } : {}),
@@ -446,27 +443,27 @@ async function postOllamaJson<T>(target: OllamaTarget, endpoint: "web_search" | 
 			signal: requestSignal.signal,
 		});
 
-		return await readJsonResponse<T>(response, operation, host);
+		return await readJsonResponse<T>(response, host);
 	} catch (error) {
 		if (isConnectionRefused(error) && isLoopbackHost(host)) {
 			requestSignal.cleanup();
 			await ensureOllamaRunning(host, timeoutMs, signal);
-			return waitForEndpointReady(() => postOllamaJson<T>(target, endpoint, body, operation, signal, timeoutMs, false), host, operation, timeoutMs, signal);
+			return waitForEndpointReady(() => postOllamaJson<T>(target, body, signal, timeoutMs, false), host, timeoutMs, signal);
 		}
 
 		if (retryEndpointUnavailable && isEndpointUnavailable(error) && isLoopbackHost(host)) {
 			requestSignal.cleanup();
-			return waitForEndpointReady(() => postOllamaJson<T>(target, endpoint, body, operation, signal, timeoutMs, false), host, operation, timeoutMs, signal);
+			return waitForEndpointReady(() => postOllamaJson<T>(target, body, signal, timeoutMs, false), host, timeoutMs, signal);
 		}
 
-		throw normalizeOllamaError(error, operation, host, timeoutMs, requestSignal.timedOut(), signal);
+		throw normalizeOllamaError(error, host, timeoutMs, requestSignal.timedOut(), signal);
 	} finally {
 		requestSignal.cleanup();
 	}
 }
 
-function createTavilyHttpError(response: Response, operation: Operation, body: string): Error {
-	const endpoint = tavilyEndpoint(operation);
+function createTavilyHttpError(response: Response, body: string): Error {
+	const endpoint = TAVILY_ENDPOINT;
 	const bodySuffix = formatErrorBody(body);
 	const withBody = bodySuffix ? ` Response: ${bodySuffix}` : "";
 
@@ -481,8 +478,8 @@ function createTavilyHttpError(response: Response, operation: Operation, body: s
 	return new Error(`Tavily ${endpoint} API returned HTTP ${response.status}.${withBody || ` ${response.statusText}`}`);
 }
 
-function normalizeTavilyError(error: unknown, operation: Operation, timeoutMs: number, timedOut: boolean, parentSignal: AbortSignal | undefined): Error {
-	const endpoint = tavilyEndpoint(operation);
+function normalizeTavilyError(error: unknown, timeoutMs: number, timedOut: boolean, parentSignal: AbortSignal | undefined): Error {
+	const endpoint = TAVILY_ENDPOINT;
 
 	if (timedOut) {
 		return new Error(
@@ -511,8 +508,8 @@ function normalizeTavilyError(error: unknown, operation: Operation, timeoutMs: n
 	return error instanceof Error ? error : new Error(String(error));
 }
 
-async function postTavilyJson<T>(apiKey: string, operation: Operation, body: Record<string, unknown>, signal: AbortSignal | undefined, timeoutMs: number): Promise<T> {
-	const endpoint = tavilyEndpoint(operation);
+async function postTavilyJson<T>(apiKey: string, body: Record<string, unknown>, signal: AbortSignal | undefined, timeoutMs: number): Promise<T> {
+	const endpoint = TAVILY_ENDPOINT;
 	const requestSignal = createRequestSignal(signal, timeoutMs);
 
 	try {
@@ -527,7 +524,7 @@ async function postTavilyJson<T>(apiKey: string, operation: Operation, body: Rec
 		});
 		const responseBody = await response.text().catch(() => "");
 
-		if (!response.ok) throw createTavilyHttpError(response, operation, responseBody);
+		if (!response.ok) throw createTavilyHttpError(response, responseBody);
 		if (!responseBody.trim()) throw new Error(`Tavily ${endpoint} API returned an empty response.`);
 
 		try {
@@ -538,7 +535,7 @@ async function postTavilyJson<T>(apiKey: string, operation: Operation, body: Rec
 			throw new Error(`Tavily ${endpoint} API returned invalid JSON: ${parseMessage}.${bodySuffix ? ` Body: ${bodySuffix}` : ""}`);
 		}
 	} catch (error) {
-		throw normalizeTavilyError(error, operation, timeoutMs, requestSignal.timedOut(), signal);
+		throw normalizeTavilyError(error, timeoutMs, requestSignal.timedOut(), signal);
 	} finally {
 		requestSignal.cleanup();
 	}
@@ -573,61 +570,105 @@ function parseSearchResponse(data: unknown, providerName = "Ollama"): SearchResp
 	};
 }
 
-function parseTavilyExtractResponse(data: unknown, requestedUrl: string): FetchResponse {
-	if (!isRecord(data) || !Array.isArray(data.results)) {
-		throw new Error("Tavily extract API returned an unexpected response: missing results array.");
-	}
-
-	const result = data.results.find((item) => isRecord(item) && item.url === requestedUrl) ?? data.results[0];
-	if (!isRecord(result) || typeof result.raw_content !== "string") {
-		const failedResult = Array.isArray(data.failed_results)
-			? data.failed_results.find((item) => isRecord(item) && item.url === requestedUrl) ?? data.failed_results[0]
-			: undefined;
-		const failedMessage = isRecord(failedResult) ? optionalString(failedResult.error) : undefined;
-		throw new Error(`Tavily extract API did not return content for ${requestedUrl}.${failedMessage ? ` ${failedMessage}` : ""}`);
-	}
-
-	return {
-		title: requestedUrl,
-		content: result.raw_content,
-		links: [],
-	};
-}
-
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
-async function withTavilyFallback<T>(
-	operation: Operation,
-	signal: AbortSignal | undefined,
-	ollamaHost: string,
-	tavilyApiKey: string | undefined,
-	ollamaRequest: () => Promise<T>,
-	tavilyRequest: (apiKey: string) => Promise<T>,
-): Promise<ProviderResponse<T>> {
-	try {
-		return { data: await ollamaRequest(), provider: "ollama", host: ollamaHost };
-	} catch (ollamaError) {
-		if (signal?.aborted) throw ollamaError;
+/** Tries providers in order; stops on success or parent cancellation. */
+async function runSearchChain<T>(signal: AbortSignal | undefined, attempts: SearchAttempt<T>[]): Promise<ProviderResponse<T>> {
+	const failures: Array<ProviderFailure & { label: string }> = [];
 
-		if (!tavilyApiKey) throw ollamaError;
-
+	for (const attempt of attempts) {
 		try {
+			const data = await attempt.request();
+			if (failures.length === 0) return { data, provider: attempt.provider, host: attempt.host };
 			return {
-				data: await tavilyRequest(tavilyApiKey),
-				provider: "tavily",
-				host: TAVILY_API_HOST,
-				fallbackFrom: { provider: "ollama", error: errorMessage(ollamaError) },
+				data,
+				provider: attempt.provider,
+				host: attempt.host,
+				fallbackFrom: { provider: failures[0].provider, error: failures[0].error },
+				failures: failures.map(({ provider, error }) => ({ provider, error })),
 			};
-		} catch (tavilyError) {
-			if (signal?.aborted) throw tavilyError;
-
-			throw new Error(
-				`Ollama ${endpointName(operation)} failed: ${errorMessage(ollamaError)} ` +
-					`Tavily ${tavilyEndpoint(operation)} fallback also failed: ${errorMessage(tavilyError)}`,
-			);
+		} catch (error) {
+			if (signal?.aborted) throw error;
+			failures.push({ provider: attempt.provider, label: attempt.label, error: errorMessage(error) });
 		}
+	}
+
+	if (failures.length === 1) throw new Error(failures[0].error);
+	throw new Error(
+		failures
+			.map((failure, index) => `${failure.label} ${index === 0 ? "failed" : "fallback also failed"}: ${failure.error}`)
+			.join(" "),
+	);
+}
+
+function normalizeBraveError(error: unknown, timeoutMs: number, timedOut: boolean, parentSignal: AbortSignal | undefined): Error {
+	if (timedOut) return new Error(`Brave Search request timed out after ${timeoutMs}ms.`);
+	if (isAbortError(error) && parentSignal?.aborted) return new Error("Brave Search request was cancelled.");
+	if (errorIncludes(error, "ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT")) {
+		const details = collectErrorText(error);
+		return new Error(`Connection to Brave Search failed.${details ? ` ${details}` : ""}`);
+	}
+	return error instanceof Error ? error : new Error(String(error));
+}
+
+const BRAVE_MAX_BYTES = 4 * 1024 * 1024;
+const STATUS_MARKER = "\n__PI_HTTP_STATUS__:";
+
+export type BraveTransport = (url: string, signal: AbortSignal) => Promise<{ status: number; body: string }>;
+
+/**
+ * Brave rejects Node/Bun TLS clients (HTTP 429) but serves curl, so the keyless fallback
+ * shells out to the system curl without a shell; arguments are passed as an argv array.
+ */
+const curlTransport: BraveTransport = (url, signal) => new Promise((resolve, reject) => {
+	const args = ["-sS", "--compressed", "--max-filesize", String(BRAVE_MAX_BYTES), "-w", `${STATUS_MARKER}%{http_code}`];
+	for (const [name, value] of Object.entries(BRAVE_SEARCH_HEADERS)) args.push("-H", `${name}: ${value}`);
+	args.push("--", url);
+	const child = spawnImpl("curl", args, { stdio: ["ignore", "pipe", "pipe"], signal });
+	const out: Buffer[] = [];
+	const err: Buffer[] = [];
+	let bytes = 0;
+	child.stdout?.on("data", (chunk: Buffer) => {
+		bytes += chunk.byteLength;
+		if (bytes > BRAVE_MAX_BYTES + 64) child.kill();
+		else out.push(chunk);
+	});
+	child.stderr?.on("data", (chunk: Buffer) => err.push(chunk));
+	child.once("error", (error) => reject(errorIncludes(error, "ENOENT") ? new Error("curl is not installed; Brave Search fallback is unavailable.") : error));
+	child.once("close", (code) => {
+		const text = Buffer.concat(out).toString("utf8");
+		const marker = text.lastIndexOf(STATUS_MARKER);
+		if (code !== 0 || marker < 0) {
+			reject(new Error(`curl failed (exit ${code}). ${formatErrorBody(Buffer.concat(err).toString("utf8"))}`.trim()));
+			return;
+		}
+		resolve({ status: Number(text.slice(marker + STATUS_MARKER.length).trim()), body: text.slice(0, marker) });
+	});
+});
+
+let braveTransport: BraveTransport = curlTransport;
+
+export function __setBraveTransportForTests(next: BraveTransport | undefined): void {
+	braveTransport = next ?? curlTransport;
+}
+
+/** Keyless fallback: fetches the public Brave Search results page and parses it locally. */
+async function searchBrave(query: string, maxResults: number, signal: AbortSignal | undefined, timeoutMs: number): Promise<SearchResponse> {
+	const requestSignal = createRequestSignal(signal, timeoutMs);
+
+	try {
+		const response = await braveTransport(braveSearchUrl(query), requestSignal.signal);
+		const body = response.body;
+		if (response.status === 429) throw new Error("Brave Search rate limit was exceeded (HTTP 429).");
+		if (response.status < 200 || response.status >= 300) throw new Error(`Brave Search returned HTTP ${response.status}.`);
+		const limit = Math.max(0, Math.trunc(maxResults));
+		return { results: parseBraveSearchHtml(body).slice(0, limit) };
+	} catch (error) {
+		throw normalizeBraveError(error, timeoutMs, requestSignal.timedOut(), signal);
+	} finally {
+		requestSignal.cleanup();
 	}
 }
 
@@ -696,7 +737,7 @@ function clearCredential(
 
 function registerCredentialCommand(pi: ExtensionAPI): void {
 	pi.registerCommand("web-credentials", {
-		description: "Configure Ollama and Tavily API keys for web_search/web_fetch",
+		description: "Configure Ollama and Tavily API keys for web_search",
 		handler: async (_args, ctx) => {
 			if (!ctx.hasUI) return;
 			showCredentialLinks(ctx);
@@ -723,18 +764,6 @@ function registerCredentialCommand(pi: ExtensionAPI): void {
 	});
 }
 
-function parseFetchResponse(data: unknown): FetchResponse {
-	if (!isRecord(data) || typeof data.content !== "string") {
-		throw new Error("Ollama web_fetch API returned an unexpected response: missing content string.");
-	}
-
-	return {
-		title: optionalString(data.title) || "Untitled",
-		content: data.content,
-		links: Array.isArray(data.links) ? data.links.filter((link): link is string => typeof link === "string") : undefined,
-	};
-}
-
 function truncateForTool(text: string): { text: string; truncated: boolean } {
 	const truncation = truncateHead(text, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
 	if (!truncation.truncated) return { text: truncation.content, truncated: false };
@@ -759,27 +788,6 @@ function formatSearchResults(results: SearchResult[]): string {
 		.join("\n\n");
 }
 
-function formatFetchResult(data: FetchResponse): string {
-	const links = data.links ?? [];
-	const visibleLinks = links.slice(0, 10);
-	const hiddenLinkCount = Math.max(0, links.length - visibleLinks.length);
-
-	return [
-		`Title: ${data.title}`,
-		"",
-		"Content:",
-		data.content,
-		"",
-		`Links found: ${links.length}`,
-		...visibleLinks.map((link) => `  - ${link}`),
-		hiddenLinkCount > 0 ? `  … ${hiddenLinkCount} more link(s) omitted` : undefined,
-	].filter((line): line is string => line !== undefined).join("\n");
-}
-
-function contentByteLength(text: string): number {
-	return new TextEncoder().encode(text).byteLength;
-}
-
 function timeoutParameterDescription(): string {
 	return `Request timeout in milliseconds (default: ${DEFAULT_REQUEST_TIMEOUT_MS}; env override: ${REQUEST_TIMEOUT_ENV}; max: ${MAX_REQUEST_TIMEOUT_MS})`;
 }
@@ -802,22 +810,7 @@ function searchResultDetails(response: ProviderResponse<SearchResponse>, timeout
 		provider: response.provider,
 		host: response.host,
 		fallbackFrom: response.fallbackFrom,
-		timeoutMs,
-		truncated,
-	};
-}
-
-function fetchResultDetails(response: ProviderResponse<FetchResponse>, timeoutMs: number, truncated: boolean) {
-	const data = response.data;
-	return {
-		title: data.title,
-		content: data.content,
-		contentBytes: contentByteLength(data.content),
-		links: data.links ?? [],
-		linkCount: data.links?.length ?? 0,
-		provider: response.provider,
-		host: response.host,
-		fallbackFrom: response.fallbackFrom,
+		failures: response.failures,
 		timeoutMs,
 		truncated,
 	};
@@ -839,21 +832,35 @@ export default function webSearch(pi: ExtensionAPI) {
 			const tavilyApiKey = resolveApiKey(TAVILY_API_KEY_ENV, "tavily");
 			const timeoutMs = resolveRequestTimeoutMs(params.timeout_ms);
 
-			const response = await withTavilyFallback(
-				"Search",
-				signal,
-				ollamaTarget.host,
-				tavilyApiKey,
-				async () => parseSearchResponse(await postOllamaJson<unknown>(ollamaTarget, "web_search", { query: params.query, max_results: maxResults }, "Search", signal, timeoutMs)),
-				async (apiKey) => parseSearchResponse(
-					await postTavilyJson<unknown>(apiKey, "Search", {
-						query: params.query,
-						max_results: Math.max(0, Math.min(TAVILY_MAX_SEARCH_RESULTS, Math.trunc(maxResults))),
-						search_depth: "basic",
-					}, signal, timeoutMs),
-					"Tavily",
-				),
-			);
+			const attempts: SearchAttempt<SearchResponse>[] = [{
+				provider: "ollama",
+				label: `Ollama ${OLLAMA_ENDPOINT}`,
+				host: ollamaTarget.host,
+				request: async () => parseSearchResponse(await postOllamaJson<unknown>(ollamaTarget, { query: params.query, max_results: maxResults }, signal, timeoutMs)),
+			}];
+			if (tavilyApiKey) {
+				attempts.push({
+					provider: "tavily",
+					label: `Tavily ${TAVILY_ENDPOINT}`,
+					host: TAVILY_API_HOST,
+					request: async () => parseSearchResponse(
+						await postTavilyJson<unknown>(tavilyApiKey, {
+							query: params.query,
+							max_results: Math.max(0, Math.min(TAVILY_MAX_SEARCH_RESULTS, Math.trunc(maxResults))),
+							search_depth: "basic",
+						}, signal, timeoutMs),
+						"Tavily",
+					),
+				});
+			}
+			attempts.push({
+				provider: "brave",
+				label: "Brave Search",
+				host: BRAVE_SEARCH_HOST,
+				request: () => searchBrave(params.query, maxResults, signal, timeoutMs),
+			});
+
+			const response = await runSearchChain(signal, attempts);
 			if (response.fallbackFrom) suiteDiagnostics.report("warn", "web", "search-provider-fallback", ctx?.cwd);
 			const formatted = truncateForTool(formatSearchResults(response.data.results));
 
@@ -871,32 +878,42 @@ export default function webSearch(pi: ExtensionAPI) {
 			timeout_ms: timeoutParameter(),
 		}),
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-			const ollamaTarget = resolveOllamaTarget();
-			const tavilyApiKey = resolveApiKey(TAVILY_API_KEY_ENV, "tavily");
 			const timeoutMs = resolveRequestTimeoutMs(params.timeout_ms);
-
-			const response = await withTavilyFallback(
-				"Fetch",
-				signal,
-				ollamaTarget.host,
-				tavilyApiKey,
-				async () => parseFetchResponse(await postOllamaJson<unknown>(ollamaTarget, "web_fetch", { url: params.url }, "Fetch", signal, timeoutMs)),
-				async (apiKey) => parseTavilyExtractResponse(
-					await postTavilyJson<unknown>(apiKey, "Fetch", {
-						urls: [params.url],
-						extract_depth: "basic",
-						format: "markdown",
-					}, signal, timeoutMs),
-					params.url,
-				),
-			);
-			if (response.fallbackFrom) suiteDiagnostics.report("warn", "web", "fetch-provider-fallback", ctx?.cwd);
-			const formatted = truncateForTool(formatFetchResult(response.data));
-
-			return {
-				content: [{ type: "text", text: formatted.text }],
-				details: fetchResultDetails(response, timeoutMs, formatted.truncated),
-			};
+			const deadline = performance.now() + timeoutMs;
+			const request = createRequestSignal(signal, timeoutMs);
+			try {
+				request.signal.throwIfAborted();
+				const url = parsePublicPageUrl(params.url);
+				const source = await downloadPublicPage(url, request.signal);
+				const reader = source.html ? await import("./page-markdown.js") : undefined;
+				request.signal.throwIfAborted();
+				const page = reader?.extractPageMarkdown(source.text, source.url) ?? { title: "", content: source.text };
+				request.signal.throwIfAborted();
+				if (!page.content.trim()) throw new Error("No readable content found.");
+				const title = page.title || "Untitled";
+				const formatted = truncateForTool(`Title: ${title}\nURL: ${source.url.href}\n\nContent:\n${page.content}`);
+				if (performance.now() >= deadline) throw new Error("Page processing exceeded its deadline.");
+				return {
+					content: [{ type: "text", text: formatted.text }],
+					details: {
+						title,
+						content: page.content,
+						contentBytes: Buffer.byteLength(page.content),
+						provider: "local",
+						host: url.origin,
+						timeoutMs,
+						truncated: formatted.truncated,
+					},
+				};
+			} catch (error) {
+				if (signal?.aborted) throw new Error("web_fetch request was cancelled.");
+				const timedOut = request.timedOut() || performance.now() >= deadline;
+				suiteDiagnostics.report("warn", "web", timedOut ? "fetch-timeout" : "fetch-failed", ctx?.cwd);
+				if (timedOut) throw new Error(`web_fetch request timed out after ${timeoutMs}ms.`);
+				throw new Error(`web_fetch failed: ${errorMessage(error)}`);
+			} finally {
+				request.cleanup();
+			}
 		},
 	});
 }
