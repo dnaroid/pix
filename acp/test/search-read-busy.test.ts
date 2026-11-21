@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { setTimeout as delay } from "node:timers/promises";
 import { DatabaseSync } from "node:sqlite";
 import { removeDirsWithRetry } from "../../external/pi-tools-suite/test/support/fs-retry.mjs";
 import { openDatabase, READ_BUSY_BUDGET_MS } from "../src/search/source-work.js";
@@ -24,34 +23,40 @@ async function locked(t: { after(fn: () => Promise<unknown>): void }) {
   return { file, peer };
 }
 
+function observeReadAttempts(t: TestContext, afterFirstAttempt: () => void) {
+  const prepare = DatabaseSync.prototype.prepare;
+  let attempts = 0;
+  t.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
+    // Only the readiness probe in openDatabase prepares a statement before it returns.
+    // Leave the real lock held during that probe, then act between retry turns.
+    if (++attempts === 1) queueMicrotask(afterFirstAttempt);
+    return prepare.call(this, sql);
+  });
+  return () => attempts;
+}
+
 test("read-only open waits asynchronously for a transient peer lock, then reads committed data", async t => {
   const { file, peer } = await locked(t);
-  let ticks = 0;
-  const timer = setInterval(() => { ticks++; }, 5);
+  const attempts = observeReadAttempts(t, () => peer.exec("ROLLBACK"));
+  const db = await openDatabase(file, { readOnly: true });
   try {
-    const opening = openDatabase(file, { readOnly: true });
-    await delay(60);
-    peer.exec("ROLLBACK");
-    const db = await opening;
-    try { assert.equal((db.prepare("SELECT count(*) AS n FROM t").get() as { n: number }).n, 1); }
-    finally { db.close(); }
-  } finally { clearInterval(timer); }
-  assert.ok(ticks >= 5, `event loop kept running while waiting (${ticks} ticks)`);
+    assert.equal(attempts(), 2, "opening retries after yielding so the peer can unlock");
+    assert.equal((db.prepare("SELECT count(*) AS n FROM t").get() as { n: number }).n, 1);
+  } finally { db.close(); }
 });
 
-test("read-only open gives up after the bounded budget with a busy error", async t => {
+test("read-only open gives up after the bounded budget with a busy error", { timeout: 5_000 }, async t => {
   const { file } = await locked(t);
-  const started = Date.now();
+  t.mock.timers.enable({ apis: ["Date"] });
+  const attempts = observeReadAttempts(t, () => t.mock.timers.tick(READ_BUSY_BUDGET_MS));
   await assert.rejects(openDatabase(file, { readOnly: true }), /locked|busy/i);
-  const elapsed = Date.now() - started;
-  assert.ok(elapsed >= READ_BUSY_BUDGET_MS - 20 && elapsed < READ_BUSY_BUDGET_MS + 500, `bounded wait (${elapsed}ms)`);
+  assert.equal(attempts(), 2, "the deadline stops retries after the next busy result");
 });
 
 test("read-only open honours cancellation while waiting", async t => {
   const { file } = await locked(t);
   const controller = new AbortController();
-  const opening = openDatabase(file, { readOnly: true, signal: controller.signal });
-  await delay(30);
-  controller.abort();
-  await assert.rejects(opening, { name: "AbortError" });
+  const attempts = observeReadAttempts(t, () => controller.abort());
+  await assert.rejects(openDatabase(file, { readOnly: true, signal: controller.signal }), { name: "AbortError" });
+  assert.equal(attempts(), 1, "cancellation stops the pending retry");
 });
