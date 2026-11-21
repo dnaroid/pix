@@ -21,8 +21,9 @@ remain true when CI or UI-QA tests change.
   do not repeat this matrix.
 - Browser QA E2E runs once on the Ubuntu job.
 - A native-host preflight runs before the full gate on each matrix leg. It
-  checks deterministic test contracts on all hosts and platform-specific
-  lifecycle/portability regressions. It is additive, not an alternative to
+  checks tools-suite dependency parity, install repair, and deterministic
+  test contracts on all hosts before platform-specific lifecycle/portability
+  regressions. It is additive, not an alternative to
   `check:ci`, and its failure artifacts are retained.
 - `publish.yml` runs only for `v*` tags or manual dispatch. It has a lightweight
   `release-contract` gate and the three-target native release matrix.
@@ -78,9 +79,11 @@ remain true when CI or UI-QA tests change.
   shared native-host verification entrypoint used locally and by `check.yml`.
   `-- --list` prints the host plan without executing checks.
 - `npm run check:ci:preflight` is a short, independently reported gate using
-  the same isolated test HOME and log/summary protocol. Linux checks the real
-  AST binary and LSP broker ownership; Windows checks SQLite fixture cleanup, detached broker receipts
-  and PTY-exit timers; macOS checks process-group exit races. In GitHub CI and
+  the same isolated test HOME and log/summary protocol. Every host first runs
+  the tools-suite dependency parity/install repair tests, then test contracts.
+  Linux checks the real AST binary and LSP broker ownership; Windows checks
+  SQLite fixture cleanup, detached broker receipts and PTY-exit timers; macOS
+  checks process-group exit races. In GitHub CI and
   authorized full local runs, `check:ci` follows a successful preflight; a
   focused local preflight can run on its own.
 - Every supported host runs root checks, ACP checks (including stdio smoke),

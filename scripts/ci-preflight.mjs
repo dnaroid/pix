@@ -10,6 +10,7 @@ const node = (id, args, isolatedHome = false) => ({ id, command: process.execPat
 export function preflightPlan(platform = process.platform) {
   if (!["linux", "darwin", "win32"].includes(platform)) throw new Error(`Unsupported CI host: ${platform}`);
   const plan = [
+    node("suite-dependencies", ["--import", "tsx", "--test", join(repoRoot, "tests/pi-tools-suite-dependencies.test.ts")]),
     node("test-contracts", [join(repoRoot, "scripts/ci-test-contracts.mjs"), "--check"]),
   ];
   if (platform === "win32") {

@@ -73,7 +73,7 @@ authorize a full run. For those release/push-everything tasks, run:
 
 ```bash
 npm run check:ci:preflight -- --list  # inspect platform-specific smoke tests
-npm run check:ci:preflight            # quick lifecycle/portability regressions
+npm run check:ci:preflight            # dependency parity, test contracts, lifecycle/portability regressions
 npm run check:ci -- --list  # inspect the native-host plan without running tests
 npm run check:ci
 ```
@@ -88,9 +88,9 @@ the smoke result is never a substitute for the complete platform matrix. This
 local verification policy does not change automatic GitHub Actions triggers.
 Report the actual verification scope and any blocked or incomplete checks;
 do not present a local pass as proof of other OS matrix legs.
-Preflight verifies test contracts on every OS, AST CLI availability and LSP
-ownership on Linux,
-native SQLite, detached broker and PTY exit handling on Windows, and
+On every OS, preflight checks tools-suite dependency parity, install repair,
+and test contracts. It also checks AST CLI availability and LSP ownership on
+Linux; native SQLite, detached broker and PTY exit handling on Windows; and
 Claude Code process-group cleanup on macOS. Both stages retain individual logs
 and summaries under `.pi/artifacts`, which CI uploads even on failure.
 On Windows, the shared gate launches the npm-installed Bun command through

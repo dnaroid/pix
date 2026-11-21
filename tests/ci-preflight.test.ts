@@ -5,18 +5,20 @@ import { test } from "node:test";
 import { preflightPlan } from "../scripts/ci-preflight.mjs";
 import { ciPlan, repoRoot } from "../scripts/check-ci.mjs";
 
-test("preflight selects actual cross-platform lifecycle regressions, not the full gate", () => {
+test("preflight checks dependency parity early and selects platform regressions, not the full gate", () => {
   const ids = (platform: NodeJS.Platform) => preflightPlan(platform).map(step => step.id);
-  assert.deepEqual(ids("win32"), ["test-contracts", "windows-lifecycle", "windows-sqlite", "windows-pty"]);
-  assert.deepEqual(ids("linux"), ["test-contracts", "linux-ast", "linux-lsp"]);
-  assert.deepEqual(ids("darwin"), ["test-contracts", "macos-process-cleanup"]);
-  assert.ok(preflightPlan("win32").slice(1).every(step => step.command === "bun"),
+  const shared = ["suite-dependencies", "test-contracts"];
+  assert.deepEqual(ids("win32"), [...shared, "windows-lifecycle", "windows-sqlite", "windows-pty"]);
+  assert.deepEqual(ids("linux"), [...shared, "linux-ast", "linux-lsp"]);
+  assert.deepEqual(ids("darwin"), [...shared, "macos-process-cleanup"]);
+  assert.ok(preflightPlan("win32").slice(shared.length).every(step => step.command === "bun"),
     "Windows Bun tests must use CI's cmd.exe command resolution");
   assert.throws(() => preflightPlan("solaris" as NodeJS.Platform), /Unsupported CI host/);
   for (const platform of ["win32", "linux", "darwin"] as const) {
     const plan = preflightPlan(platform);
-    assert.ok(plan.slice(1).every(step => step.isolatedHome), "sensitive suite preflight must isolate HOME");
-    assert.ok(plan.some(step => step.id === "test-contracts"));
+    assert.equal(plan[0].command, process.execPath);
+    assert.deepEqual(plan[0].args, ["--import", "tsx", "--test", join(repoRoot, "tests/pi-tools-suite-dependencies.test.ts")]);
+    assert.ok(plan.slice(shared.length).every(step => step.isolatedHome), "sensitive suite preflight must isolate HOME");
     for (const step of plan) for (const arg of step.args) {
       if (/\.(?:test\.[jt]s|case\.js|mjs)$/.test(arg) && arg.startsWith(repoRoot)) {
         assert.ok(existsSync(arg), `missing smoke regression file: ${arg}`);
