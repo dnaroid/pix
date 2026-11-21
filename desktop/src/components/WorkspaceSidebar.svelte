@@ -785,6 +785,10 @@
   }
 
   /** Reveal Source Control without toggling it closed when already active. */
+  export function refreshLaunchCommands(): void {
+    void launchController.refreshLaunchCommands();
+  }
+
   export function openGitPanel(isCurrent: () => boolean = () => true): void {
     if (!isCurrent()) return;
     statusMenuController.close();

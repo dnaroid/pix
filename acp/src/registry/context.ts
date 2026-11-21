@@ -3,7 +3,7 @@ export interface RegistryContext {
 	readonly cwd: string;
 	readonly hasUI: boolean;
 	readonly ui: {
-		confirm(title: string, message: string): Promise<boolean>;
+		confirm(title: string, message: string, signal?: AbortSignal): Promise<boolean>;
 		input(title: string, prefill?: string): Promise<string | undefined>;
 		editor(title: string, prefill?: string): Promise<string | undefined>;
 		notify(message: string, type?: "info" | "warning" | "error"): void;

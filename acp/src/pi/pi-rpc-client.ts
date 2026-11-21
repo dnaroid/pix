@@ -56,7 +56,8 @@ export type PiEvent = ((JsonAgentSessionEvent | RpcExtensionUIRequest) & {
 }) | { readonly type: "pix_btw_event"; readonly data: BtwEvent }
   | { readonly type: "pix_task_run_request"; readonly requestId: string; readonly op?: "run" | "models"; readonly taskId?: string; readonly modelRef?: string }
   | { readonly type: "pix_task_run_cancel"; readonly requestId: string }
-  | { readonly type: "pix_supervisor_request"; readonly requestId: string; readonly request: unknown };
+  | { readonly type: "pix_supervisor_request"; readonly requestId: string; readonly request: unknown }
+  | { readonly type: "pix_supervisor_setup_cancel"; readonly requestId: string };
 
 export type PiEventListener = (event: PiEvent) => void;
 

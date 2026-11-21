@@ -35,6 +35,27 @@ afterEach(async () => {
 	await fs.rm(root, { recursive: true, force: true });
 });
 
+test("an aborted queued Registry operation settles without letting followers bypass the owner", { timeout: 10_000 }, async () => {
+	let enter!: () => void;
+	let release!: () => void;
+	const entered = new Promise<void>((resolve) => { enter = resolve; });
+	const released = new Promise<void>((resolve) => { release = resolve; });
+	const first = withRegistryCache(async () => { enter(); await released; });
+	await entered;
+	const cancelled = new AbortController();
+	const queued = withRegistryCache(async () => assert.fail("cancelled operation ran"), cancelled.signal);
+	let nextEntered = false;
+	try {
+		cancelled.abort();
+		await assert.rejects(queued, { name: "AbortError" });
+		const next = withRegistryCache(async () => { nextEntered = true; });
+		assert.equal(nextEntered, false);
+		release();
+		await next;
+		assert.equal(nextEntered, true);
+	} finally { release(); await first; }
+});
+
 function worker(body: string): { child: ChildProcess; waitFor: (message: string) => Promise<void> } {
 	const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", `
 		import { promises as fs } from "node:fs";

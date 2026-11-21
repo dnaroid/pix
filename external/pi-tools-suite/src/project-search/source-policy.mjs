@@ -131,7 +131,25 @@ export async function replaceWorkspaceConfig(root, content, verify) {
     return content;
   });
 }
-async function installWorkspaceConfig(root, content) {
+
+export async function readWorkspaceConfig(root) {
+  const current = await readProjectPolicy(root);
+  if (current.error) throw new Error(current.error);
+  return current.content;
+}
+
+/** Surgical workspace edits use the same cross-process mutex as Desktop CAS. */
+export async function editWorkspaceConfig(root, edit, beforeCommit) {
+  return withSourcePolicyWriteLock(root, async () => {
+    const current = await readWorkspaceConfig(root);
+    const [content, result] = edit(current);
+    projectSelection(content);
+    if (content !== current) await installWorkspaceConfig(root, content, beforeCommit);
+    return result;
+  });
+}
+
+async function installWorkspaceConfig(root, content, beforeCommit) {
   if (Buffer.byteLength(content) > MAX_WORKSPACE_BYTES) throw new Error("Workspace configuration is too large");
   const path = sourcePolicyPath(root), parent = join(resolve(root), ".pi");
   const temp = join(parent, `.workspace.jsonc.${randomUUID()}.tmp`);
@@ -141,6 +159,7 @@ async function installWorkspaceConfig(root, content) {
     finally { await handle.close(); }
     await directory(parent);
     if ((await readProjectPolicy(root)).error) throw new Error("Unsafe workspace configuration");
+    if (beforeCommit) await beforeCommit();
     await rename(temp, path);
     if (process.platform !== "win32") {
       const handle = await open(parent, constants.O_RDONLY | constants.O_NOFOLLOW);

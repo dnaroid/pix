@@ -227,6 +227,54 @@ function item(snapshot: RegistryUiSnapshot, id: string): RegistryUiItem {
 	return found;
 }
 
+test("supervisor Registry confirmation binds an exact publication and preserves local copies", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
+	const { project, seed, h } = await scopeFixture();
+	const svc = service();
+	const signal = new AbortController();
+	const execute = (action: "install" | "update", current = signal.signal) => svc.confirmedResource(
+		{ action, type: "skill", name: "demo" }, h.ctx, current, async () => {}, (run) => run());
+	const destination = path.join(project, ".pi", "skills", "demo", "SKILL.md");
+	const publish = (body: string) => {
+		fs.writeFileSync(path.join(seed, "skills", "demo", "SKILL.md"), body);
+		git(seed, ["commit", "-am", "Update demo"]);
+		git(seed, ["push"]);
+	};
+	h.setConfirm(async () => false);
+	await assert.rejects(execute("install"), /not approved/);
+	assert.equal(fs.existsSync(destination), false);
+	h.setConfirm(async () => {
+		// A second window can refresh while the dialog is open.
+		assert.equal((await act(project, { action: "refresh" }, h.ctx, svc)).error, undefined);
+		publish("v2\n");
+		return true;
+	});
+	await assert.rejects(execute("install"), /changed after confirmation/);
+	assert.equal(fs.existsSync(destination), false);
+	h.setConfirm(async () => true);
+	assert.equal(await execute("install"), "installed");
+	assert.equal(fs.readFileSync(destination, "utf8"), "v2\n");
+	assert.match(h.confirmations.at(-1)!.message, /Scope: Global\nRevision: [a-f0-9]{40}/);
+	assert.ok(h.confirmations.at(-1)!.message.includes(project));
+	publish("v3\n");
+	h.setConfirm(async () => { fs.appendFileSync(destination, "edited during confirmation\n"); return true; });
+	await assert.rejects(execute("update"), /local changes|changed after confirmation/);
+	assert.equal(fs.readFileSync(destination, "utf8"), "v2\nedited during confirmation\n");
+	fs.writeFileSync(destination, "v2\n");
+	let active = true;
+	h.setConfirm(async () => { active = false; return true; });
+	await assert.rejects(svc.confirmedResource({ action: "update", type: "skill", name: "demo" }, h.ctx,
+		signal.signal, async () => { if (!active) throw new Error("supervisor paused"); }, (run) => run()), /supervisor paused/);
+	assert.equal(fs.readFileSync(destination, "utf8"), "v2\n");
+	h.setConfirm(async () => { signal.abort(); return true; });
+	await assert.rejects(execute("update"), { name: "AbortError" });
+	assert.equal(fs.readFileSync(destination, "utf8"), "v2\n");
+	h.setConfirm(async () => true);
+	assert.equal(await execute("update", new AbortController().signal), "updated");
+	fs.appendFileSync(destination, "local change\n");
+	await assert.rejects(execute("update", new AbortController().signal), /local changes/);
+	assert.equal(fs.readFileSync(destination, "utf8"), "v3\nlocal change\n");
+});
+
 test("installed agent model choices are isolated from authored files and publication, and reset uses current original", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
 	const { project, seed, h } = await scopeFixture();
 	const svc = service();

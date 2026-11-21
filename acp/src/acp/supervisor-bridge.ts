@@ -1,5 +1,6 @@
 import { parseSupervisorToolRequest, type SupervisorToolRequest } from "./supervisor-contract.js";
 import type { Logger } from "../logging.js";
+import { parseSupervisorSetupRequest, type SupervisorSetupRequest } from "./supervisor-setup-contract.js";
 
 type SupervisorResponse = { result?: unknown; error?: string };
 type SupervisorSession = {
@@ -18,12 +19,16 @@ export async function forwardSupervisorRequest(
 	handle: (cwd: string, callerSessionId: string, request: SupervisorToolRequest) => Promise<unknown>,
 	current: () => boolean,
 	logger: Logger,
+	setup?: (request: SupervisorSetupRequest) => Promise<unknown>,
 ): Promise<void> {
 	if (!session.pi.respondToSupervisor || !current()) return;
 	let response: SupervisorResponse;
 	try {
-		const request = parseSupervisorToolRequest(event.request);
-		response = { result: await handle(session.cwd, session.acpSessionId, request) };
+		const request = event.request && typeof event.request === "object" && !Array.isArray(event.request)
+			? parseSupervisorSetupRequest(event.request as Record<string, unknown>) : undefined;
+		if (request && !setup) throw new Error("Supervisor project setup is not available on this host");
+		response = { result: request && setup ? await setup(request)
+			: await handle(session.cwd, session.acpSessionId, parseSupervisorToolRequest(event.request)) };
 	} catch (error) {
 		const detail = error instanceof Error ? error.message : "Supervisor request failed";
 		logger.warn(`supervisor request failed: ${detail.slice(0, 500)}`, { module: "supervisor" });

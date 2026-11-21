@@ -5,6 +5,8 @@ export const SEARCH_SOURCES: readonly SearchSource[];
 export const DEFAULT_SEARCH_SOURCES: Readonly<SourceSelection>;
 export function sourcePolicyPath(root: string): string;
 export function replaceWorkspaceConfig(root: string, content: string, verify: () => Promise<void>): Promise<string>;
+export function readWorkspaceConfig(root: string): Promise<string>;
+export function editWorkspaceConfig<T>(root: string, edit: (content: string) => [string, T], beforeCommit: () => Promise<void>): Promise<T>;
 export function readSourcePolicy(root: string): Promise<SourcePolicy>;
 export function sourceEnabled(root: string, source: SearchSource, revision?: string): Promise<boolean>;
 export function requireSourceEnabled(root: string, source: SearchSource, signal?: AbortSignal, revision?: string): Promise<void>;

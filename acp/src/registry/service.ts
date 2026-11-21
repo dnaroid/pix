@@ -19,6 +19,7 @@ import { selectPublicationRuntime } from "./publication-location.js";
 import { togglePublicationScope } from "./publication-scope.js";
 import { pushProjectResourceChanges, syncInstalledResources, syncProjectResources } from "./project-resource-sync.js";
 import { setAgentModelOverride } from "./agent-models.js";
+import { confirmRegistryResource, type ConfirmedResourceRequest } from "./confirmed-resource.js";
 
 async function configure(ctx: RegistryContext): Promise<void> {
 	const current = loadRegistryConfig(ctx.cwd);
@@ -114,6 +115,10 @@ export class DesktopRegistryService {
 
 	action(request: DesktopRegistryActionRequest, ctx: RegistryContext, signal?: AbortSignal): Promise<RegistryUiSnapshot> {
 		return this.track(signal, (operationSignal, executor) => this.runAction(request, ctx, operationSignal, executor));
+	}
+
+	confirmedResource(request: ConfirmedResourceRequest, ctx: RegistryContext, signal: AbortSignal, beforeCommit: () => Promise<void>, exclusive: <T>(operation: () => Promise<T>) => Promise<T>) {
+		return this.track(signal, (operationSignal, executor) => confirmRegistryResource(executor, ctx, request, operationSignal, beforeCommit, exclusive));
 	}
 
 	diff(request: DesktopRegistryDiffRequest, signal?: AbortSignal) {

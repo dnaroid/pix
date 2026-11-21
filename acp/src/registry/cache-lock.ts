@@ -7,6 +7,18 @@ import { REGISTRY_LOCK_RETRIES, REGISTRY_LOCK_RETRY_MS, REGISTRY_LOCK_STALE_MS, 
 
 const queues = new Map<string, Promise<void>>();
 
+async function waitForTurn(previous: Promise<void>, signal?: AbortSignal): Promise<void> {
+	if (!signal) return previous;
+	signal.throwIfAborted();
+	let abort!: () => void;
+	try {
+		await Promise.race([previous, new Promise<never>((_, reject) => {
+			abort = () => reject(signal.reason);
+			signal.addEventListener("abort", abort, { once: true });
+		})]);
+	} finally { signal.removeEventListener("abort", abort); }
+}
+
 /**
  * Own the checkout and provenance through the entire operation, including reads.
  * An aborted signal stops waiting for the lock and is checked again once it is
@@ -19,8 +31,8 @@ export async function withRegistryCache<T>(task: () => Promise<T>, signal?: Abor
 	const turn = new Promise<void>((resolve) => { releaseTurn = resolve; });
 	const tail = previous.then(() => turn);
 	queues.set(key, tail);
-	await previous;
 	try {
+		await waitForTurn(previous, signal);
 		signal?.throwIfAborted();
 		await fs.mkdir(dirname(key), { recursive: true });
 		const releaseLock = await acquireRegistryLock(key, signal);
@@ -30,7 +42,8 @@ export async function withRegistryCache<T>(task: () => Promise<T>, signal?: Abor
 		} finally { await releaseLock(); }
 	} finally {
 		releaseTurn();
-		if (queues.get(key) === tail) queues.delete(key);
+		// A cancelled slot still links followers to its predecessor.
+		void tail.then(() => { if (queues.get(key) === tail) queues.delete(key); });
 	}
 }
 

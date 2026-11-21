@@ -81,7 +81,7 @@ decision outside its mandate.
   not project_tasks updates; inside the supervisor session use supervisor
   close, never project_tasks update, for managed tasks." Worker sessions never
   get the mandate, and it never authorizes creating or deleting saved tasks,
-  editing other tasks, commits, or actions on unmanaged sessions.
+  editing other tasks, commits, or actions on unmanaged sessions. Its project-setup writes apply only to the supervisor's own project (see [Project setup](#project-setup)).
 - Mandate fields, with defaults:
   - `maxConcurrent`: 5 managed sessions with a turn in flight;
   - `maxReworkRounds`: 5 follow-ups per item after its first completed turn;
@@ -182,11 +182,63 @@ hosts. It calls ACP through a correlated request bridge modelled on
 | `close` | `{sessionId, outcome: done or failed, summary}`. Runs the completion guards, sets the task status, journals the evidence and unregisters the session. |
 | `reopen` | Restores a closed item to `in-progress` and re-registers its session. Refused if that session was deleted; run the item again with `start`. |
 | `escalate` | Records a decision needed from the user; the supervisor asks in its reply. Include `{sessionId, questionId}` for a worker questionnaire. A generic escalation is cleared by the next `send`; a questionnaire escalation is not. Allowed while paused. |
+| `registry-list` | Read-only. Searches the project's registry for skills and agents (`{filter?}`). See [Project setup](#project-setup). |
+| `registry-install` | `{resourceType: skill or agent, name}`. Installs one resource after its own Desktop confirmation. Mandate required. |
+| `registry-update` | Same fields. Updates one tracked resource after its own Desktop confirmation. Mandate required. |
+| `launch-list` | Read-only. Lists the project's Launch Commands with ids and revisions. |
+| `launch-add` | `{name, command}`. Adds a Launch Command. Mandate and a user-prompted turn required. Never runs it. |
+| `launch-edit` | `{commandId, revision, name?, command?}`. Edits one Launch Command whose revision still matches. Mandate and a user-prompted turn required. |
 
 Each mutating op checks, inside ACP and atomically: the supervisor is not
 paused, the session is managed and in `managed` mode, limits allow the action,
 and the request belongs to the current supervisor runtime (stale replies after
 a runtime replacement are dropped).
+
+## Project setup
+
+Setup ops change only the supervisor's own project (the session cwd). They go
+through the same `supervisor` tool and ACP request bridge as the ops above.
+They are not `project_tasks` edits.
+
+- **Caller and host:** ACP accepts setup only from a `pix-desktop` client during
+  an active supervisor turn, and only for the registry's current
+  `supervisorSessionId` in the current runtime. Duplicate request ids are refused.
+- **Reads:** `registry-list` and `launch-list` need only the caller check above.
+- **Writes:** `registry-install`, `registry-update`, `launch-add` and
+  `launch-edit` also need the mandate enabled and not paused. Otherwise they fail
+  with "Enable and resume the supervisor before changing project settings".
+  `launch-add` and `launch-edit` also need a user-prompted supervisor turn
+  (`pix-acp-agent.ts`); the tool description adds that settings change only when
+  the user asks.
+- **Registry search:** `registry-list` refreshes the registry, excludes
+  `project`-type entries, matches `filter` against name, type, description and
+  tags, returns at most 100 items, truncates descriptions to 300 characters and
+  offers only install and update actions.
+- **Registry install and update:** each resource needs its own Desktop
+  confirmation. A host without a UI refuses with "Registry changes require
+  confirmation in Pix Desktop". Declining gives "Registry change was not
+  approved". The dialog shows type, name, project path, registry remote
+  (credentials and query stripped), branch, scope (Project(key) or Global) and
+  revision. Install refuses an existing local copy. Update needs a tracked entry
+  from the same publication and refuses local changes unless the local copy
+  matches the tracked or source hash. After approval the proof is re-checked under
+  the supervisor exclusive operation and the registry cache lock. A changed proof
+  or local hash aborts the write. Agent companion directory conflicts are refused.
+  Setup never publishes, removes or overwrites local changes.
+- **Launch Commands:** `launch-list` returns ids and revisions. `launch-add`
+  appends `{name, command}` with a generated id. `launch-edit` needs the revision
+  of the current entry (sha256 over id, name and command). A mismatch fails with
+  "Launch Command changed or was removed; use launch-list and review before
+  editing". Writes run under the workspace config write lock, are re-checked
+  before commit and keep JSONC comments and unrelated fields. Commands are never
+  run. See [Desktop package scripts](../desktop/integrations/desktop-package-scripts.md).
+- **Desktop refresh:** a successful write sends `supervisor:setup-saved` with
+  `{cwd, section}`. Desktop refreshes Launch Commands (`launch`) or the Registry
+  (`registry`) only in the window whose workspace matches `cwd`. When ACP
+  aborts a pending confirmation, `supervisor:setup-confirmation-cancelled`
+  dismisses only that form.
+- **Timeout:** ACP expires setup requests after 5 minutes. The Pi bridge has
+  a 5-second grace period to receive that response before its fallback fires.
 
 ## Events and digests
 
@@ -483,6 +535,10 @@ supervisor mandate bar, not as a message to the supervisor model.
 - A restart with a mid-turn worker yields an `interrupted` event and no
   duplicate session.
 - Worker sessions do not expose the `supervisor` tool or mandate text.
+- Setup ops: writes are refused when paused or disabled, and `launch-add` and
+  `launch-edit` are refused outside a user-prompted turn. A stale `launch-edit`
+  revision is refused without writing. A registry install or update without
+  confirmation writes nothing.
 - Two managed sessions that successfully write the same path produce one
   `conflict` per pair and path in the digest. A `manual` session, the
   supervisor's own session, a worker that left registration and a shell-only

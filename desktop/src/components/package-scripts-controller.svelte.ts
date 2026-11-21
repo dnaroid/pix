@@ -399,6 +399,20 @@ export function createPackageScriptsController(options: PackageScriptsController
     });
   }
 
+  async function refreshLaunchCommands(): Promise<void> {
+    const { workspace, isCurrent } = captureWorkspace();
+    if (!workspace || !isCurrent()) return;
+    const generation = ++launchGeneration;
+    const current = () => isCurrent() && generation === launchGeneration;
+    try {
+      const exists = await invoke<boolean>("project_file_exists", { workspace, path: WORKSPACE_CONFIG_PATH });
+      const settings = exists ? await invoke<ProjectFilePreview>("read_project_file", { workspace, path: WORKSPACE_CONFIG_PATH }) : undefined;
+      if (current()) launchCommands = launchCommandsFromWorkspaceConfig(settings?.content);
+    } catch (caught) {
+      if (current()) error = errorMessage(caught);
+    }
+  }
+
   // Package scripts.
 
   async function runScript(script: PackageScript): Promise<void> {
@@ -762,6 +776,7 @@ export function createPackageScriptsController(options: PackageScriptsController
     },
     isTerminalBusy: (terminal: PackageTerminalView) => isBusy(terminal),
     refresh,
+    refreshLaunchCommands,
     runScript,
     launchScript,
     get launchCommands() { return launchCommands; },

@@ -15,6 +15,7 @@ export async function installResourceWithRuntime(
 	runtime: RegistryRuntime,
 	type: ResourceType,
 	name: string,
+	beforeWrite?: () => Promise<void>,
 ): Promise<void> {
 	validateName(name);
 	const source = registryResourcePath(runtime.cacheDir, type, name, runtime);
@@ -26,10 +27,11 @@ export async function installResourceWithRuntime(
 		const confirmed = await confirmOverwrite(ctx, "Resource already exists", `Overwrite project ${type} "${name}" from the registry?`);
 		if (!confirmed) throw new Error(`Project ${type} "${name}" already exists; install cancelled.`);
 	}
-	if (type === "agent") await replaceAgent(source, destination);
-	else await replaceResource(source, destination);
 	const revision = await resourceRevision(executor, runtime, type, name);
 	if (!revision) throw new Error(`Cannot determine registry revision for ${type} "${name}".`);
+	if (beforeWrite) await beforeWrite();
+	if (type === "agent") await replaceAgent(source, destination);
+	else await replaceResource(source, destination);
 	await recordProvenance(ctx, runtime, type, name, revision, await hashResource(type, destination));
 }
 
@@ -48,6 +50,7 @@ export async function updateResourceWithRuntime(
 	runtime: RegistryRuntime,
 	type: ResourceType,
 	name: string,
+	beforeWrite?: () => Promise<void>,
 ): Promise<"updated" | "current"> {
 	validateName(name);
 	const provenance = await readProvenance(ctx);
@@ -66,6 +69,7 @@ export async function updateResourceWithRuntime(
 		if (localHash !== tracked.hash) {
 			// Local edits that already match the publication: adopt it as the baseline.
 			if (localHash === await hashResource(type, source)) {
+				if (beforeWrite) await beforeWrite();
 				await recordProvenance(ctx, runtime, type, name, remoteRevision, localHash);
 				return "current";
 			}
@@ -73,6 +77,7 @@ export async function updateResourceWithRuntime(
 		}
 	}
 	if (remoteRevision === tracked.revision && await pathExists(destination)) return "current";
+	if (beforeWrite) await beforeWrite();
 	if (type === "agent") await replaceAgent(source, destination);
 	else await replaceResource(source, destination);
 	await recordProvenance(ctx, runtime, type, name, remoteRevision, await hashResource(type, destination));

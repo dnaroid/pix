@@ -43,6 +43,20 @@ describe("elicitation notification ownership", () => {
     } as unknown as CreateElicitationRequest;
   }
 
+  it("cancels only the matching session and form, not a subsequent confirmation", async () => {
+    const store = createElicitationStore({ cancelQuestionImageOperation: vi.fn(), activeSessionId: () => "session-1" });
+    const first = store.request({ ...formRequest(), elicitationId: "first" } as CreateElicitationRequest);
+    store.dismissForm("other-session", "first");
+    expect(store.pendingBySession.size).toBe(1);
+    store.dismissForm("session-1", "first");
+    await expect(first).resolves.toEqual({ action: "cancel" });
+    const next = store.request({ ...formRequest(), elicitationId: "next" } as CreateElicitationRequest);
+    store.dismissForm("session-1", "first");
+    expect(store.pendingBySession.size).toBe(1);
+    store.dismissForm("session-1", "next");
+    await expect(next).resolves.toEqual({ action: "cancel" });
+  });
+
   it.each(["cancelAll", "cancelForSession"] as const)("marks question %s as interruption but clears its local state", async (method) => {
     const store = createElicitationStore({ cancelQuestionImageOperation: vi.fn(), activeSessionId: () => "session-1" });
     const response = store.request(questionRequest());

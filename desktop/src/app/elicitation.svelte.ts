@@ -20,6 +20,7 @@ import {
 export type PendingFormElicitation = {
   kind: "form";
   sessionId: string | null;
+  elicitationId?: string;
   message: string;
   field: ElicitationField;
   resolve: (response: CreateElicitationResponse) => void;
@@ -108,19 +109,20 @@ export function createElicitationStore(options: ElicitationStoreOptions) {
       return Promise.resolve({ action: "cancel" });
     }
 
+    const identity = "elicitationId" in request && typeof request.elicitationId === "string" ? { elicitationId: request.elicitationId } : {};
     return new Promise((resolve) => {
       const pending: PendingElicitation = question
         ? {
             kind: "question",
             sessionId: ownerSessionId,
             requestId: ++sequence,
-            ...("elicitationId" in request && typeof request.elicitationId === "string" ? { elicitationId: request.elicitationId } : {}),
+            ...identity,
             message: question.message,
             questions: question.questions,
             state: createQuestionnaireState(question.questions),
             resolve,
           }
-        : { kind: "form", sessionId: ownerSessionId, message: request.message, field: field!, resolve };
+        : { kind: "form", sessionId: ownerSessionId, ...identity, message: request.message, field: field!, resolve };
       if (ownerSessionId === null) {
         pendingUnscoped = pending;
       } else {
@@ -206,6 +208,13 @@ export function createElicitationStore(options: ElicitationStoreOptions) {
       : { action: "cancel" };
   }
 
+  function dismissForm(sessionId: string, elicitationId: string): void {
+    const pending = pendingBySession.get(sessionId);
+    if (pending?.kind !== "form" || pending.elicitationId !== elicitationId) return;
+    remove(pending);
+    pending.resolve({ action: "cancel" });
+  }
+
   async function requestLocalTextInput(message: string, title: string): Promise<string | undefined> {
     const response = await requestInternal({
       mode: "form",
@@ -237,6 +246,7 @@ export function createElicitationStore(options: ElicitationStoreOptions) {
     cancel,
     cancelForSession,
     resolveSupervisorQuestion,
+    dismissForm,
     requestLocalTextInput,
   };
 }

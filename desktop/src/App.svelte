@@ -55,6 +55,7 @@
   import { createDesktopCommandServices } from "./app/desktop-command-services";
   import { createSupervisorHandover, createSupervisorSessionAction, createSupervisorTabAutoClose, handleSupervisorMenu, listenSupervisorMenu } from "./app/supervisor-session";
   import { SUPERVISOR_QUESTION_RESOLVED_CHANNEL } from "../../acp/src/acp/supervisor-contract";
+  import { SUPERVISOR_SETUP_CONFIRMATION_CANCELLED, SUPERVISOR_SETUP_SAVED } from "../../acp/src/acp/supervisor-setup-contract";
   import { createDesktopInteractionServices } from "./app/desktop-interaction-services.svelte";
   import { createDesktopPresentationState } from "./app/desktop-presentation-state.svelte";
   import { createDesktopRootEffects } from "./app/desktop-root-effects.svelte";
@@ -134,6 +135,7 @@
     openWikiConflicts: () => Promise<void>;
     closeProjectSwitcher: () => void;
     openProjectSettings: () => void;
+    refreshLaunchCommands: () => void;
   } | null>(null);
   let localMessageId = 0;
   let onSessionActivityChanged = (_sessionId: string): void => {};
@@ -167,6 +169,19 @@
     onForkReady: (notification) => { void backgroundFork.handleReady(notification); },
     requestElicitation: (request) => requestElicitation(request),
     onSessionState: ({ sessionId, channel, data }) => {
+      if (channel === SUPERVISOR_SETUP_CONFIRMATION_CANCELLED) {
+        if (data && typeof data === "object" && "elicitationId" in data && typeof data.elicitationId === "string") {
+          elicitationStore.dismissForm(sessionId, data.elicitationId);
+        }
+        return true;
+      }
+      if (channel === SUPERVISOR_SETUP_SAVED) {
+        if (data && typeof data === "object" && "cwd" in data && data.cwd === workspace && "section" in data) {
+          if (data.section === "launch") workspaceSidebar?.refreshLaunchCommands();
+          if (data.section === "registry") void projectServices.registry.refresh({ background: true });
+        }
+        return true;
+      }
       if (channel !== SUPERVISOR_QUESTION_RESOLVED_CHANNEL) return false;
       if (data && typeof data === "object" && "questionId" in data && typeof data.questionId === "string") {
         elicitationStore.resolveSupervisorQuestion(sessionId, data.questionId);

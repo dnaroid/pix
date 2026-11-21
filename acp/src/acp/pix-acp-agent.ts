@@ -87,6 +87,8 @@ import {
 	type SupervisorOpenResponse,
 } from "./supervisor-contract.js";
 import { forwardSupervisorRequest } from "./supervisor-bridge.js";
+import { configureSupervisorProject } from "./supervisor-setup.js";
+import { SUPERVISOR_SETUP_CONFIRMATION_CANCELLED, SUPERVISOR_SETUP_SAVED, SUPERVISOR_SETUP_TIMEOUT_MS, type SupervisorSetupRequest } from "./supervisor-setup-contract.js";
 import { createSupervisorService, readSessionBranchMessages, type SupervisorPendingQuestion, type SupervisorService } from "./supervisor-service.js";
 import { createSupervisorBudget, createSupervisorBudgetUsage } from "./supervisor-budget.js";
 import { createSupervisorActions, type SupervisorActions } from "./supervisor-actions.js";
@@ -620,7 +622,7 @@ export interface PixAcpAgentOptions {
 	readonly documentTranslator?: DocumentTranslator;
 	readonly fileAnnotator?: FileAnnotator;
 	/** Direct workspace Registry backend (overridable for transport tests). */
-	readonly registryService?: Pick<DesktopRegistryService, "action" | "diff"> & Partial<Pick<DesktopRegistryService, "dispose">>;
+	readonly registryService?: Pick<DesktopRegistryService, "action" | "diff"> & Partial<Pick<DesktopRegistryService, "dispose" | "confirmedResource">>;
 	/** ACP-owned plan-launch records (overridable for hermetic tests). */
 	readonly planLaunches?: PlanLaunchesStore;
 	/** Session lifecycle event monitor (overridable for deterministic timer tests). */
@@ -737,10 +739,11 @@ export class PixAcpAgent {
 	private readonly loadDesktopQueues: (cwd: string, sessionPath: string | undefined) => Promise<PersistedDesktopQueues>;
 	private readonly saveDesktopQueues: (cwd: string, sessionPath: string | undefined, queues: PersistedDesktopQueues) => Promise<void>;
 	private readonly copyText: (text: string) => Promise<void>;
-	private readonly registryService: Pick<DesktopRegistryService, "action" | "diff"> & Partial<Pick<DesktopRegistryService, "dispose">>;
+	private readonly registryService: NonNullable<PixAcpAgentOptions["registryService"]>;
 	private readonly planLaunches: PlanLaunchesStore;
 	private readonly sessionEvents: SessionEventMonitor;
 	private readonly supervisorStore: SupervisorStore;
+	private readonly supervisorSetupRequests = new WeakMap<AgentSessionState, Map<string, AbortController>>();
 	private readonly supervisor: SupervisorService;
 	private readonly unsubscribeSupervisorEvents: () => void;
 	private readonly supervisorWaker: SupervisorWaker;
@@ -1242,6 +1245,7 @@ export class PixAcpAgent {
 		this.fileMentionIndex.dispose();
 		this.backgroundSearchSessions.dispose();
 		this.disposed = true;
+		for (const session of this.sessions.values()) this.abortSupervisorSetup(session);
 		// First: abort registry Git/lock waits so the shared checkout lock is
 		// released before the host's exit deadline can SIGKILL this process.
 		const registryDisposed = this.registryService.dispose?.();
@@ -1397,28 +1401,75 @@ export class PixAcpAgent {
 	 * Bridge direct workspace Registry dialogs to Desktop elicitation without
 	 * creating or borrowing a conversation/Pi runtime.
 	 */
-	private registryContext(cwd: string, client: ClientCaller): RegistryContext {
-		const ask = async (request: RpcExtensionUIRequest): Promise<{ value?: string; confirmed?: boolean }> => {
-			const elicitation = toElicitationRequest(request, { elicitationId: randomUUID() });
+	private registryContext(cwd: string, client: ClientCaller, owner?: { sessionId: string; signal: AbortSignal }): RegistryContext {
+		const ask = async (request: RpcExtensionUIRequest, operationSignal?: AbortSignal): Promise<{ value?: string; confirmed?: boolean }> => {
+			const elicitationId = randomUUID();
+			const elicitation = toElicitationRequest(request, { elicitationId, ...(owner ? { sessionId: owner.sessionId } : {}) });
 			if (!elicitation || this.clientCapabilities?.elicitation?.form == null) return {};
+			const signal = operationSignal ?? owner?.signal;
+			let abort: (() => void) | undefined;
 			try {
-				const response = fromElicitationResponse(await client.request("elicitation/create", elicitation), request);
+				signal?.throwIfAborted();
+				const pending = client.request("elicitation/create", elicitation);
+				const answer = owner && signal ? await Promise.race([pending, new Promise<never>((_, reject) => {
+					abort = () => {
+						void client.notify(PIX_SESSION_STATE_METHOD, { sessionId: owner.sessionId,
+							channel: SUPERVISOR_SETUP_CONFIRMATION_CANCELLED, data: { elicitationId } })
+							.catch(() => this.options.logger.warn("Supervisor confirmation dismissal could not be delivered", { module: "supervisor" }));
+						reject(signal.reason);
+					};
+					signal.addEventListener("abort", abort, { once: true });
+					if (signal.aborted) abort();
+				})]) : await pending;
+				signal?.throwIfAborted();
+				const response = fromElicitationResponse(answer, request);
 				return "value" in response ? { value: response.value } : "confirmed" in response ? { confirmed: response.confirmed } : {};
 			}
 			catch (error) {
+				if (signal?.aborted) throw error;
 				this.options.logger.warn(`registry elicitation failed: ${stringifyUnknown(error)}`);
 				return {};
-			}
+			} finally { if (abort) signal?.removeEventListener("abort", abort); }
 		};
 		return {
 			cwd, hasUI: this.clientCapabilities?.elicitation?.form != null,
 			ui: {
-				confirm: async (title, message) => (await ask({ type: "extension_ui_request", id: randomUUID(), method: "confirm", title, message })).confirmed === true,
+				confirm: async (title, message, signal) => (await ask({ type: "extension_ui_request", id: randomUUID(), method: "confirm", title, message }, signal)).confirmed === true,
 				input: async (title, placeholder) => (await ask({ type: "extension_ui_request", id: randomUUID(), method: "input", title, ...(placeholder === undefined ? {} : { placeholder }) })).value,
 				editor: async (title, prefill) => (await ask({ type: "extension_ui_request", id: randomUUID(), method: "editor", title, ...(prefill === undefined ? {} : { prefill }) })).value,
 				notify: (message, type) => { if (type === "error" || type === "warning") this.options.logger.warn(message); },
 			},
 		};
+	}
+
+	private async supervisorSetup(session: AgentSessionState, requestId: string, request: SupervisorSetupRequest): Promise<unknown> {
+		const run = session.activeRun;
+		const current = () => !this.disposed && this.sessions.get(session.acpSessionId) === session &&
+			run !== undefined && session.activeRun === run && !run.cancelled;
+		if (this.clientName !== "pix-desktop" || !current()) throw new Error("Project setup requires an active Pix Desktop supervisor turn");
+		if ((request.op === "launch-add" || request.op === "launch-edit") && run?.userPromptAt === undefined) {
+			throw new Error("Launch Commands can be changed only during a user-prompted supervisor turn");
+		}
+		const requests = this.supervisorSetupRequests.get(session) ?? new Map<string, AbortController>();
+		if (requests.has(requestId)) throw new Error("Duplicate supervisor setup request");
+		this.supervisorSetupRequests.set(session, requests);
+		const controller = new AbortController();
+		requests.set(requestId, controller);
+		const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(SUPERVISOR_SETUP_TIMEOUT_MS)]);
+		try {
+			const result = await configureSupervisorProject({ request, caller: session.acpSessionId,
+				ctx: this.registryContext(session.cwd, session.client, { sessionId: session.acpSessionId, signal }),
+				registry: this.registryService, store: this.supervisorStore, current, signal,
+				exclusive: (operation) => this.supervisorExclusive(session.cwd, operation) });
+			const section = request.op === "launch-add" || request.op === "launch-edit" ? "launch"
+				: request.op === "registry-install" || request.op === "registry-update" ? "registry" : undefined;
+			if (section) void session.client.notify(PIX_SESSION_STATE_METHOD, { sessionId: session.acpSessionId,
+				channel: SUPERVISOR_SETUP_SAVED, data: { cwd: session.cwd, section } })
+				.catch(() => this.options.logger.warn("Supervisor settings refresh could not be delivered", { module: "supervisor" }));
+			return result;
+		} finally {
+			requests.delete(requestId);
+		}
 	}
 
 	private async desktopRegistryAction(
@@ -3541,7 +3592,11 @@ export class PixAcpAgent {
 		if (event.type === "pix_supervisor_request") {
 			const current = () => !this.disposed && this.sessions.get(session.acpSessionId) === session;
 			void forwardSupervisorRequest(session, event, (cwd, caller, request) => this.supervisor.handle(cwd, caller, request, current),
-				current, this.options.logger);
+				current, this.options.logger, (request) => this.supervisorSetup(session, event.requestId, request));
+			return;
+		}
+		if (event.type === "pix_supervisor_setup_cancel") {
+			this.supervisorSetupRequests.get(session)?.get(event.requestId)?.abort(new Error("Supervisor setup request cancelled"));
 			return;
 		}
 		if (event.type === "pix_btw_event") {
@@ -5176,6 +5231,7 @@ export class PixAcpAgent {
 		const session = this.sessions.get(sessionId);
 		if (!session) return;
 		if (session.activeRun) session.activeRun.cancelled = true;
+		this.abortSupervisorSetup(session);
 		void this.setAgentControlState(session, "idle");
 		this.options.logger.debug(`session/cancel for ${sessionId}`);
 		void session.pi.abort().catch((error: unknown) => {
@@ -5201,6 +5257,7 @@ export class PixAcpAgent {
 	}
 
 	private async teardownSession(session: AgentSessionState): Promise<void> {
+		this.abortSupervisorSetup(session);
 		// Retirement is not a run outcome: emit no settled/cancelled for it.
 		session.events.dispose();
 		this.sessionRefreshes.forget(session);
@@ -5260,6 +5317,7 @@ export class PixAcpAgent {
 		// The prompt response must follow every streamed update of its run.
 		session.updates.flush();
 		session.activeRun = undefined;
+		this.abortSupervisorSetup(session);
 		run.resolve(stopReason);
 		session.events.settled(stopReason);
 		return true;
@@ -5270,9 +5328,14 @@ export class PixAcpAgent {
 		if (!run) return false;
 		session.updates.flush();
 		session.activeRun = undefined;
+		this.abortSupervisorSetup(session);
 		run.reject(error);
 		session.events.failed("run", error.message);
 		return true;
+	}
+
+	private abortSupervisorSetup(session: AgentSessionState): void {
+		for (const controller of this.supervisorSetupRequests.get(session)?.values() ?? []) controller.abort();
 	}
 
 	/** Resolve attribution per operation, never from the adapter's own cwd. */

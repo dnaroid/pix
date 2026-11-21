@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { SUPERVISOR_RESPONSE_PREFIX } from "../acp/supervisor-contract.js";
+import { isSupervisorSetupOp, SUPERVISOR_SETUP_TIMEOUT_MS } from "../acp/supervisor-setup-contract.js";
 
 /**
  * Pi-side half of the `supervisor` tool bridge (decision 0077). Installed only
@@ -31,10 +32,18 @@ export function createSupervisorBridge(session, emit, timeoutMs = 60_000) {
         signal?.removeEventListener("abort", abort);
         if (error) reject(error); else resolve(value);
       };
-      const abort = () => finish(undefined, new Error("Supervisor request cancelled"));
-      pending.set(requestId, finish);
+      const setup = isSupervisorSetupOp(body.op);
+      const cancel = (message) => {
+        if (setup && pending.has(requestId)) {
+          try { emit({ type: "pix_supervisor_setup_cancel", requestId }); } catch { /* Transport retiring. */ }
+        }
+        finish(undefined, new Error(message));
+      };
+      const abort = () => cancel("Supervisor request cancelled");
+      pending.set(requestId, { finish, cancel });
       signal?.addEventListener("abort", abort, { once: true });
-      timer = setTimeout(() => finish(undefined, new Error("Supervisor request timed out")), timeoutMs);
+      // Let ACP expire and reply first; this timer is a transport fallback.
+      timer = setTimeout(() => cancel("Supervisor request timed out"), setup ? SUPERVISOR_SETUP_TIMEOUT_MS + 5_000 : timeoutMs);
       timer.unref?.();
       try { emit({ type: "pix_supervisor_request", requestId, request: body }); }
       catch (error) { finish(undefined, error); }
@@ -43,14 +52,15 @@ export function createSupervisorBridge(session, emit, timeoutMs = 60_000) {
   return {
     request,
     respond(envelope) {
-      const finish = pending.get(envelope.requestId);
-      if (!finish) return; // cancelled, timed out or an old runtime's late reply
+      const request = pending.get(envelope.requestId);
+      if (!request) return; // cancelled, timed out or an old runtime's late reply
+      const { finish } = request;
       if (typeof envelope.error === "string") finish(undefined, new Error(envelope.error));
       else finish(envelope.result);
     },
     dispose() {
       closed = true;
-      for (const finish of [...pending.values()]) finish(undefined, new Error("Supervisor runtime closed"));
+      for (const { cancel } of [...pending.values()]) cancel("Supervisor runtime closed");
     },
   };
 }

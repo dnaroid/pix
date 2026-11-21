@@ -8,6 +8,7 @@
     openSettingsSection: (id: string) => Promise<void>;
     openSettingsField: (section: string, fieldId: string) => Promise<void>;
     openGitPanel: (isCurrent?: () => boolean) => void;
+    refreshLaunchCommands: () => void;
     openWikiChecks: () => Promise<void>;
     openWikiConflicts: () => Promise<void>;
     closeProjectSwitcher: () => void;
