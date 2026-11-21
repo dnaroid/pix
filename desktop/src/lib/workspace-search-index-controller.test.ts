@@ -15,11 +15,16 @@ vi.mock("./search-source-selection", () => ({
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("workspace search indicator transport", () => {
+  // Advancing fake timers does not drain the native WebCrypto worker pool.
+  function stubSettingsDigest() {
+    vi.stubGlobal("crypto", { subtle: { digest: async () => new Uint8Array(32).buffer } });
+  }
+
   it.each([false, true])("keeps native freshness available when ACP reconnects: %s", async reconnecting => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     vi.stubGlobal("window", new EventTarget());
-    vi.stubGlobal("crypto", { subtle: { digest: async () => new Uint8Array(32).buffer } });
+    stubSettingsDigest();
     vi.mocked(invoke).mockResolvedValue({ stores: [] });
     vi.mocked(requestNative).mockResolvedValue({ observations: {}, runs: {} });
     const sessionSnapshot = "b".repeat(64);
@@ -47,6 +52,7 @@ describe("workspace search indicator transport", () => {
   it("reads diagnostics in the selected workspace, routes explicit indexing, and releases config listeners", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("window", new EventTarget());
+    stubSettingsDigest();
     vi.mocked(invoke).mockImplementation(async command => (command === "search_index_status" ? { stores: [] }
       : { configured: true, provider: "ollama", model: "m", vectorSize: 3, keyAvailable: true }) as never);
     vi.mocked(indexNativeRepository).mockResolvedValue({ source: "code", complete: true });
