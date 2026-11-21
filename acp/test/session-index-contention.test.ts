@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { appendFile, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setImmediate as yieldTask } from "node:timers/promises";
 import { DatabaseSync } from "node:sqlite";
+import { removeDirsWithRetry } from "../../external/pi-tools-suite/test/support/fs-retry.mjs";
 import { claimWork, openDatabase } from "../src/search/source-work.js";
 import { SESSION_PASS_WORK, withSessionPass } from "../src/search/session-pass.js";
 import { indexSessionChunks, RECONCILE_BATCH } from "../src/search/session-chunks.js";
@@ -18,19 +19,28 @@ async function project(t: { after(fn: () => Promise<unknown>): void }) {
   const base = fileURLToPath(new URL("../../.pi/artifacts/session-index-contention-tests/", import.meta.url));
   await mkdir(base, { recursive: true });
   const root = await mkdtemp(join(base, "case-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  const disposers: Array<() => void | Promise<void>> = [];
+  t.after(async () => {
+    try {
+      const results = await Promise.allSettled(disposers.map(async dispose => dispose()));
+      const failed = results.find(result => result.status === "rejected");
+      if (failed?.status === "rejected") throw failed.reason;
+    } finally {
+      await removeDirsWithRetry([root]);
+    }
+  });
   await writeSourcePolicy(root, "sessions", true);
   await mkdir(join(root, ".pi/search"), { recursive: true });
-  return root;
+  return { root, onClose: (dispose: () => void | Promise<void>) => disposers.push(dispose) };
 }
 const database = (root: string) => join(root, ".pi/search/sessions.sqlite");
 const message = (id: string, parentId: string | null, role: string, text: string) =>
   JSON.stringify({ type: "message", id, parentId, message: { role, content: [{ type: "text", text }], stopReason: "stop" } }) + "\n";
 
 test("background pass lease: a held lease or locked cache defers without running; a free lease runs and is released", async t => {
-  const root = await project(t);
+  const { root, onClose } = await project(t);
   const peer = await openDatabase(database(root)) as unknown as DatabaseSync;
-  t.after(async () => { peer.close(); });
+  onClose(() => peer.close());
   let runs = 0;
   const run = async () => { runs++; return "done"; };
 
@@ -53,7 +63,7 @@ test("background pass lease: a held lease or locked cache defers without running
 });
 
 test("ACP background pass treats cache contention as a deferral and retries the same revision", async t => {
-  const root = await project(t);
+  const { root, onClose } = await project(t);
   const now = Date.now();
   const path = join(root, "a.jsonl");
   await writeFile(path, JSON.stringify({ type: "session", id: "a", cwd: root }) + "\n" + message("m", null, "user", "needle"));
@@ -66,7 +76,10 @@ test("ACP background pass treats cache contention as a deferral and retries the 
     discoverBackground: async () => records, embedding: async () => undefined,
     titles: async () => { titles++; if (busy) throw new Error("Search index busy; update deferred"); },
     failed: error => failures.push(error), recovered: () => { recoveries++; } });
-  t.after(async () => { await chunks.dispose(); await policy.dispose(); });
+  onClose(async () => {
+    try { await chunks.dispose(); }
+    finally { await policy.dispose(); }
+  });
   const run = () => (chunks as unknown as { sync: { run(s: AbortSignal): Promise<void> } }).sync.run(signal());
 
   await run();
@@ -91,7 +104,7 @@ test("ACP background pass treats cache contention as a deferral and retries the 
 });
 
 test("reconcile never holds the write lock across an await and never publishes a partial rebuild", async t => {
-  const root = await project(t);
+  const { root, onClose } = await project(t);
   const candidate = { id: "big", path: join(root, "big.jsonl") };
   const chunkText = (seed: string, count: number) => Array.from({ length: count }, (_, i) => `${seed}${i} `.padEnd(1600, seed)).join("");
   // Several transactions per table: more chunks than one rebuild batch.
@@ -103,7 +116,7 @@ test("reconcile never holds the write lock across an await and never publishes a
   await indexSessionChunks(root, [candidate], { signal: signal() });
 
   const peer = new DatabaseSync(database(root));
-  t.after(async () => { peer.close(); });
+  onClose(() => peer.close());
   peer.exec("PRAGMA busy_timeout=0");
   const meta = () => peer.prepare("SELECT revision FROM pix_session_indexed_files WHERE session_id=?").get(candidate.id) as { revision: string } | undefined;
   const ranges = () => Number((peer.prepare("SELECT count(*) AS n FROM pix_session_chunk_ranges WHERE session_id=?").get(candidate.id) as { n: number }).n);
