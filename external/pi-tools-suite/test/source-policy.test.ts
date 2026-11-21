@@ -134,7 +134,7 @@ test("native knowledge defaults off, retains its cache when disabled, and reuses
   await writeSourcePolicy(root, "knowledge", true);
   expect((await searchNative(root, query)).hits).toHaveLength(1);
   const cache = join(root, ".pi/search/knowledge.sqlite");
-  const db = new Database(cache, { create: false });
+  const db = new Database(cache, { readwrite: true, create: false });
   try {
     // Drain enabled indexing writes and keep the connection open so another
     // connection's deferred close cannot trigger a last-close checkpoint.
