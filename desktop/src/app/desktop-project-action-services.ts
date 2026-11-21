@@ -168,10 +168,19 @@ export function createDesktopProjectActionServices(options: DesktopProjectAction
     }
     const prefix = `${SUPERVISOR_WORKER_PREAMBLE}\n\n`;
     const { item, modelRef } = request;
+    // Launching activates the worker tab; once its prompt is dispatched, hand
+    // focus back to the tab the user was on unless they navigated meanwhile.
+    const originSessionId = options.transitions.draft.active ? null : options.state.sessionId;
+    const returnFocus = (sessionId: string) => {
+      if (originSessionId && originSessionId !== sessionId && options.state.sessionId === sessionId && current()) {
+        void options.transitions.sessionTabs.loadSession(originSessionId).catch(options.reportError);
+      }
+      return { sessionId };
+    };
     if (item.kind !== "task") {
       const sessionId = await actions.startFromAgent(item.kind === "plan" ? { kind: "plan", path: item.path } : { kind: "prompt", text: item.text },
         signal, prefix, modelRef);
-      return { sessionId };
+      return returnFocus(sessionId);
     }
     if (options.project.tasks.saving || options.project.tasks.loading) throw new Error("Project tasks are being saved; retry later");
     await options.project.tasks.load(request.cwd);
@@ -181,7 +190,7 @@ export function createDesktopProjectActionServices(options: DesktopProjectAction
     // A linked task would only reopen its old session, which the supervisor never briefed.
     if (task.sessionId) throw new Error(`Task ${task.id} already has session ${task.sessionId}; reopen it or ask the user to hand it over`);
     const result = await actions.runTaskFromAgent(task, signal, modelRef, prefix);
-    return { sessionId: result.sessionId };
+    return returnFocus(result.sessionId);
   }
 
   return { actions, runTaskFromAgent, startFromSupervisor };

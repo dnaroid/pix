@@ -16,6 +16,7 @@ export class IdleSessionSelection {
   reset(): void;
   useCache(revision: string): void;
   succeeded(candidate: TranscriptCandidate): void;
+  forget(candidate: TranscriptCandidate): void;
   hasUnresolvedFailures(): boolean;
   select<T extends TranscriptCandidate & { createdAt?: number | undefined; changedAt?: number | undefined }>(candidates: readonly T[], signal: AbortSignal, since?: number): Promise<T[]>;
 }

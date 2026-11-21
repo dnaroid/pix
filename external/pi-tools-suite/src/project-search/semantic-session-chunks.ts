@@ -15,6 +15,7 @@ import { SessionIdlePolicy, IdleSessionSelection } from "./session-idle.mjs";
 import { indexMissingSessionVectors } from "./semantic-session-indexer.js";
 import { SessionCandidateCatalog, readSessionTitle } from "./session-discovery.mjs";
 import { beginSessionSweep, completeSessionSweep } from "./session-watermark.mjs";
+import { isSessionIndexBusy, withSessionPass } from "./session-pass.mjs";
 
 export async function syncSessionChunks(root: string,candidates: readonly TranscriptCandidate[],signal: AbortSignal,
   options: SemanticSearchOptions = {},drain = false,retry = drain,
@@ -56,57 +57,65 @@ export function registerSessionChunkSync(pi: ExtensionAPI,options: SemanticSearc
       phase = "policy";
       if (!await sourceEnabled(root,"sessions")) return;
       if (await automaticWorkPaused(root,"sessions",signal)) { selection.reset(); return; }
-      phase = "embedding";
-      const config = await semanticConfiguration(options,signal);
-      const key = config?.provider === "openrouter" ? await semanticKey(options,signal) : undefined;
-      if (config?.provider === "openrouter" && !key) return;
-      const identity = `${SESSION_CHUNK_FORMAT}:${config ? commitIdentity(config) : "lexical-only"}`;
-      phase = "sweep";
-      const pass = await beginSessionSweep(root,identity,signal);
-      selection.useCache(`${identity}:${pass.cacheRevision}`);
-      phase = "discovery";
-      const candidates = await catalog.list(root,getAgentDir(),signal);
-      phase = "selection";
-      const selected = await selection.select(candidates,signal,pass.since);
-      let complete = selection.complete;
-      let failedIndexing = false;
-      for (const candidate of selected) {
-        try {
-          if (!await eligible(candidate,signal)) { complete = false; continue; }
-          if (config) {
-            phase = "title";
-            const title = await readSessionTitle(root,candidate,signal);
-            if (!title) { complete = false; failedIndexing = true; continue; }
-            const result = await indexMissingSessionVectors(root,[title],key,options,signal,config,true,eligible,false);
-            if (result.remaining) { complete = false; failedIndexing = true; continue; }
+      // One automatic pass across hosts; contention defers to the ordinary cadence.
+      try { await withSessionPass(root,signal,async () => {
+        phase = "embedding";
+        const config = await semanticConfiguration(options,signal);
+        const key = config?.provider === "openrouter" ? await semanticKey(options,signal) : undefined;
+        if (config?.provider === "openrouter" && !key) return;
+        const identity = `${SESSION_CHUNK_FORMAT}:${config ? commitIdentity(config) : "lexical-only"}`;
+        phase = "sweep";
+        const pass = await beginSessionSweep(root,identity,signal);
+        selection.useCache(`${identity}:${pass.cacheRevision}`);
+        phase = "discovery";
+        const candidates = await catalog.list(root,getAgentDir(),signal);
+        phase = "selection";
+        const selected = await selection.select(candidates,signal,pass.since);
+        let complete = selection.complete;
+        let failedIndexing = false;
+        for (const [index,candidate] of selected.entries()) {
+          try {
+            if (!await eligible(candidate,signal)) { complete = false; continue; }
+            if (config) {
+              phase = "title";
+              const title = await readSessionTitle(root,candidate,signal);
+              if (!title) { complete = false; failedIndexing = true; continue; }
+              const result = await indexMissingSessionVectors(root,[title],key,options,signal,config,true,eligible,false);
+              if (result.remaining) { complete = false; failedIndexing = true; continue; }
+            }
+            phase = "indexing";
+            const result = await syncSessionChunks(root,[candidate],signal,options,true,false,eligible);
+            if (result.complete) selection.succeeded(candidate);
+            else { complete = false; if (!result.deferred) failedIndexing = true; }
+          } catch (error) {
+            complete = false;
+            signal.throwIfAborted();
+            if (isSessionIndexBusy(error)) {
+              // Another host owns the cache; retry these unchanged revisions next pass.
+              for (const rest of selected.slice(index)) selection.forget(rest);
+              break;
+            }
+            failedIndexing = true;
+            const paused = error instanceof SearchWorkNeedsContinueError;
+            suiteDiagnostics.report("warn", "search", "background-session-index-stopped", root,
+              { source: "sessions", phase: paused ? "needs_continue" : "candidate_failed" });
+            await logSearchDiagnostic(root,{event:"session_indexing_stopped",sessionId:candidate.id,
+              reason:paused?"needs_continue":"candidate_failed",...classifyIndexFailure(error),
+              message:"Session indexing stopped; local search remains available."});
+            if (paused) { selection.reset(); break; }
           }
-          phase = "indexing";
-          const result = await syncSessionChunks(root,[candidate],signal,options,true,false,eligible);
-          if (result.complete) selection.succeeded(candidate);
-          else { complete = false; if (!result.deferred) failedIndexing = true; }
-        } catch (error) {
-          complete = false;
-          signal.throwIfAborted();
-          failedIndexing = true;
-          const paused = error instanceof SearchWorkNeedsContinueError;
-          suiteDiagnostics.report("warn", "search", "background-session-index-stopped", root,
-            { source: "sessions", phase: paused ? "needs_continue" : "candidate_failed" });
-          await logSearchDiagnostic(root,{event:"session_indexing_stopped",sessionId:candidate.id,
-            reason:paused?"needs_continue":"candidate_failed",...classifyIndexFailure(error),
-            message:"Session indexing stopped; local search remains available."});
-          if (paused) { selection.reset(); break; }
         }
-      }
-      signal.throwIfAborted();
-      if (failedIndexing) sync.noteIncomplete();
-      phase = "finalize";
-      if (config) await requireSemanticIdentity(options,config,signal);
-      else if (await semanticConfiguration(options,signal)) { selection.reset(); return; }
-      await requireSourceEnabled(root,"sessions",signal);
-      if (complete) await completeSessionSweep(root,pass,signal);
-      const after = await beginSessionSweep(root,identity,signal);
-      if (pass.incarnation && after.incarnation !== pass.incarnation) selection.reset();
-      selection.cacheRevision = `${identity}:${after.cacheRevision}`;
+        signal.throwIfAborted();
+        if (failedIndexing) sync.noteIncomplete();
+        phase = "finalize";
+        if (config) await requireSemanticIdentity(options,config,signal);
+        else if (await semanticConfiguration(options,signal)) { selection.reset(); return; }
+        await requireSourceEnabled(root,"sessions",signal);
+        if (complete) await completeSessionSweep(root,pass,signal);
+        const after = await beginSessionSweep(root,identity,signal);
+        if (pass.incarnation && after.incarnation !== pass.incarnation) selection.reset();
+        selection.cacheRevision = `${identity}:${after.cacheRevision}`;
+      }); } catch (error) { if (signal.aborted || !isSessionIndexBusy(error)) throw error; }
     }),owner.signal,error=>{logBackgroundIndexFailure(root,error,phase);});
     const changed = () => { void start(ctx).catch(()=>{}); };
     const config = semanticConfigurationPath();

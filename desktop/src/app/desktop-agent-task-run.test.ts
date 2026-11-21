@@ -22,15 +22,20 @@ function fixture() {
     document: { version: 1, tasks: [] as unknown[] },
     load: vi.fn(async () => { tasks.document.tasks = [task]; }),
   };
+  const state = { sessionId: "sup" as string | null };
+  const draft = { active: false };
+  const loadSession = vi.fn(async (_sessionId: string) => {});
+  const reportError = vi.fn();
   const services = createDesktopProjectActionServices({
-    client: () => client, workspace: () => workspace, canUseSession: () => true,
-    sessions: { runtime: { getConfigOptions: () => configOptions }, catalog: {} }, transitions: { sessionTabs: {} }, project: { tasks },
+    client: () => client, workspace: () => workspace, canUseSession: () => true, state, reportError,
+    sessions: { runtime: { getConfigOptions: () => configOptions }, catalog: {} },
+    transitions: { sessionTabs: { loadSession }, draft }, project: { tasks },
   } as any);
   actions.runTaskFromAgent.mockReset().mockResolvedValue({ sessionId: "child", outcome: "started" });
   actions.startFromAgent.mockReset().mockResolvedValue("worker");
   actions.actionId = null;
   const request = { requestId: "r1", cwd: "/project", taskId: task.id, sourceSessionId: "parent" } satisfies TaskRunRequest;
-  return { services, tasks, task, request, setWorkspace: (value: string) => { workspace = value; },
+  return { services, tasks, task, request, state, draft, loadSession, setWorkspace: (value: string) => { workspace = value; },
     replaceClient: () => { client = {}; } };
 }
 
@@ -166,6 +171,30 @@ describe("supervisor start boundary", () => {
     await expect(services.startFromSupervisor(start({ kind: "task", taskId: task.id }), signal)).rejects.toThrow("already has session old");
     await expect(services.startFromSupervisor(start({ kind: "task", taskId: "missing" }), signal)).rejects.toThrow("Unknown project task id");
     expect(actions.runTaskFromAgent).toHaveBeenCalledOnce();
+  });
+
+  it.each(["task", "prompt"] as const)("returns focus to the origin tab after a %s worker is dispatched", async (kind) => {
+    const { services, state, task, loadSession } = fixture();
+    const launched = kind === "task" ? "child" : "worker";
+    const launch = kind === "task" ? actions.runTaskFromAgent : actions.startFromAgent;
+    const result = kind === "task" ? { sessionId: launched, outcome: "started" } : launched;
+    launch.mockImplementationOnce(async () => { state.sessionId = launched; return result; });
+    const item: SupervisorStartRequest["item"] = kind === "task" ? { kind: "task", taskId: task.id } : { kind: "prompt", text: "x" };
+    await expect(services.startFromSupervisor(start(item), new AbortController().signal)).resolves.toEqual({ sessionId: launched });
+    expect(loadSession).toHaveBeenCalledExactlyOnceWith("sup");
+  });
+
+  it.each(["navigated", "draft origin", "workspace"])("keeps the current tab when the %s", async (reason) => {
+    const harness = fixture();
+    if (reason === "draft origin") harness.draft.active = true;
+    actions.startFromAgent.mockImplementationOnce(async () => {
+      // The worker tab was activated, then the user (or a project switch) moved on.
+      harness.state.sessionId = reason === "navigated" ? "other" : "worker";
+      if (reason === "workspace") harness.setWorkspace("/elsewhere");
+      return "worker";
+    });
+    await harness.services.startFromSupervisor(start({ kind: "prompt", text: "x" }), new AbortController().signal);
+    expect(harness.loadSession).not.toHaveBeenCalled();
   });
 
   it.each(["workspace", "busy", "aborted"])("refuses to launch when the window is %s", async (reason) => {

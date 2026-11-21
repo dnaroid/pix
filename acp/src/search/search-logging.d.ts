@@ -9,9 +9,11 @@ export type SearchDiagnosticRecord = {
   phase?: string;
   errorType?: string;
   suppressed?: number;
+  cause?: IndexFailureCause;
 };
+export type IndexFailureCause = "busy" | "compat" | "provider" | "io" | "corrupt" | "ownership" | "policy" | "needs_continue" | "other";
 export function logSearchDiagnostic(root: string, diagnostic: SearchDiagnosticRecord): Promise<void>;
-export function classifyIndexFailure(error: unknown): { errorType: string; code?: string };
+export function classifyIndexFailure(error: unknown): { errorType: string; cause: IndexFailureCause; code?: string };
 export function isExpectedIndexCancellation(error: unknown): boolean;
 export type BackgroundIndexFailureLogger = (root: string, error: unknown, phase?: string) => void;
 export function createBackgroundIndexFailureLogger(options?: {

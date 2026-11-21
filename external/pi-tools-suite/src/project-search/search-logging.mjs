@@ -14,7 +14,7 @@ const INDEX_PROGRESS_PHASES = new Set([
 const INDEX_FAILURE_CODES = new Set([
   "ENOENT", "EACCES", "EPERM", "EBUSY", "ENOSPC", "EMFILE", "ETIMEDOUT",
   "SQLITE_BUSY", "SQLITE_LOCKED", "SQLITE_IOERR", "SQLITE_CORRUPT",
-  "SQLITE_READONLY", "SEARCH_WORK_NEEDS_CONTINUE",
+  "SQLITE_READONLY", "SQLITE_FULL", "SQLITE_CANTOPEN", "SQLITE_NOTADB", "SEARCH_WORK_NEEDS_CONTINUE",
 ]);
 const INDEX_FAILURE_TYPES = new Set([
   "Error", "TypeError", "RangeError", "SyntaxError", "AbortError",
@@ -34,12 +34,47 @@ const LOG_WINDOW_MS = 300_000;
 const MAX_RECENT = 128;
 const recent = new Map();
 
+/** Fixed cause categories. Messages are matched only against Pix-owned texts and
+ * are never logged; node:sqlite reports `ERR_SQLITE_ERROR` plus a numeric errcode. */
+const INDEX_FAILURE_CAUSES = new Set([
+  "busy", "compat", "provider", "io", "corrupt", "ownership", "policy", "needs_continue", "other",
+]);
+const SQLITE_ERRCODES = new Map([
+  [5, "SQLITE_BUSY"], [6, "SQLITE_LOCKED"], [8, "SQLITE_READONLY"], [10, "SQLITE_IOERR"],
+  [11, "SQLITE_CORRUPT"], [13, "SQLITE_FULL"], [14, "SQLITE_CANTOPEN"], [26, "SQLITE_NOTADB"],
+]);
+const CODE_CAUSES = new Map([
+  ["SQLITE_BUSY", "busy"], ["SQLITE_LOCKED", "busy"], ["EBUSY", "busy"],
+  ["SQLITE_CORRUPT", "corrupt"], ["SQLITE_NOTADB", "corrupt"],
+  ["SQLITE_IOERR", "io"], ["SQLITE_READONLY", "io"], ["SQLITE_FULL", "io"], ["SQLITE_CANTOPEN", "io"],
+  ["ENOENT", "io"], ["EACCES", "io"], ["EPERM", "io"], ["ENOSPC", "io"], ["EMFILE", "io"],
+  ["ETIMEDOUT", "provider"], ["SEARCH_WORK_NEEDS_CONTINUE", "needs_continue"],
+]);
+const MESSAGE_CAUSES = [
+  [/^Search (?:index|source) busy; update deferred$|database is (?:locked|busy)/i, "busy"],
+  [/^Incompatible (?:embedding cache|search index schema)/, "compat"],
+  [/^Semantic .*search unavailable|^Search provider unavailable$|^Invalid embedding (?:response|batch)$|^Search credentials unavailable/, "provider"],
+  [/^Search (?:work|provider) ownership expired$/, "ownership"],
+  [/search source policy|^Search source .*disabled|^Search authorization (?:revoked|changed)$/i, "policy"],
+  [/^Unsafe search directory$|unable to open database|disk I\/O error|database or disk is full|readonly database/i, "io"],
+  [/database disk image is malformed|file is not a database/i, "corrupt"],
+];
+function sqliteCode(error) {
+  const errcode = error?.errcode;
+  return error?.code === "ERR_SQLITE_ERROR" && Number.isSafeInteger(errcode) ? SQLITE_ERRCODES.get(errcode & 0xff) : undefined;
+}
 export function classifyIndexFailure(error) {
   try {
-    const code = INDEX_FAILURE_CODES.has(error?.code) ? error.code : undefined;
+    const raw = sqliteCode(error) ?? error?.code;
+    const code = INDEX_FAILURE_CODES.has(raw) ? raw : undefined;
     const errorType = INDEX_FAILURE_TYPES.has(error?.name) ? error.name : "OtherError";
-    return { errorType, ...(code ? { code } : {}) };
-  } catch { return { errorType: "OtherError" }; }
+    let cause = CODE_CAUSES.get(raw);
+    if (!cause) {
+      const message = typeof error?.message === "string" ? error.message : "";
+      cause = MESSAGE_CAUSES.find(([pattern]) => pattern.test(message))?.[1] ?? "other";
+    }
+    return { errorType, cause, ...(code ? { code } : {}) };
+  } catch { return { errorType: "OtherError", cause: "other" }; }
 }
 
 /** A fixed-size, metadata-only event envelope. Never pass IDs, paths, query text,
@@ -65,6 +100,7 @@ export function logSearchDiagnostic(root, diagnostic) {
       if (status === "failed") {
         details.errorType = INDEX_FAILURE_TYPES.has(diagnostic.errorType) ? diagnostic.errorType : "OtherError";
         if (INDEX_FAILURE_CODES.has(diagnostic.code)) details.code = diagnostic.code;
+        details.cause = INDEX_FAILURE_CAUSES.has(diagnostic.cause) ? diagnostic.cause : "other";
       }
     } else if (diagnostic.event === "session_transcript_skipped") {
       level = diagnostic.reason === "file_changed" ? "debug" : "warn";
@@ -79,11 +115,12 @@ export function logSearchDiagnostic(root, diagnostic) {
       details.phase = INDEX_FAILURE_PHASES.has(diagnostic.phase) ? diagnostic.phase : "unknown";
       if (INDEX_FAILURE_TYPES.has(diagnostic.errorType)) details.errorType = diagnostic.errorType;
       if (INDEX_FAILURE_CODES.has(diagnostic.code)) details.code = diagnostic.code;
+      details.cause = INDEX_FAILURE_CAUSES.has(diagnostic.cause) ? diagnostic.cause : "other";
       if (Number.isSafeInteger(diagnostic.suppressed) && diagnostic.suppressed > 0) details.suppressed = diagnostic.suppressed;
     } else return Promise.resolve(); // Slash-command output is not a diagnostic event.
 
     if (level === "warn") {
-      const key = `${root}\0${event}\0${details.reason ?? ""}\0${details.phase ?? ""}\0${details.code ?? ""}\0${details.errorType ?? ""}`;
+      const key = `${root}\0${event}\0${details.reason ?? ""}\0${details.phase ?? ""}\0${details.code ?? ""}\0${details.errorType ?? ""}\0${details.cause ?? ""}`;
       const now = Date.now();
       const previous = recent.get(key);
       // Background worker already coalesced its own events and repeat counter.
@@ -114,10 +151,10 @@ export function createBackgroundIndexFailureLogger({ write = logSearchDiagnostic
   return (root, error, phase = "unknown") => {
     try {
       if (isExpectedIndexCancellation(error)) return;
-      const { code, errorType } = classifyIndexFailure(error);
+      const { code, errorType, cause } = classifyIndexFailure(error);
       const reason = code === "SEARCH_WORK_NEEDS_CONTINUE" ? "needs_continue" : "worker_failed";
       const safePhase = INDEX_FAILURE_PHASES.has(phase) ? phase : "unknown";
-      const key = `${root}\0${reason}\0${safePhase}\0${code ?? ""}\0${errorType}`;
+      const key = `${root}\0${reason}\0${safePhase}\0${code ?? ""}\0${errorType}\0${cause}`;
       const current = now();
       const previous = history.get(key);
       if (previous && current >= previous.at && current - previous.at < LOG_WINDOW_MS) {
@@ -127,7 +164,7 @@ export function createBackgroundIndexFailureLogger({ write = logSearchDiagnostic
       if (!previous && history.size >= MAX_RECENT) history.delete(history.keys().next().value);
       history.set(key, { at: current, suppressed: 0 });
       const record = { event: "session_indexing_stopped", reason, phase: safePhase,
-        errorType, ...(code ? { code } : {}),
+        errorType, cause, ...(code ? { code } : {}),
         ...(previous?.suppressed ? { suppressed: previous.suppressed } : {}) };
       void Promise.resolve().then(() => write(root, record)).catch(() => {});
     } catch { /* Optional diagnostics. */ }

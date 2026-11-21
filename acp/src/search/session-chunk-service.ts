@@ -10,6 +10,7 @@ import { automaticWorkPaused, SearchWorkNeedsContinueError } from "./source-work
 import type { BackgroundSessionRecord } from "./background-session-discovery.js";
 import { beginSessionSweep, completeSessionSweep } from "./session-watermark.js";
 import { coverageDigest } from "./source-coverage.js";
+import { isSessionIndexBusy, withSessionPass } from "./session-pass.js";
 
 export const transcriptCandidates = (records: readonly SessionMapRecord[]) => records.map(r => ({ id:r.piSessionId,path:r.piSessionPath }));
 export class DesktopSessionChunks {
@@ -34,6 +35,17 @@ export class DesktopSessionChunks {
     this.sync = new SessionChunkSync(async owned => {
       phase = "policy";
       if (await automaticWorkPaused(cwd,"sessions",owned)) { selection.reset(); return; }
+      try { await withSessionPass(cwd,owned,() => runPass(owned)); }
+      catch (error) {
+        // Contention with another host is a deferral on the ordinary cadence, never an index failure.
+        if (owned.aborted || !isSessionIndexBusy(error)) throw error;
+      }
+    },signal,error => {
+      if (isExpectedIndexCancellation(error)) return;
+      logBackgroundIndexFailure(cwd,error,phase);
+      options.failed(error);
+    });
+    const runPass = async (owned: AbortSignal) => {
       phase = "embedding";
       const embedding = await options.embedding(owned);
       const identity = `${SESSION_CHUNK_FORMAT}:${embedding?.identity ?? "lexical-only"}`;
@@ -47,8 +59,8 @@ export class DesktopSessionChunks {
       const candidates = await selection.select(records.map(r => ({id:r.piSessionId,path:r.piSessionPath,
         createdAt:r.createdAt,changedAt:Date.parse(r.updatedAt)||0})),owned,pass.since);
       let complete = selection.complete;
-      let failedIndexing = false;
-      for (const candidate of candidates) {
+      let failedIndexing = false, deferred = false;
+      for (const [index,candidate] of candidates.entries()) {
         try {
           if (!await options.policy.eligible(candidate,owned)) { complete = false; continue; }
           const record = records.find(r => r.piSessionId === candidate.id && r.piSessionPath === candidate.path)!;
@@ -66,6 +78,11 @@ export class DesktopSessionChunks {
         } catch (error) {
           complete = false;
           owned.throwIfAborted();
+          if (isSessionIndexBusy(error)) {
+            // Another host owns the cache; retry these unchanged revisions next pass.
+            for (const rest of candidates.slice(index)) selection.forget(rest);
+            deferred = true; break;
+          }
           failedIndexing = true;
           options.failed(error);
           const paused = error instanceof SearchWorkNeedsContinueError;
@@ -89,12 +106,8 @@ export class DesktopSessionChunks {
       const after = await beginSessionSweep(cwd,identity,owned);
       if (pass.incarnation && after.incarnation !== pass.incarnation) selection.reset();
       selection.cacheRevision = `${identity}:${after.cacheRevision}`;
-      if (!failedIndexing && !selection.hasUnresolvedFailures()) options.recovered?.();
-    },signal,error => {
-      if (isExpectedIndexCancellation(error)) return;
-      logBackgroundIndexFailure(cwd,error,phase);
-      options.failed(error);
-    });
+      if (!deferred && !failedIndexing && !selection.hasUnresolvedFailures()) options.recovered?.();
+    };
   }
   get indexing(): boolean { return Boolean(this.sync.worker); }
   changed(): void { this.sync.changed(); }

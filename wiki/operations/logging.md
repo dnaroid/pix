@@ -129,11 +129,16 @@ failure/incomplete states, background-worker failures and aggregate skipped
 transcript reasons are warnings; meaningful successful vector saves are debug.
 Policy-selection changes and aborts are expected background cancellations,
 not worker-failure warnings; genuine policy-read failures remain warnings.
+Busy/locked SQLite and held session-pass leases are deferrals, not failures or warnings.
 Code/Knowledge native Desktop indexing reports its outcome through the same
 native logger. No per-pass start, five-second heartbeat, empty success, prompt,
 provider response, session ID, individual path, or raw exception text is
-included. Counts, duration, fixed failure phase, safe error class and allowlisted
-I/O/SQLite code are permitted; repeat causes are coalesced for five minutes.
+included. Counts, duration, fixed failure phase, safe error class, a fixed `cause`
+category (busy | compat | provider | io | corrupt | ownership | policy |
+needs_continue | other) and allowlisted I/O/SQLite code (`SQLITE_BUSY`,
+`SQLITE_LOCKED`, `SQLITE_READONLY`, `SQLITE_IOERR`, `SQLITE_CORRUPT`,
+`SQLITE_FULL`, `SQLITE_CANTOPEN`, `SQLITE_NOTADB`) are permitted; messages are
+never logged. Repeat causes are coalesced for five minutes.
 Standalone Pi remains independent of Pix logging. The dedicated project-local
 `.pi/artifacts/search-diagnostics-*/events.jsonl` writer and the Desktop
 Indexer Activity history have been removed; existing old files are unrelated

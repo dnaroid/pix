@@ -16,7 +16,7 @@ test("background index failure diagnostics coalesce repeats without leaking erro
   await Promise.resolve();
   assert.deepEqual(rows[0]?.record, {
     event: "session_indexing_stopped", reason: "worker_failed", phase: "discovery",
-    errorType: "Error", code: "SQLITE_BUSY",
+    errorType: "Error", cause: "busy", code: "SQLITE_BUSY",
   });
   for (let i = 0; i < 25; i++) log("/project", busy, "discovery");
   assert.equal(rows.length, 1);
@@ -32,7 +32,7 @@ test("background index failure diagnostics coalesce repeats without leaking erro
   assert.equal(rows[2]?.record.phase, "unknown");
   assert.equal(rows[2]?.record.errorType, "OtherError");
   assert.equal(rows[2]?.record.code, undefined);
-  assert.deepEqual(classifyIndexFailure(unsafe), { errorType: "OtherError" });
+  assert.deepEqual(classifyIndexFailure(unsafe), { errorType: "OtherError", cause: "other" });
   assert.doesNotMatch(JSON.stringify(rows), /private prompt|private query|PRIVATE_TOKEN|PRIVATE_EXCEPTION/);
   log("/project", new DOMException("do not log cancellation", "AbortError"), "indexing");
   log("/project", new Error("Search source selection changed"), "policy");
@@ -156,6 +156,24 @@ test("settings/task source failures log a fixed reason, never the message", asyn
   log("/project", "tasks", new Error("Search index busy; update deferred"));
   await new Promise(resolve => setImmediate(resolve));
   assert.equal((rows.at(-1)![2] as Record<string, unknown>).suppressed, 1);
+});
+
+test("index failure cause classification maps node:sqlite and Pix-owned errors without logging text", () => {
+  const sqlite = (errcode: number, message: string) => Object.assign(new Error(message), { code: "ERR_SQLITE_ERROR", errcode });
+  assert.deepEqual(classifyIndexFailure(sqlite(5, "database is locked")), { errorType: "Error", cause: "busy", code: "SQLITE_BUSY" });
+  assert.deepEqual(classifyIndexFailure(sqlite(517, "database is locked")), { errorType: "Error", cause: "busy", code: "SQLITE_BUSY" });
+  assert.deepEqual(classifyIndexFailure(sqlite(14, "unable to open database file")), { errorType: "Error", cause: "io", code: "SQLITE_CANTOPEN" });
+  assert.deepEqual(classifyIndexFailure(sqlite(11, "malformed")), { errorType: "Error", cause: "corrupt", code: "SQLITE_CORRUPT" });
+  assert.equal(classifyIndexFailure(new Error("Search index busy; update deferred")).cause, "busy");
+  assert.equal(classifyIndexFailure(new Error("Incompatible embedding cache; explicit rebuild required. Local search remains available")).cause, "compat");
+  assert.equal(classifyIndexFailure(new Error("Semantic session-title search unavailable; local search remains available")).cause, "provider");
+  assert.equal(classifyIndexFailure(new Error("Invalid embedding response")).cause, "provider");
+  assert.equal(classifyIndexFailure(new Error("Search work ownership expired")).cause, "ownership");
+  assert.equal(classifyIndexFailure(new Error("Search source policy unavailable")).cause, "policy");
+  assert.equal(classifyIndexFailure(Object.assign(new Error("x"), { code: "ENOENT" })).cause, "io");
+  assert.equal(classifyIndexFailure(Object.assign(new Error("x"), { code: "SEARCH_WORK_NEEDS_CONTINUE" })).cause, "needs_continue");
+  assert.equal(classifyIndexFailure("PRIVATE string").cause, "other");
+  assert.equal(classifyIndexFailure(sqlite(999, "PRIVATE")).code, undefined);
 });
 
 test("source failure reason classification covers known ACP/suite causes", () => {

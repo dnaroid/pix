@@ -27,28 +27,65 @@ function schema(db) {
       PRIMARY KEY(session_id,message_id,start));`);
   ensureSessionRevision(db);
 }
-async function reconcile(db, snapshot, signal) {
-  const saved = db.prepare(`SELECT * FROM ${INDEX_META} WHERE session_id=?`).get(snapshot.id);
+/** Rows per rebuild transaction: bounds how long a peer host waits for the write lock. */
+export const RECONCILE_BATCH = 256;
+const DELETE_BATCH = 1024;
+/** BEGIN..COMMIT runs synchronously: the write lock is never held across an await. */
+async function writeTransaction(db, signal, write) {
+  await beginWrite(db, signal);
+  try {
+    const result = write();
+    if (typeof result?.then === "function") throw new TypeError("Session index write transactions must be synchronous");
+    db.exec("COMMIT");
+    return result;
+  } catch (e) { db.exec("ROLLBACK"); throw e; }
+}
+/** Rebuild one session in bounded transactions under the documents lease, which
+ * every writer of this cache holds and each batch asserts. Readers find sessions
+ * only through INDEX_META, unpublished first and published last, so a partial
+ * rebuild is never searchable (a stale entry was already hidden by its file stamp).
+ * `publishable` runs between transactions; false leaves the session unpublished. */
+async function reconcile(db, snapshot, signal, work, publishable) {
+  const id = snapshot.id;
+  const saved = db.prepare(`SELECT * FROM ${INDEX_META} WHERE session_id=?`).get(id);
   if (saved?.revision === snapshot.revision && saved?.file_stamp === snapshot.fileStamp && saved?.format === SESSION_CHUNK_FORMAT
-    && saved.path === snapshot.path && saved.cwd === snapshot.cwd) return;
-  db.prepare(`DELETE FROM ${DOCUMENTS} WHERE session_id=?`).run(snapshot.id);
-  db.prepare(`DELETE FROM ${FTS} WHERE session_id=?`).run(snapshot.id);
-  db.prepare(`DELETE FROM ${RANGES} WHERE session_id=?`).run(snapshot.id);
-  db.prepare(`INSERT OR REPLACE INTO ${INDEX_META} VALUES(?,?,?,?,?,?,?,?,?,?)`).run(snapshot.id,snapshot.cwd,snapshot.path,
-    snapshot.fileStamp,snapshot.revision,snapshot.head,SESSION_CHUNK_FORMAT,snapshot.title,snapshot.name,snapshot.firstMessage);
-  db.prepare(`INSERT INTO ${META} VALUES(?,?,?,?) ON CONFLICT(session_id)
-    DO UPDATE SET path=excluded.path,revision=excluded.revision,head=excluded.head`).run(snapshot.id,snapshot.path,snapshot.revision,snapshot.head);
-  const insert = db.prepare(`INSERT INTO ${DOCUMENTS} VALUES(?,?,?,?,?,?,?,?,?)`);
-  const fts = db.prepare(`INSERT INTO ${FTS} VALUES(?,?,?,?)`);
-  const ranges = db.prepare(`INSERT INTO ${RANGES} VALUES(?,?,?,?,?,?,1)`);
-  let count = 0;
-  for (const c of snapshot.chunks) {
-    signal.throwIfAborted();
-    insert.run(snapshot.id,c.messageId,c.start,c.end,c.ordinal,c.role,c.status,c.text,c.hash);
-    fts.run(snapshot.id,c.messageId,c.start,c.text);
-    ranges.run(snapshot.id,c.messageId,c.start,c.byteOffset,c.byteLength,c.text.replace(/\s+/gu," ").slice(0,1200));
-    if (++count % 128 === 0) await yieldTask();
+    && saved.path === snapshot.path && saved.cwd === snapshot.cwd) return publishable();
+  await writeTransaction(db, signal, () => { work.assert(db); db.prepare(`DELETE FROM ${INDEX_META} WHERE session_id=?`).run(id); });
+  for (const table of [DOCUMENTS, FTS, RANGES]) {
+    const rowids = db.prepare(`SELECT rowid FROM ${table} WHERE session_id=?`).all(id).map(row => row.rowid);
+    for (let i = 0; i < rowids.length; i += DELETE_BATCH) {
+      await writeTransaction(db, signal, () => {
+        work.assert(db);
+        const remove = db.prepare(`DELETE FROM ${table} WHERE rowid=?`);
+        for (const rowid of rowids.slice(i, i + DELETE_BATCH)) remove.run(rowid);
+      });
+      await yieldTask();
+    }
   }
+  for (let i = 0; i < snapshot.chunks.length; i += RECONCILE_BATCH) {
+    await writeTransaction(db, signal, () => {
+      work.assert(db);
+      const insert = db.prepare(`INSERT INTO ${DOCUMENTS} VALUES(?,?,?,?,?,?,?,?,?)`);
+      const fts = db.prepare(`INSERT INTO ${FTS} VALUES(?,?,?,?)`);
+      const ranges = db.prepare(`INSERT INTO ${RANGES} VALUES(?,?,?,?,?,?,1)`);
+      for (const c of snapshot.chunks.slice(i, i + RECONCILE_BATCH)) {
+        signal.throwIfAborted();
+        insert.run(id,c.messageId,c.start,c.end,c.ordinal,c.role,c.status,c.text,c.hash);
+        fts.run(id,c.messageId,c.start,c.text);
+        ranges.run(id,c.messageId,c.start,c.byteOffset,c.byteLength,c.text.replace(/\s+/gu," ").slice(0,1200));
+      }
+    });
+    await yieldTask();
+  }
+  if (!await publishable()) return false;
+  await writeTransaction(db, signal, () => {
+    work.assert(db);
+    db.prepare(`INSERT OR REPLACE INTO ${INDEX_META} VALUES(?,?,?,?,?,?,?,?,?,?)`).run(id,snapshot.cwd,snapshot.path,
+      snapshot.fileStamp,snapshot.revision,snapshot.head,SESSION_CHUNK_FORMAT,snapshot.title,snapshot.name,snapshot.firstMessage);
+    db.prepare(`INSERT INTO ${META} VALUES(?,?,?,?) ON CONFLICT(session_id)
+      DO UPDATE SET path=excluded.path,revision=excluded.revision,head=excluded.head`).run(id,snapshot.path,snapshot.revision,snapshot.head);
+  });
+  return true;
 }
 /* Shared index storage is owned by session-chunk-store. */
 async function* sessionSnapshots(root, candidates, signal, onSkip, onRead) {
@@ -77,9 +114,7 @@ export async function indexSessionChunks(root, candidates, options) {
   try {
     db = await storage(root,true);
     work = await claimWork(db,signal,{retry:options.retry === true});
-    await beginWrite(db,signal);
-    try { schema(db); work.assert(db); db.exec("COMMIT"); }
-    catch (e) { db.exec("ROLLBACK"); throw e; }
+    await writeTransaction(db,signal,() => { schema(db); work.assert(db); });
     const diagnostics = [];
     let deferred = 0;
     const admitted = [];
@@ -95,13 +130,11 @@ export async function indexSessionChunks(root, candidates, options) {
       if (options.eligible && !await options.eligible(snapshot, signal)) { deferred++; continue; }
       total += snapshot.chunks.length;
       counts.sessionsChecked++; counts.chunksDiscovered = total; counts.phase = "saving";
-      await beginWrite(db,signal);
-      try {
-        await reconcile(db,snapshot,signal);
+      const published = await reconcile(db,snapshot,signal,work,async () => {
         if (!await transcriptUnchanged(snapshot,signal)) throw new Error("Session changed during indexing; refresh required");
-        if (options.eligible && !await options.eligible(snapshot, signal)) { db.exec("ROLLBACK"); deferred++; continue; }
-        work.assert(db); db.exec("COMMIT");
-      } catch (e) { db.exec("ROLLBACK"); throw e; }
+        return !options.eligible || await options.eligible(snapshot, signal);
+      });
+      if (!published) { deferred++; continue; }
       if (!embedding) continue;
       counts.phase = "checking_cache";
       const identity = `session-chunks-v1:${embedding.identity}`;
@@ -120,8 +153,7 @@ export async function indexSessionChunks(root, candidates, options) {
         if (options.eligible && !await options.eligible(snapshot, signal)) { deferred++; break; }
         const batch = [];
         for (const entry of missing) { batch.push(entry); if (batch.length === 16) break; }
-        await beginWrite(db,signal);
-        try { work.network(db); db.exec("COMMIT"); } catch (e) { db.exec("ROLLBACK"); throw e; }
+        await writeTransaction(db,signal,() => work.network(db));
         counts.phase = "provider"; counts.requestsStarted++;
         let vectors;
         try {
@@ -137,11 +169,11 @@ export async function indexSessionChunks(root, candidates, options) {
         if (!await embedding.authorized(signal)) throw new Error("Session embedding configuration changed");
         if (options.eligible && !await options.eligible(snapshot, signal)) { deferred++; break; }
         counts.phase = "saving";
-        await beginWrite(db,signal);
-        try {
-          if (!await transcriptUnchanged(snapshot,signal)) throw new Error("Session changed during indexing; refresh required");
-          if (!await embedding.authorized(signal)) throw new Error("Session embedding configuration changed");
-          if (options.eligible && !await options.eligible(snapshot, signal)) { db.exec("ROLLBACK"); deferred++; break; }
+        // Fences run just before the synchronous save, never while holding the write lock.
+        if (!await transcriptUnchanged(snapshot,signal)) throw new Error("Session changed during indexing; refresh required");
+        if (!await embedding.authorized(signal)) throw new Error("Session embedding configuration changed");
+        if (options.eligible && !await options.eligible(snapshot, signal)) { deferred++; break; }
+        await writeTransaction(db,signal,() => {
           work.assert(db);
           const insert = db.prepare(`INSERT OR REPLACE INTO ${VECTORS} VALUES(?,?,?)`);
           for (let i=0;i<batch.length;i++) {
@@ -149,9 +181,8 @@ export async function indexSessionChunks(root, candidates, options) {
             vectors[i].forEach((value,j)=>bytes.writeFloatLE(value,j*4));
             insert.run(identity,batch[i][0],bytes);
           }
-          db.exec("COMMIT");
-          counts.savedVectors += batch.length;
-        } catch(e) { db.exec("ROLLBACK"); throw e; }
+        });
+        counts.savedVectors += batch.length;
         for (const [hash] of batch) missing.delete(hash);
         calls++;
         await yieldTask();

@@ -25,8 +25,8 @@ sink; standalone Pi remains functional when that optional sink is absent.
 Normal starts, per-session successful/empty passes, cancellation and five-second
 provider-wait heartbeats are not written. Failed and incomplete index passes
 include bounded counts (checked/skipped sessions, discovered/cached chunks,
-saved vectors, provider calls), elapsed duration, fixed execution phase and
-allowlisted error type/OS/SQLite code. A successful pass that saved vectors is
+saved vectors, provider calls), elapsed duration, fixed execution phase, the same fixed
+`cause` category and allowlisted error type/OS/SQLite code. A successful pass that saved vectors is
 `debug`-only. Skipped transcripts emit a rate-limited warning with a fixed
 reason and safe code; raw session IDs, file paths, parent/child IDs, provider
 messages, prompts and document text never enter these events. The separate
@@ -37,11 +37,16 @@ Background session synchronization normally rechecks cross-host inactivity after
 30 seconds. If a worker throws or finishes with an operationally incomplete
 index (e.g. an unreadable transcript), periodic recovery backs off to 2, 4, 8,
 then at most 15 minutes instead of retrying every 30 seconds. Deferred or
-not-yet-mature sessions do not trigger failure backoff. A fresh session or
+not-yet-mature sessions do not trigger failure backoff. Busy/locked SQLite and a
+held cross-host `session-pass` lease are also deferrals: they are not index
+failures, do not log `search:background-failed`, and the remaining unchanged
+candidates are forgotten so the next pass reselects them. A fresh session or
 source change can trigger a debounced earlier retry; explicit manual
 Index/Continue is unaffected. Generic background-worker errors generate
-`search:background-failed` (warn), tagged with a fixed phase, error category
-and allowlisted OS/SQLite code; repeated causes are coalesced for five minutes
+`search:background-failed` (warn), tagged with a fixed phase, error category,
+a fixed `cause` (busy | compat | provider | io | corrupt | ownership | policy |
+needs_continue | other) and an allowlisted OS/SQLite code; repeated causes are
+coalesced for five minutes
 with a suppressed count. Per-session failures use the same safe categories
 without including session IDs. Ordinary cancellations, including a deliberate
 change to the enabled search sources, are not warnings. Invalid or unreadable
@@ -226,6 +231,15 @@ saved-name vectors and require a second Continue to populate them.
   Failed unchanged background revisions do not spin; `/search-index sessions` explicitly
   continues it. Configuration removal, session replacement and shutdown
   invalidate old work. These caches do not modify canonical JSONL files.
+  Each automatic session pass first claims the shared `session-pass` lease in
+  `pix_search_work` without waiting. A held lease or locked database defers the
+  pass without running it; without an existing `sessions.sqlite` the pass runs
+  without a lease. Title/chunk writes still claim `documents` inside the pass.
+  A changed session is rebuilt in bounded write transactions (256 chunk rows per
+  insert batch, 1024 rows per delete batch). Its index entry is removed first and
+  published last, so readers never see a partial rebuild. Each write transaction is
+  synchronous between `BEGIN IMMEDIATE` and `COMMIT`, so the write lock is never held
+  across an await.
 - Session background sweeps persist one successful **start-time watermark** in
   `pix_session_sweep` inside `.pi/search/sessions.sqlite`, not a per-file manifest.
   Only a fully successful title/chunk pass advances it; failed, cancelled,

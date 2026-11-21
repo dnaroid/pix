@@ -22,7 +22,9 @@ test("indexing failures are classified, coalesced and never include provider tex
     errorType: "Error", suppressed: 30 });
   expect(JSON.stringify(records)).not.toContain("PRIVATE_PROVIDER_TOKEN");
   expect(classifyIndexFailure(Object.assign(new Error("secret"), { code: "PRIVATE_CREDENTIAL" })))
-    .toEqual({ errorType: "Error" });
+    .toEqual({ errorType: "Error", cause: "other" });
+  expect(classifyIndexFailure(Object.assign(new Error("database is locked"), { code: "ERR_SQLITE_ERROR", errcode: 5 })))
+    .toEqual({ errorType: "Error", cause: "busy", code: "SQLITE_BUSY" });
   const abort = new DOMException("PRIVATE_CANCEL", "AbortError");
   log("/fixture", abort, "indexing");
   log("/fixture", new Error("Search source selection changed"), "selection");
