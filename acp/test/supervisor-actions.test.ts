@@ -61,7 +61,7 @@ async function setup(
 	let catalogRefreshes = 0;
 	const gone = new Set<string>();
 	const launches: { item: SupervisorStartItem; modelRef: string | undefined; caller: string }[] = [];
-	let launchGate: Promise<void> = Promise.resolve();
+	let launchGate: (() => Promise<void>) | undefined;
 	let launchError: Error | undefined;
 	const exclusive = lock();
 	const actions = createSupervisorActions({
@@ -81,7 +81,7 @@ async function setup(
 			cancel: (sessionId) => { cancelled.push(sessionId); },
 			launch: async (_cwd, caller, item, modelRef) => {
 				launches.push({ item, modelRef, caller });
-				await launchGate;
+				await launchGate?.();
 				if (launchError) throw launchError;
 				const sessionId = `new${launches.length}`;
 				live.set(sessionId, liveSession(true));
@@ -102,7 +102,7 @@ async function setup(
 	return { cwd, store, live, digests, stops, delivered, cancelled, taskWrites, released, autoClosed, gone, exclusive, handle, ledger, launches,
 		catalogRefreshes: () => catalogRefreshes,
 		questions, answers, setUserPromptAt: (at: number) => { userPromptAt = at; },
-		gate: (gate: Promise<void>) => { launchGate = gate; }, failLaunch: (error: Error | undefined) => { launchError = error; } };
+		gate: (gate: () => Promise<void>) => { launchGate = gate; }, failLaunch: (error: Error | undefined) => { launchError = error; } };
 }
 
 const send = (text = "please fix", kind: "rework" | "answer" | "note" = "note"): SupervisorMutation => ({ op: "send", sessionId: "w1", text, kind });
@@ -441,14 +441,18 @@ test("supervisor start refuses duplicates, a paused mandate and a full concurren
 
 test("concurrent supervisor starts cannot both pass maxConcurrent", async (t) => {
 	const s = await setup(t, { sessions: {}, mandate: { maxConcurrent: 1 } });
-	let open!: () => void;
-	s.gate(new Promise<void>((resolve) => { open = resolve; }));
+	const entered = Promise.withResolvers<void>();
+	const release = Promise.withResolvers<void>();
+	s.gate(() => { entered.resolve(); return release.promise; });
 	const first = s.handle({ op: "start", item: { kind: "prompt", text: "a" } });
-	const second = s.handle({ op: "start", item: { kind: "prompt", text: "b" } });
-	await new Promise((resolve) => setTimeout(resolve, 10));
-	assert.equal(s.launches.length, 1, "the second start waits for the lock");
-	open();
-	await first;
-	await assert.rejects(second, /Concurrency limit reached/);
+	let secondRejected: Promise<void>;
+	try {
+		const launchEntered = await Promise.race([entered.promise.then(() => true), first.then(() => false)]);
+		assert.ok(launchEntered, "the first start must enter launch before completing");
+		secondRejected = assert.rejects(s.handle({ op: "start", item: { kind: "prompt", text: "b" } }), /Concurrency limit reached/);
+	} finally {
+		release.resolve();
+	}
+	await Promise.all([first, secondRejected]);
 	assert.equal(s.launches.length, 1);
 });
