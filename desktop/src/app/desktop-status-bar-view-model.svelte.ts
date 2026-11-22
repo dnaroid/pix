@@ -36,6 +36,7 @@ export function createDesktopStatusBarViewModel(options: {
   sessionActivity: () => StatusBarProps["sessionActivity"];
   sessionSubagentSnapshot: () => StatusBarProps["sessionSubagentSnapshot"];
   sessionTodoSnapshot: () => StatusBarProps["sessionTodoSnapshot"];
+  findSessionSkills?: StatusBarProps["findSessionSkills"];
   sessionNeedsInput: () => boolean;
   canClearTodos: () => boolean;
   clearSessionTodos: (sessionId: string) => Promise<boolean>;
@@ -125,6 +126,7 @@ export function createDesktopStatusBarViewModel(options: {
 
     return {
       showSkeletons,
+      findSessionSkills: !draft && sessionId && !historyLoading ? options.findSessionSkills : undefined,
       configOptions: displayConfigOptions,
       changingConfig,
       promptRunning,

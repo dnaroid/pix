@@ -9,6 +9,7 @@ import { projectTaskDisplayLabel } from "../lib/project-tasks";
 import type { SubagentSessionNavigation } from "./desktop-subagent-navigation";
 import { createSessionStepNavigation } from "./session-step-navigation";
 import { workspaceRelativePath } from "../lib/background-jobs";
+import { loadedSessionSkills } from "../lib/session-skills";
 
 export function createDesktopShellViewModelServices(
   options: DesktopViewModelServicesOptions,
@@ -57,6 +58,7 @@ export function createDesktopShellViewModelServices(
     sessionActivity: () => options.presentation.activeSessionActivity,
     sessionSubagentSnapshot: () => options.presentation.activeSubagentSnapshot,
     sessionTodoSnapshot: () => options.presentation.activeTodoSnapshot,
+    findSessionSkills: () => loadedSessionSkills(options.state.transcript.items),
     sessionNeedsInput: () => options.presentation.activePendingElicitation !== null,
     canClearTodos: () => Boolean(
       options.state.sessionId && todoActions.canClear(options.state.sessionId),

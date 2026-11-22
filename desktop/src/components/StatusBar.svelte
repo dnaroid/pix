@@ -17,6 +17,7 @@
   import SessionPlanStatus from "./SessionPlanStatus.svelte";
   import NotificationCenter from "./NotificationCenter.svelte";
   import BackgroundJobsStatus from "./BackgroundJobsStatus.svelte";
+  import SessionSkillsStatus from "./SessionSkillsStatus.svelte";
   import type { PlanProgress } from "../lib/project-documents";
 
   type ConfigValue = { value: string; name: string; group?: string };
@@ -29,6 +30,7 @@
     quotaWaitIndicator = null,
     observer = null,
     backgroundJobs = null,
+    findSessionSkills,
     canConfigure,
     modelThinkingOpen,
     runtimeStatus,
@@ -76,6 +78,7 @@
       onOpenSettings: () => void;
     } | null;
     backgroundJobs?: import("svelte").ComponentProps<typeof BackgroundJobsStatus> | null;
+    findSessionSkills?: () => string[];
     canConfigure: boolean;
     modelThinkingOpen: boolean;
     runtimeStatus?: RuntimeStatus;
@@ -222,6 +225,9 @@
 
   <div class="flex h-full shrink-0 items-center gap-0.5" data-status-right>
   {#key observer?.sessionId}
+  {#if findSessionSkills}
+    <SessionSkillsStatus findSkills={findSessionSkills} />
+  {/if}
   {#if observer}
     <ObserverStatus {...observer} />
   {/if}
