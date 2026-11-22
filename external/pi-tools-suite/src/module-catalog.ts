@@ -30,7 +30,7 @@ export const PI_TOOLS_SUITE_MODULE_CATALOG: readonly PiToolsSuiteModuleCatalogEn
 	{ name: "model-tools", defaultEnabled: true, description: "Registers model-specific aliases and gated variants for common file, shell, search, and patch tools." },
 	{ name: "codemode", defaultEnabled: true, description: "Enables SDK QuickJS scripts alongside direct tools. Changes apply after extension reload or session restart." },
 	{ name: "usage", defaultEnabled: true, description: "Adds read-only quota and usage reporting for supported model providers." },
-	{ name: "web-search", defaultEnabled: true, description: "Adds web_search with Ollama and Tavily fallback, and web_fetch with local Markdown extraction." },
+	{ name: "web-search", defaultEnabled: true, description: "Adds web_search with keyless Brave Search and optional Tavily fallback, and web_fetch with local Markdown extraction." },
 	{ name: "truncation-metadata-normalizer", defaultEnabled: true, description: "Removes redundant truncation metadata text when it duplicates content already visible in the tool result." },
 	{ name: "dcp", defaultEnabled: true, description: "Provides Dynamic Context Pruning, manual/automatic compression, context statistics, and recoverable summaries." },
 	// After dcp, so DCP accounting sees the full transcript; before credential-firewall.

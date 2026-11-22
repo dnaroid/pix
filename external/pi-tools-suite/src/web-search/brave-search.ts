@@ -1,6 +1,6 @@
 import { parse, type DefaultTreeAdapterTypes as Tree } from "parse5";
 
-// Keyless last-resort search: Brave Search public HTML results page, parsed locally.
+// Keyless search: Brave Search public HTML results page, parsed locally.
 export const BRAVE_SEARCH_HOST = "https://search.brave.com";
 
 export const BRAVE_SEARCH_HEADERS: Record<string, string> = {

@@ -505,8 +505,8 @@ microphone permission.
 
 ## Optional integrations
 
-- **Web search:** local Ollama can work without a cloud key; cloud Ollama/Tavily
-  credentials can be configured with `/web-credentials`.
+- **Web search:** keyless Brave Search needs no key; an optional Tavily key can be
+  configured with `/web-credentials` or `TAVILY_API_KEY`.
 - **Context7:** export `CONTEXT7_API_KEY`.
 - **LSP:** configure/trust servers in tools-suite configuration. See
   [pi-tools-suite LSP setup](../tools/suite.md#lsp-setup).

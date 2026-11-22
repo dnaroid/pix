@@ -86,12 +86,13 @@ async function inventory(tools: string[] | undefined, indexed = false, extraArgs
 	return { ...record, piArgs: (getLive(runDir, "child")?.launchArgs ?? []).join("\n").split("\n") };
 }
 
-offline("research work tools are read-only in the actual child provider inventory", async () => {
-	const { tools, all, piArgs } = await inventory(["read", "grep", "ast_grep", "web_search", "web_fetch"], true);
-	for (const name of ["read", "grep", "ast_grep", "web_search", "web_fetch", ...SUBAGENT_COMMON_TOOLS]) expect(tools).toContain(name);
+offline("research can write reports without shell or edit tools in the actual child provider inventory", async () => {
+	const allowed = ["read", "grep", "write", "ast_grep", "web_search", "web_fetch", ...SUBAGENT_COMMON_TOOLS];
+	const { tools, all, piArgs } = await inventory(allowed, true);
+	for (const name of allowed) expect(tools).toContain(name);
 	expect(piArgs.some((arg) => arg.endsWith("async-subagents/work-tools.ts"))).toBe(true);
 	expect(all).not.toContain("ast_apply");
-	for (const name of tools) expect(["read", "grep", "ast_grep", "web_search", "web_fetch", ...SUBAGENT_COMMON_TOOLS]).toContain(name);
+	for (const name of tools) expect(allowed).toContain(name);
 }, 60_000);
 
 offline("coding tools gain only AST; CLI exclusions can remove optional capabilities", async () => {

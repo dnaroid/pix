@@ -61,10 +61,10 @@ test("optional capabilities follow final CLI restrictions, not role names or uni
 	expect(subagentWorkTools([])).toEqual({ optional: [] });
 	expect(config(["ast_grep", "web_search"], ["--no-tools"])).toEqual({ optional: [] });
 	expect(config(["ast_grep", "web_search"], ["-t", "read"])).toEqual({ optional: [] });
-	expect(config(["read", "ast_grep", "web_search"], ["-xt", "ast_grep"])).toEqual({ optional: ["web_search"], readOnlySelection: ["read", "web_search", ...SUBAGENT_COMMON_TOOLS] });
+	expect(config(["read", "ast_grep", "web_search"], ["-xt", "ast_grep"])).toEqual({ optional: ["web_search"], canonicalSelection: ["read", "web_search", ...SUBAGENT_COMMON_TOOLS] });
 	expect(selectSubagentToolsForModel("openai/gpt-test", ["read", "grep", "ast_grep", "web_fetch"])).toEqual(["read", "grep", "ast_grep", "web_fetch"]);
 	expect(selectSubagentToolsForModel("openai/gpt-test", ["read", "bash", "edit", "ast_grep"])).toEqual(["read", "shell", "apply_patch", "ast_grep"]);
-	expect(config(["read", "bash", "ast_grep"]).readOnlySelection).toBeUndefined();
+	expect(config(["read", "bash", "ast_grep"]).canonicalSelection).toBeUndefined();
 });
 
 test("facade registers only requested tools, no commands, and guards read-only lifecycle", async () => {
@@ -122,10 +122,11 @@ test("project-local replacements do not inherit optional built-in work tools", (
 	expect(config(profiles.research.tools!).optional).toEqual([]);
 });
 
-for (const modelId of ["gpt-work-offline", "claude-work-offline"]) test(`actual SDK research capabilities stay read-only (${modelId})`, async () => {
+for (const modelId of ["gpt-work-offline", "claude-work-offline"]) test(`actual SDK research can write without shell or patch aliases (${modelId})`, async () => {
 	const root = workspace();
 	mkdirSync(join(root, ".git"));
-	const selected = ["read", "grep", "ast_grep", "web_search", "web_fetch", ...SUBAGENT_COMMON_TOOLS];
+	const profileTools = loadSubagentConfig(root, {}).types.research.tools!;
+	const selected = [...selectSubagentToolsForModel(modelId, profileTools), ...SUBAGENT_COMMON_TOOLS];
 	process.env[SUBAGENT_WORK_TOOLS_ENV] = JSON.stringify(config(selected));
 	const agentDir = join(root, "agent");
 	const settingsManager = SettingsManager.inMemory({ enableInstallTelemetry: false });
@@ -144,7 +145,7 @@ for (const modelId of ["gpt-work-offline", "claude-work-offline"]) test(`actual 
 		const errors: unknown[] = [];
 		await session.bindExtensions({ onError: (error) => errors.push(error) });
 		expect(errors).toEqual([]);
-		expect(session.getActiveToolNames().sort()).toEqual(["read", "grep", "ast_grep", "web_search", "web_fetch", "todo", "compress"].sort());
+		expect(session.getActiveToolNames().sort()).toEqual(["read", "grep", "write", "ast_grep", "web_search", "web_fetch", "todo", "compress"].sort());
 		expect(session.getAllTools().map((tool) => tool.name)).not.toContain("ast_apply");
 	} finally { session.dispose(); }
 });

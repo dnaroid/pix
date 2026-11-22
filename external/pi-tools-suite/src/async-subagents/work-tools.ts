@@ -15,10 +15,10 @@ export default function subagentWorkTools(pi: ExtensionAPI): void {
 	if (requested.has("ast_grep")) registerAstGrepTool(toolsOnly, { readOnly: true });
 	if (requested.has("web_search") || requested.has("web_fetch")) webSearch(toolsOnly);
 
-	// Codex aliases map grep to shell. A read-only selection must use the
-	// canonical builtin instead, and must remain read-only on model changes.
-	if (!config.readOnlySelection) return;
-	const selected = config.readOnlySelection;
+	// Keep narrow selections on canonical builtins across model changes:
+	// Codex maps grep to shell and write to the more general apply_patch.
+	if (!config.canonicalSelection) return;
+	const selected = config.canonicalSelection;
 	const allowed = new Set(selected);
 	const select = () => {
 		const available = new Set(pi.getAllTools().map((tool) => tool.name));
@@ -29,5 +29,5 @@ export default function subagentWorkTools(pi: ExtensionAPI): void {
 	pi.on("before_agent_start", select);
 	pi.on("tool_call", (event) => allowed.has(event.toolName)
 		? undefined
-		: { block: true, reason: `${event.toolName} is not available to this read-only child` });
+		: { block: true, reason: `${event.toolName} is not available in this child's tool selection` });
 }

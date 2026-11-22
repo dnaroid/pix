@@ -8,7 +8,7 @@ policy, not a price oracle.
 
 ## Execution modes
 
-- `research`: read-only evidence gathering, searches and focused review questions.
+- `research`: evidence gathering, searches and focused review questions; may save a full report with `write` (prompt-only report scope, no source edits).
 - `implement-core`: Sol, then Claude Sonnet as quota fallback, for approved
   implementation handoffs, including explicit user delegation or a concrete
   capability gap; no automatic fallback to a weaker model tier.

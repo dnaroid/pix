@@ -6,11 +6,11 @@ const commonTools = new Set(SUBAGENT_COMMON_TOOLS);
 export const SUBAGENT_OPTIONAL_TOOLS = ["ast_grep", "web_search", "web_fetch"] as const;
 export const SUBAGENT_WORK_TOOLS_ENV = "PI_SUBAGENT_WORK_TOOLS";
 const optionalTools = new Set<string>(SUBAGENT_OPTIONAL_TOOLS);
-const readOnlyTools = new Set(["read", "grep", "find", "ls", "Read", "Grep", "Glob", ...SUBAGENT_COMMON_TOOLS, ...SUBAGENT_OPTIONAL_TOOLS]);
+const canonicalWorkTools = new Set(["read", "grep", "find", "ls", "Read", "Grep", "Glob", "write", ...SUBAGENT_COMMON_TOOLS, ...SUBAGENT_OPTIONAL_TOOLS]);
 
 export interface SubagentWorkTools {
 	optional: string[];
-	readOnlySelection?: string[];
+	canonicalSelection?: string[];
 }
 
 /** Called after CLI normalization, so explicit no-tools/exclusions remain authoritative. */
@@ -34,7 +34,7 @@ export function withSubagentBackgroundTools(args: readonly string[], model?: unk
 
 /** Extension names are not builtin aliases; keep them in restricted CLI lists. */
 export function selectSubagentToolsForModel(model: unknown, tools: readonly string[]): string[] {
-	if (tools.some((name) => optionalTools.has(name)) && tools.every((name) => readOnlyTools.has(name))) return [...new Set(tools)];
+	if (tools.some((name) => optionalTools.has(name)) && tools.every((name) => canonicalWorkTools.has(name))) return [...new Set(tools)];
 	return [...new Set(tools.flatMap((name) => optionalTools.has(name) || commonTools.has(name)
 		? [name] : selectSuitableToolsForModel(model, [name])))];
 }
@@ -46,7 +46,7 @@ export function subagentWorkTools(args: readonly string[]): SubagentWorkTools {
 	const excluded = new Set(exclusion < 0 ? [] : args[exclusion + 1].split(","));
 	const tools = selection < 0 ? [] : args[selection + 1].split(",").filter((name) => !excluded.has(name));
 	const optional = tools.filter((name) => optionalTools.has(name));
-	return { optional, ...(optional.length && tools.every((name) => readOnlyTools.has(name)) ? { readOnlySelection: tools } : {}) };
+	return { optional, ...(optional.length && tools.every((name) => canonicalWorkTools.has(name)) ? { canonicalSelection: tools } : {}) };
 }
 
 /** Keep work-tool restrictions, with universal planning, DCP and read-only queries. */

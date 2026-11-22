@@ -117,6 +117,12 @@ in memory; it exposes tool + slash-command interfaces. `[confirmed by code]`
   Markdown profile defines that exact name; custom roles remain supported.
   Ordinary/readiness review is a focused `research` task, actual checks belong
   to `verify`/`ui-qa`, and the parent owns the readiness decision.
+  For requested reports or substantial findings, `research` uses the existing
+  `write` tool to save a full Markdown report in a unique run directory under
+  `.pi/artifacts/subagents/` (or at a user-requested deliverable path). Its final
+  reply gives key findings, caveats, and a link. Short investigations or runs
+  without `write` return findings directly. Report-only writing is a prompt
+  rule, not a filesystem restriction; source edits remain outside the role.
 - `/ultrawork` and its auto-classifier do not override these delegation grounds.
   Explicit user invocation authorizes scoped delegation; an automatic suggestion
   is not a user request. Broad scope alone must not trigger immediate workers.
@@ -143,9 +149,10 @@ in memory; it exposes tool + slash-command interfaces. `[confirmed by code]`
      `ast_apply`, LSP or full suite. Empty/no-tools selections, later lists and
      exclusions may remove optional tools; universal todo/DCP/repo is unchanged.
      Every attempt overwrites `PI_SUBAGENT_WORK_TOOLS`, preventing inherited
-     capability contamination. Read-only optional selections retain canonical
-     builtins (not Codex's grep-to-shell alias), reselect only available permitted
-     tools on session/model/before-agent events and reject non-allowlisted calls.
+     capability contamination. Optional selections limited to read-only tools
+     and optional `write` retain canonical builtins (not Codex's grep-to-shell
+     or write-to-patch aliases), reselect only available permitted tools on
+     session/model/before-agent events and reject non-allowlisted calls.
      Executing selections retain existing mutation authority without web by
      default. Research uses web for public evidence, never secrets/private data
      or local discovery, and reports access gaps rather than configuring keys.
