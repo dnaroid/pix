@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -10,12 +10,13 @@ import { configureSupervisorProject } from "../src/acp/supervisor-setup.js";
 import { createSupervisorStore } from "../src/acp/supervisor-store.js";
 import { writeSourcePolicy } from "../src/search/source-policy.js";
 import { createSupervisorBridge } from "../src/pi/supervisor-host.js";
+import { removeDirsWithRetry } from "../../external/pi-tools-suite/test/support/fs-retry.mjs";
 
 async function project(t: TestContext) {
 	const parent = fileURLToPath(new URL("../../.pi/artifacts/supervisor-setup-tests/", import.meta.url));
 	await mkdir(parent, { recursive: true });
 	const cwd = await mkdtemp(join(parent, "project-"));
-	t.after(() => rm(cwd, { recursive: true, force: true }));
+	t.after(() => removeDirsWithRetry([cwd]));
 	return cwd;
 }
 
@@ -30,15 +31,38 @@ test("setup accepts configuration only, with no target project or approval param
 	assert.throws(() => parseSupervisorSetupRequest({ op: "registry-install", name: "test", resourceType: "project" }), /Invalid resourceType/);
 });
 
-test("launch writes serialize with Search, preserve JSONC and never execute the command", async (t) => {
+test("launch and Search writes respect a busy owner, preserve JSONC on retry and never execute the command", async (t) => {
 	const cwd = await project(t);
 	const config = join(cwd, ".pi", "workspace.jsonc");
 	const marker = join(cwd, "must-not-exist");
-	const add = (name: string) => saveSupervisorLaunchCommand(cwd, { op: "launch-add", name, command: `touch ${JSON.stringify(marker)}` }, allow);
+	const add = (name: string, beforeCommit = allow) => saveSupervisorLaunchCommand(cwd, { op: "launch-add", name, command: `touch ${JSON.stringify(marker)}` }, beforeCommit);
 	assert.deepEqual(await listSupervisorLaunchCommands(cwd), []);
 	await mkdir(join(cwd, ".pi"));
-	await writeFile(config, '{\n  // project metadata\n  "wiki": { "path": "wiki" },\n}\n');
-	const [first] = await Promise.all([add("First"), add("Second"), writeSourcePolicy(cwd, "tasks", true)]);
+	const original = '{\n  // project metadata\n  "wiki": { "path": "wiki" },\n}\n';
+	await writeFile(config, original);
+	const entered = Promise.withResolvers<void>();
+	const release = Promise.withResolvers<void>();
+	const firstWrite = add("First", () => {
+		entered.resolve();
+		return release.promise;
+	});
+	try {
+		assert.equal(await Promise.race([entered.promise, firstWrite]), undefined, "first write reaches the pre-commit barrier");
+		// Keep the owner parked until both contenders finish. Successful writes
+		// must not depend on all filesystem work fitting inside the busy budget.
+		const contenders = await Promise.allSettled([add("Second"), writeSourcePolicy(cwd, "tasks", true)]);
+		for (const result of contenders) {
+			if (result.status !== "rejected") assert.fail("contender must not bypass the workspace lock");
+			assert.match(String(result.reason), /Workspace configuration busy; retry/);
+		}
+		assert.equal(await readFile(config, "utf8"), original);
+	} finally {
+		release.resolve();
+		await firstWrite;
+	}
+	const first = await firstWrite;
+	await writeSourcePolicy(cwd, "tasks", true);
+	await add("Second");
 	const before = await readFile(config, "utf8");
 	assert.match(before, /\/\/ project metadata/);
 	assert.match(before, /"tasks": true/);
