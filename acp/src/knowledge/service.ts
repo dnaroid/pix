@@ -31,6 +31,15 @@ function reviewedPassages(snapshot: KnowledgeSnapshot): KnowledgeCitation[] | un
   return passages;
 }
 
+/**
+ * An incomplete verdict must always carry its reason: pending uncertainties are their own
+ * explanation; otherwise a generic notice replaces an empty diagnostics list.
+ */
+export function explainIncomplete(result: KnowledgeCheckResult, language: KnowledgeReportLanguage): KnowledgeCheckResult {
+  if (result.status !== "incomplete" || result.notices.length || result.uncertainties?.length) return result;
+  return { ...result, notices: [reportMessage(language, "incompleteUnexplained")] };
+}
+
 export interface KnowledgeCheckOptions {
   readonly bundledExtensionPath?: string;
   readonly agentDir?: string;
@@ -111,9 +120,9 @@ export class KnowledgeCheckService {
           if (message.stopReason === "length") throw new Error(reportMessage(reportLanguage, "modelOutputLimit"));
           return message.content.flatMap(part => part.type === "text" ? [part.text] : []).join("");
         };
-        if (chunks.length > 1) return checkKnowledgeChunks({ request, body, chunks, firstSnapshot: snapshot,
+        if (chunks.length > 1) return explainIncomplete(await checkKnowledgeChunks({ request, body, chunks, firstSnapshot: snapshot,
           collect, complete: completePrompt, signal: owned, reportLanguage, modelRef: preferences.modelRef,
-          ...(this.options.warn ? { warn: this.options.warn } : {}) });
+          ...(this.options.warn ? { warn: this.options.warn } : {}) }), reportLanguage);
         const comparison = await compareKnowledge(snapshot.document, snapshot.evidence, completePrompt, owned, reportLanguage);
         owned.throwIfAborted();
         if (!await snapshot.current(owned)) {
@@ -127,9 +136,9 @@ export class KnowledgeCheckService {
         if (!reviewedSources) notices.push(reportMessage(reportLanguage, "reviewedSourcesInvalid"));
         const complete = snapshot.evidence.length > 0 && snapshot.complete && comparison.complete && Boolean(reviewedSources);
         if (!complete) this.options.warn?.("Wiki contradiction check returned incomplete evidence or model output");
-        return { ...base, modelRef: preferences.modelRef, conflicts: comparison.conflicts,
+        return explainIncomplete({ ...base, modelRef: preferences.modelRef, conflicts: comparison.conflicts,
           uncertainties: comparison.uncertainties, reviewedSources: reviewedSources ?? [], notices,
-          status: comparison.conflicts.length ? "conflicts" : complete ? "clear" : "incomplete" };
+          status: comparison.conflicts.length ? "conflicts" : complete ? "clear" : "incomplete" }, reportLanguage);
       });
     } catch (error) {
       if (error instanceof KnowledgeReportError) throw new Error(reportMessage(reportLanguage, error.reason));

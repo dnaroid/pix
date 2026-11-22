@@ -6,6 +6,7 @@
   import type { ProjectFileLineRange } from "../lib/project-files";
   import { iconButtonClass } from "../lib/icon-button";
   import WikiConsistencyReport from "./WikiConsistencyReport.svelte";
+  import { needsClarification } from "./wiki-consistency-report-text";
 
   let { workspace, jobs = [], onCancel, onDismiss, onOpenFile, onOpenCitation, onResolve, canOpenSources = true, resolving = false }: {
     workspace: string;
@@ -36,6 +37,7 @@
     if (job.state === "failed") return ru ? "Ошибка" : "Failed";
     if (job.state === "cancelled") return ru ? "Отменено" : "Cancelled";
     if (job.result?.status === "conflicts") return ru ? "Противоречия" : "Conflicts";
+    if (job.result && needsClarification(job.result)) return ru ? "Нужно уточнить" : "Needs clarification";
     if (job.result?.status === "incomplete") return ru ? "Неполная проверка" : "Incomplete";
     return ru ? "Проверено" : "Checked";
   }

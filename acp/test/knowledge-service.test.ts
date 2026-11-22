@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { KnowledgeCheckService } from "../src/knowledge/service.js";
+import { explainIncomplete, KnowledgeCheckService } from "../src/knowledge/service.js";
 import { parseKnowledgeCheckRequest } from "../src/knowledge/request.js";
 import { isKnowledgeCheckResult, MAX_KNOWLEDGE_DOCUMENT_CHARS, type KnowledgeCheckCoverage } from "../src/knowledge/contract.js";
 import type { KnowledgeSnapshot, KnowledgeSearch } from "../src/knowledge/evidence.js";
@@ -172,6 +172,15 @@ describe("retrieval plus actual model invocation", () => {
       explanation: uncertainty.explanation,
     }]);
     assert.equal(isKnowledgeCheckResult(result), true);
+  });
+  it("never returns an incomplete verdict without a recorded reason", () => {
+    const base = { status: "incomplete" as const, path: "wiki/a.md", documentHash: "x", modelRef: "m", checkedSources: 1, conflicts: [], notices: [] };
+    assert.deepEqual(explainIncomplete(base, "ru").notices, ["Проверка не смогла подтвердить чистый результат по незаписанной причине; повторите её."]);
+    const uncertain = { ...base, uncertainties: [{ draft: { path: "wiki/a.md", quote: "a", startLine: 1, endLine: 1 },
+      existing: { path: "wiki/b.md", quote: "b", startLine: 1, endLine: 1 }, explanation: "e" }] };
+    assert.equal(explainIncomplete(uncertain, "en"), uncertain);
+    const clear = { ...base, status: "clear" as const };
+    assert.equal(explainIncomplete(clear, "en"), clear);
   });
   it("keeps independent established conflicts visible alongside an uncertain pair", async () => {
     const initial = snapshot();

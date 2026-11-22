@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { KnowledgeCheckCoverage, KnowledgeCheckResult } from "../../../acp/src/knowledge/contract";
-import { knowledgeCheckReportText } from "./wiki-consistency-report-text";
+import { knowledgeCheckReportText, needsClarification } from "./wiki-consistency-report-text";
 
 const result = (extra: Partial<KnowledgeCheckResult> = {}): KnowledgeCheckResult => ({
   status: "clear", path: "wiki/policy.md", documentHash: "fixture", modelRef: "fixture/judge",
@@ -149,5 +149,18 @@ describe("Wiki consistency report language", () => {
     const english = knowledgeCheckReportText({ ...value, reportLanguage: "en" }, false, false, true);
     expect(english.reviewed).toContain("Findings apply to the saved document version");
     expect(english.draftLabel).toBe("Document at check time");
+  });
+});
+
+describe("Wiki consistency clarification state", () => {
+  const uncertainty = { draft: { path: "wiki/a.md", quote: "a", startLine: 1, endLine: 1 },
+    existing: { path: "wiki/b.md", quote: "b", startLine: 1, endLine: 1 }, explanation: "e" };
+  it("labels an incomplete result caused only by uncertainties as needing clarification", () => {
+    const value = result({ reportLanguage: "ru", status: "incomplete", uncertainties: [uncertainty] });
+    expect(needsClarification(value)).toBe(true);
+    expect(knowledgeCheckReportText(value).summary).toBe("Некоторые утверждения нужно уточнить, прежде чем проверка станет чистой");
+    expect(needsClarification({ ...value, notices: ["x"] })).toBe(false);
+    expect(needsClarification({ ...value, uncertainties: [] })).toBe(false);
+    expect(needsClarification({ ...value, status: "conflicts" })).toBe(false);
   });
 });

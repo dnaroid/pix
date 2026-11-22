@@ -495,3 +495,24 @@ test("a partially built semantic index reports its latest coverage once with an 
   assert.equal(partial.length, 1);
   assert.ok(partial[0]!.includes(`${indexed}/2000`));
 });
+
+test("adding, removing or swapping report/stamp metadata on a related page keeps the comparison current", async t => {
+  const result = (status: "clear" | "incomplete") => ({ status, path: "wiki/policy.md",
+    documentHash: createHash("sha256").update(policy).digest("hex"), modelRef: "test/judge",
+    checkedSources: 1, conflicts: [], notices: [] });
+  const stamp = () => stampKnowledgeCheck(policy, result("clear"), "2026-01-01T00:00:00.000Z");
+  const report = () => recordKnowledgeCheck(policy, result("incomplete"), "2026-01-01T00:00:00.000Z");
+  const cases: [string, () => Promise<string>, () => Promise<string>][] = [
+    ["first report", async () => policy, report], ["first stamp", async () => policy, stamp],
+    ["report replaces stamp", stamp, report], ["stamp replaces report", report, stamp],
+    ["metadata removed", report, async () => policy],
+  ];
+  for (const [name, before, after] of cases) await t.test(name, async child => {
+    const input = await project(child);
+    await put(input.cwd, "wiki/policy.md", await before());
+    const snapshot = await collectKnowledgeEvidence(input, search, signal());
+    assert.equal(snapshot.complete, true);
+    await put(input.cwd, "wiki/policy.md", await after());
+    assert.equal(await snapshot.current(signal()), true);
+  });
+});

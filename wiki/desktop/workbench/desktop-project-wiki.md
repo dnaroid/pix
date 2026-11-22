@@ -569,6 +569,12 @@ make the check incomplete; independently valid findings can still be shown.
   visible when other parts of the check were incomplete.
 - **Consistency check is incomplete** preserves the draft and reports missing
   coverage or a failed check. It never automatically counts as a clear result.
+  An incomplete result always carries a reason: grounded uncertainties, or a
+  generic notice when no other diagnostic exists. When grounded uncertainties
+  are its only cause, the check queue labels it **Needs clarification**
+  (**Нужно уточнить**) and the report summary reads "Some claims need
+  clarification before the check can be clear" instead of the generic
+  **Incomplete** label.
 
 The report is a collapsible document in both Preview and Edit, and in the
 retained sidebar task. Its summary keeps status, counts and actions accessible
@@ -630,14 +636,17 @@ retains Preview's dirty-draft protection, so links are disabled while the draft
 is dirty; quoted evidence remains visible in the report.
 
 Before returning a result, the service revalidates the Wiki corpus, Wiki
-configuration, the raw hash of the draft's saved baseline and the evidence text
+configuration, the raw hash of the draft's saved baseline and the body text
 of selected source files. The corpus fence compares every Markdown page's body
 without app-owned report/stamp metadata (cached by unchanged file metadata), and
-selected sources compare their line-preserving evidence text. Body edits,
+related evidence pages compare their body with that metadata stripped too; the
+checked page and configuration keep raw identity. Body edits,
 additions, removals and renames, including of previously unselected pages,
 invalidate the result. A report or decision written to another page (for example
 by a `wiki_conflicts` recheck from a session), a `touch` or an identical atomic
-rewrite does not. Pages unreadable as evidence fall back to file metadata.
+rewrite does not, and neither does adding, removing or swapping report/stamp
+metadata on a related page (for example a batch check recording the previous
+page). Pages unreadable as evidence fall back to file metadata.
 Incomplete corpus validation also prevents a clear result.
 Draft and project ownership guards discard stale or cancelled pre-save replies;
 manual jobs retain their own captured file identity through Preview navigation.

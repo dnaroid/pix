@@ -46,6 +46,7 @@ const MESSAGES = {
   resultExtraFields: ["The comparison result contains unsupported fields.", "Результат сравнения содержит неподдерживаемые поля."],
   conflictLimit: ["The comparison exceeded the conflict limit; remaining findings were not validated.", "Превышен лимит противоречий; остальные результаты не проверены."],
   uncertaintyLimit: ["The comparison exceeded the uncertainty limit.", "Превышен лимит сообщений о неопределённости."],
+  incompleteUnexplained: ["The check could not establish a clear result for an unrecorded reason; run it again.", "Проверка не смогла подтвердить чистый результат по незаписанной причине; повторите её."],
   uncertaintyInvalid: ["The comparison model returned an invalid uncertainty entry.", "Модель сравнения вернула некорректное сообщение о неопределённости."],
   outcomeAmbiguous: ["The model classified the same grounded pair as both a conflict and an uncertainty; the uncertainty was retained.", "Модель отнесла одну пару утверждений и к противоречиям, и к неопределённостям; сохранена неопределённость."],
   reviewedSourcesInvalid: ["The reviewed source passages could not be represented within the report limits.", "Не удалось представить проверенные фрагменты источников в пределах ограничений отчёта."],

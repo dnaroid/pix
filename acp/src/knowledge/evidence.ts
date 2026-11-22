@@ -272,12 +272,13 @@ export async function collectKnowledgeEvidence(input: KnowledgeCheckInput, searc
   if (draftContent.length > MAX_DRAFT_CHARS) throw new KnowledgeReportError("documentInvalid");
   const root = await realpath(resolve(requestedCwd));
   const rootIdentity = await directory(root, ".");
-  // Config and the checked page keep raw identity; related pages compare their evidence text,
-  // which preserves line numbers but ignores app-owned report/stamp rewrites.
+  // Config and the checked page keep raw identity; related pages compare only their body.
+  // Adding, removing or swapping app-owned report/stamp metadata (e.g. a batch check
+  // recording the previous page) shifts raw lines but must not invalidate the comparison.
   const revisions = new Map<string, { hash: string | null; evidence: boolean }>();
   const cache: KnowledgeInventoryCache = new Map();
   const identity = (content: { text: string; hash: string } | undefined, evidence: boolean) =>
-    content ? evidence ? sha(knowledgeEvidenceText(content.text)) : content.hash : null;
+    content ? evidence ? sha(stripKnowledgeCheckStamp(content.text)) : content.hash : null;
   async function snapshot(name: string, evidence = false): Promise<{ text: string; hash: string } | undefined> {
     const content = await file(root, name, signal);
     revisions.set(name, { hash: identity(content, evidence), evidence });

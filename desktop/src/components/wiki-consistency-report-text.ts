@@ -10,6 +10,7 @@ const COPY = {
       conflicts: "Potential contradictions found",
       incomplete: "Consistency check is incomplete",
     },
+    clarification: "Some claims need clarification before the check can be clear",
     cancelCheck: "Cancel check",
     checkAgain: "Check again",
     saveAnyway: "Save anyway",
@@ -56,6 +57,7 @@ const COPY = {
       conflicts: "Найдены возможные противоречия",
       incomplete: "Проверка на противоречия выполнена не полностью",
     },
+    clarification: "Некоторые утверждения нужно уточнить, прежде чем проверка станет чистой",
     cancelCheck: "Отменить проверку",
     checkAgain: "Проверить снова",
     saveAnyway: "Всё равно сохранить",
@@ -101,6 +103,11 @@ function russianOne(count: number): boolean {
 function russianPlural(count: number, one: string, few: string, many: string): string {
   if (russianOne(count)) return one;
   return count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 12 || count % 100 > 14) ? few : many;
+}
+
+/** Incomplete only because grounded uncertainties await clarification, with no other diagnostics. */
+export function needsClarification(result: KnowledgeCheckResult): boolean {
+  return result.status === "incomplete" && (result.uncertainties?.length ?? 0) > 0 && result.notices.length === 0;
 }
 
 /** UI copy follows the language actually used for this result, including inherited settings. */
@@ -153,6 +160,6 @@ export function knowledgeCheckReportText(result?: KnowledgeCheckResult, checking
     : `This report retains ${retained} of the ${coverage!.checkedPassages} reviewed passages.`
     : "";
   return { ...copy, draftLabel: stale ? copy.checkedDraftLabel : copy.draftLabel,
-    summary: queued ? copy.queued : checking ? copy.checking : copy.status[result?.status ?? "incomplete"], reviewed, selection, counts,
+    summary: queued ? copy.queued : checking ? copy.checking : (result && needsClarification(result) ? copy.clarification : copy.status[result?.status ?? "incomplete"]), reviewed, selection, counts,
     chunkReview, retainedEvidence };
 }
