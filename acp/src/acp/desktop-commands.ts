@@ -16,6 +16,7 @@ export const PIX_RELOAD_SESSION_METHOD = "pix/session/reload";
 export const PIX_REQUEST_HISTORY_METHOD = "pix/request-history";
 export const PIX_RESUME_PATH_METHOD = "pix/session/resume_path";
 export const PIX_SESSION_HISTORY_METHOD = "pix/session/history";
+export const PIX_SESSION_SKILL_READS_METHOD = "pix/session/skill_reads";
 export const PIX_TOOL_RESULT_METHOD = "pix/session/tool_result";
 export const PIX_SESSION_IMAGE_METHOD = "pix/session/image";
 export const PIX_QUEUE_STATE_METHOD = "pix/session/queue_state";
@@ -532,7 +533,7 @@ export type DesktopRegistryActionRequest = { readonly cwd: string } & (
 	| { readonly action: "refresh" | "configure" | "project-key" | "push-project-resources" | "keep-project-key" | "migrate-project-key" }
 	| { readonly action: "pull-resources" | "push-resources" }
 	| {
-		readonly action: "install" | "update" | "push" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope";
+		readonly action: "install" | "install-global" | "update" | "push" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope";
 		readonly type: DesktopRegistryResourceType;
 		readonly name: string;
 	}
@@ -905,7 +906,8 @@ export function parseDesktopRegistryActionRequest(value: unknown): DesktopRegist
 	if (value.action === "refresh" || value.action === "configure" || value.action === "project-key" || value.action === "push-project-resources" || value.action === "keep-project-key" || value.action === "migrate-project-key" || value.action === "pull-resources" || value.action === "push-resources") {
 		return { ...workspace, action: value.action };
 	}
-	if (["install", "update", "push", "uninstall", "remove", "make-local", "tags", "toggle-scope"].includes(value.action)) {
+	if (value.action === "install" || value.action === "install-global" || value.action === "update" || value.action === "push"
+		|| value.action === "uninstall" || value.action === "remove" || value.action === "make-local" || value.action === "tags" || value.action === "toggle-scope") {
 		if (
 			(value.type !== "skill" && value.type !== "agent")
 			|| typeof value.name !== "string"
@@ -916,7 +918,7 @@ export function parseDesktopRegistryActionRequest(value: unknown): DesktopRegist
 		}
 		return {
 			...workspace,
-			action: value.action as "install" | "update" | "push" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope",
+			action: value.action,
 			type: value.type,
 			name: value.name,
 		};

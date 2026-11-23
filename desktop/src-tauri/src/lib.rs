@@ -77,6 +77,7 @@ mod project_entry_drag_source;
 mod project_file_history;
 mod project_file_search;
 mod project_icon;
+mod project_onboarding;
 mod project_relocation;
 mod project_storage;
 mod project_tasks_sqlite;
@@ -1347,6 +1348,7 @@ async fn create_project_entry(
     parent: Option<String>,
     name: String,
     kind: ProjectTreeEntryKind,
+    initial_content: Option<String>,
 ) -> Result<ProjectTreeEntry, String> {
     run_blocking(move || {
         create_project_entry_from(
@@ -1354,6 +1356,7 @@ async fn create_project_entry(
             parent.as_deref().map(Path::new),
             &name,
             kind,
+            initial_content.as_deref(),
         )
     })
     .await
@@ -1462,8 +1465,10 @@ async fn git_repository_state(workspace: String) -> Result<GitRepositoryState, S
 }
 
 #[tauri::command]
-async fn git_initialize(workspace: String) -> Result<(), String> {
-    run_blocking(move || git_initialize_from(Path::new(&workspace))).await
+async fn git_initialize(workspace: String, ensure_ignores: Option<bool>) -> Result<(), String> {
+    run_blocking(move || {
+        git_initialize_from(Path::new(&workspace), ensure_ignores.unwrap_or_default())
+    }).await
 }
 
 #[tauri::command]
@@ -2520,6 +2525,7 @@ fn create_project_entry_from(
     parent: Option<&Path>,
     name: &str,
     kind: ProjectTreeEntryKind,
+    initial_content: Option<&str>,
 ) -> Result<ProjectTreeEntry, String> {
     validate_project_entry_name(name)?;
     let (root, directory) = resolve_project_directory_path(workspace, parent)?;
@@ -2528,6 +2534,22 @@ fn create_project_entry_from(
         return Err(format!("{} already exists", target.display()));
     }
     match kind {
+        ProjectTreeEntryKind::File if initial_content.is_some() => {
+            let content = initial_content.unwrap_or_default();
+            if content.len() as u64 > MAX_PROJECT_FILE_PREVIEW_BYTES {
+                return Err("initial file content is too large (maximum 2 MB)".into());
+            }
+            // Publish a complete file without replacing an entry created since
+            // the existence check or leaving an empty file after a failed write.
+            let temporary = directory.join(format!(".pix-create-{}.tmp", uuid::Uuid::new_v4()));
+            let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&temporary)
+                .map_err(|error| format!("failed to stage {}: {error}", target.display()))?;
+            let result = file.write_all(content.as_bytes()).and_then(|()| file.sync_all());
+            drop(file);
+            let result = result.and_then(|()| fs::hard_link(&temporary, &target));
+            let _ = fs::remove_file(&temporary);
+            result.map_err(|error| format!("failed to create {}: {error}", target.display()))?;
+        }
         ProjectTreeEntryKind::File => {
             fs::OpenOptions::new()
                 .write(true)
@@ -2920,11 +2942,11 @@ fn git_repository_state_from_root(root: &Path) -> Result<GitRepositoryState, Str
     })
 }
 
-fn git_initialize_from(workspace: &Path) -> Result<(), String> {
+fn git_initialize_from(workspace: &Path, ensure_ignores: bool) -> Result<(), String> {
     let root = canonical_workspace(workspace)?;
     let state = git_repository_state_from_root(&root)?;
     if state.initialized {
-        return Ok(());
+        return if ensure_ignores { git_ignore::ensure_default_ignores(&root) } else { Ok(()) };
     }
     if let Some(repository_root) = state.repository_root {
         return Err(format!(
@@ -8684,6 +8706,8 @@ pub fn run() {
             read_attachment_base64,
             project_icon::pick_project_icon_image,
             project_icon::generate_project_icon_image,
+            project_onboarding::project_onboarding_available,
+            project_onboarding::claim_project_onboarding,
             openrouter_usage::openrouter_usage,
             project_icon::save_project_icon,
             project_icon::read_project_icon,
@@ -9460,12 +9484,14 @@ mod tests {
             Some(Path::new("src")),
             "notes.txt",
             ProjectTreeEntryKind::File,
+            Some("Starter\n"),
         )
         .expect("create project file");
         assert_eq!(created.path, "src/notes.txt");
+        assert_eq!(fs::read_to_string(workspace.join(&created.path)).unwrap(), "Starter\n");
 
         let directory =
-            create_project_entry_from(&workspace, None, "docs", ProjectTreeEntryKind::Directory)
+            create_project_entry_from(&workspace, None, "docs", ProjectTreeEntryKind::Directory, None)
                 .expect("create project directory");
         assert_eq!(directory.path, "docs");
 
@@ -9792,7 +9818,7 @@ mod tests {
         assert!(!before.initialized);
         assert!(before.repository_root.is_none());
 
-        git_initialize_from(&workspace).expect("initialize Git repository");
+        git_initialize_from(&workspace, false).expect("initialize Git repository");
         let after = git_repository_state_from(&workspace).expect("inspect initialized repository");
         assert!(after.initialized);
         assert_eq!(
@@ -9812,7 +9838,7 @@ mod tests {
         assert_eq!(snapshot.branch, "main");
         assert!(snapshot.head.is_none());
         fs::write(workspace.join(".gitignore"), "custom\n").expect("replace .gitignore");
-        git_initialize_from(&workspace).expect("reinitialization is idempotent");
+        git_initialize_from(&workspace, false).expect("reinitialization is idempotent");
         assert_eq!(
             fs::read_to_string(workspace.join(".gitignore")).expect("kept .gitignore"),
             "custom\n"
@@ -9823,7 +9849,7 @@ mod tests {
         let nested_state = git_repository_state_from(&nested).expect("inspect nested project");
         assert!(!nested_state.initialized);
         assert_eq!(nested_state.repository_root, after.repository_root);
-        assert!(git_initialize_from(&nested)
+        assert!(git_initialize_from(&nested, false)
             .expect_err("nested Git initialization should fail")
             .contains("inside the Git repository"));
 

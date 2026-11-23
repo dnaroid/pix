@@ -6,9 +6,11 @@ import { KNOWLEDGE_STAMP_PREFIX, readKnowledgeAutoCheckAttempt, recordKnowledgeA
 import type { ManualKnowledgeCheckInput, ProjectKnowledgeJob } from "./project-knowledge-queue.svelte";
 import {
   createWikiAutoCheckScheduler, MAX_WIKI_AUTO_CHECK_RAW_BYTES,
-  WIKI_AUTO_CHECK_POLL_MS, WIKI_AUTO_CHECK_SETTLE_MS,
+  WIKI_AUTO_CHECK_POLL_MS, WIKI_AUTO_CHECK_SETTLE_MS, WIKI_AUTO_CHECK_TICK_TIMEOUT_MS,
   type WikiAutoCheckConfiguration, type WikiCheckInventoryPage, type WikiCheckInventoryRequest,
 } from "./wiki-auto-check.svelte";
+import { WIKI_AUTO_CHECK_INCOMPLETE_RETRY_MS, WIKI_AUTO_CHECK_TRANSIENT_RETRY_MS } from "./wiki-auto-check-retry";
+import { reportMessage } from "../../../acp/src/knowledge/report-language";
 
 const PASS = "10000000-0000-4000-8000-000000000001";
 const NEXT_PASS = "10000000-0000-4000-8000-000000000002";
@@ -86,9 +88,9 @@ function fixture(inventoryLimit?: number) {
     setReady(value: boolean) { ready = value; },
     run(id: number) { jobs = jobs.map(job => job.id === id ? { ...job, state: "running" } : job); },
     manual(path: string, content: string) { return enqueue({ path, content, expectedContent: content, persistStamp: true }); },
-    async complete(id: number, status: "clear" | "incomplete" = "incomplete", persist = true) {
+    async complete(id: number, status: "clear" | "incomplete" = "incomplete", persist = true, extra: Partial<KnowledgeCheckResult> = {}) {
       const job = jobs.find(job => job.id === id)!;
-      const checked = result(job.path, job.content, status);
+      const checked = { ...result(job.path, job.content, status), ...extra };
       let recorded = false;
       if (persist && files.get(job.path)?.content === job.expectedContent) {
         let saved = await recordKnowledgeCheck(job.content, checked);
@@ -192,7 +194,7 @@ describe("project-owned automatic Wiki checks", () => {
     item.scheduler.dispose();
   });
 
-  it("does not recheck its own report write or a terminal failed version, including after restart", async () => {
+  it("does not recheck its own report write, nor a checkpointed failed version after restart", async () => {
     const item = fixture(); item.put("wiki/page.md", "Page body");
     await begin(item);
     await item.complete(item.jobs[0]!.id);
@@ -226,6 +228,71 @@ describe("project-owned automatic Wiki checks", () => {
     item.restart(); await advance(WIKI_AUTO_CHECK_SETTLE_MS);
     expect(item.enqueue).toHaveBeenCalledTimes(1);
     expect(item.scheduler.view.completed).toBe(1);
+    item.scheduler.dispose();
+  });
+
+  it("retries a failed version twice after pauses and then keeps its checkpoint", async () => {
+    const item = fixture(); item.put("wiki/page.md", "Page"); await begin(item);
+    await item.fail(item.jobs[0]!.id);
+    // Its own checkpoint write is observed, but the retry waits for its pause.
+    await advance(WIKI_AUTO_CHECK_TRANSIENT_RETRY_MS[0] - 1_000);
+    expect(item.enqueue).toHaveBeenCalledTimes(1);
+    expect(item.scheduler.view.completed).toBe(0);
+    await advance(1_000 + WIKI_AUTO_CHECK_SETTLE_MS);
+    expect(item.enqueue).toHaveBeenCalledTimes(2);
+    await item.fail(item.jobs.at(-1)!.id);
+    await advance(WIKI_AUTO_CHECK_TRANSIENT_RETRY_MS[1] - 1_000);
+    expect(item.enqueue).toHaveBeenCalledTimes(2);
+    await advance(1_000 + WIKI_AUTO_CHECK_SETTLE_MS);
+    expect(item.enqueue).toHaveBeenCalledTimes(3);
+    await item.fail(item.jobs.at(-1)!.id);
+    await advance(WIKI_AUTO_CHECK_INCOMPLETE_RETRY_MS * 2);
+    expect(item.enqueue).toHaveBeenCalledTimes(3);
+    expect(item.scheduler.view.completed).toBe(1);
+    item.scheduler.dispose();
+  });
+
+  it("retries a race-caused incomplete result as transient and any other incomplete result once", async () => {
+    const item = fixture(); item.put("wiki/race.md", "Race"); await begin(item);
+    await item.complete(item.jobs[0]!.id, "incomplete", true, { notices: [reportMessage("ru", "corpusChanged")] });
+    await advance(WIKI_AUTO_CHECK_TRANSIENT_RETRY_MS[0] + WIKI_AUTO_CHECK_SETTLE_MS);
+    expect(item.enqueue).toHaveBeenCalledTimes(2);
+    // A different incomplete reason after transient retries still gets its single later retry.
+    await item.complete(item.jobs.at(-1)!.id);
+    await advance(WIKI_AUTO_CHECK_INCOMPLETE_RETRY_MS - 1_000);
+    expect(item.enqueue).toHaveBeenCalledTimes(2);
+    await advance(1_000 + WIKI_AUTO_CHECK_SETTLE_MS);
+    expect(item.enqueue).toHaveBeenCalledTimes(3);
+    await item.complete(item.jobs.at(-1)!.id);
+    await advance(WIKI_AUTO_CHECK_INCOMPLETE_RETRY_MS * 2);
+    expect(item.enqueue).toHaveBeenCalledTimes(3);
+    expect(item.scheduler.view).toMatchObject({ completed: 1, total: 1, queued: 0 });
+    item.scheduler.dispose();
+  });
+
+  it("never retries a version that needs clarification", async () => {
+    const item = fixture(); item.put("wiki/page.md", "Page"); await begin(item);
+    const quote = { sourceId: "S1", draftQuote: "Page", existingQuote: "Other", explanation: "Condition missing" };
+    // The fixture report writer cannot ground this synthetic uncertainty; the outcome alone drives retries.
+    await item.complete(item.jobs[0]!.id, "incomplete", false, { notices: [], uncertainties: [quote] as never });
+    await advance(WIKI_AUTO_CHECK_INCOMPLETE_RETRY_MS * 2);
+    expect(item.enqueue).toHaveBeenCalledTimes(1);
+    expect(item.scheduler.view.completed).toBe(1);
+    item.scheduler.dispose();
+  });
+
+  it("drops a scheduled retry when the body changes or the app restarts", async () => {
+    const item = fixture(); item.put("wiki/page.md", "Page"); await begin(item);
+    await item.fail(item.jobs[0]!.id);
+    item.put("wiki/page.md", "Edited page"); await advance(WIKI_AUTO_CHECK_POLL_MS + WIKI_AUTO_CHECK_SETTLE_MS);
+    expect(item.enqueue).toHaveBeenCalledTimes(2);
+    await item.complete(item.jobs.at(-1)!.id, "clear");
+    await advance(WIKI_AUTO_CHECK_TRANSIENT_RETRY_MS[1] * 2);
+    expect(item.enqueue).toHaveBeenCalledTimes(2);
+    item.put("wiki/other.md", "Other"); await advance(WIKI_AUTO_CHECK_POLL_MS + WIKI_AUTO_CHECK_SETTLE_MS);
+    await item.fail(item.jobs.at(-1)!.id);
+    item.restart(); await advance(WIKI_AUTO_CHECK_TRANSIENT_RETRY_MS[1] * 2);
+    expect(item.enqueue).toHaveBeenCalledTimes(3);
     item.scheduler.dispose();
   });
 
@@ -349,6 +416,26 @@ describe("project-owned automatic Wiki checks", () => {
     expect(item.readConfig).toHaveBeenCalledTimes(2);
     expect(item.enqueue.mock.calls.map(([input]) => input.path)).toEqual(["wiki/page.md"]);
     item.scheduler.dispose();
+  });
+
+  it("restarts a pass whose step never settles without a reset, and ignores the late reply", async () => {
+    const item = fixture(), hung = deferred<WikiCheckInventoryPage>();
+    item.put("wiki/page.md", "Page");
+    // An inventory invoke that ignores abort and would otherwise keep the generation busy forever.
+    item.listDirectory.mockReturnValueOnce(hung.promise);
+    item.scheduler.start(); await advance(WIKI_AUTO_CHECK_POLL_MS * 4);
+    expect(item.listDirectory).toHaveBeenCalledTimes(1);
+    expect(item.enqueue).not.toHaveBeenCalled();
+    await advance(WIKI_AUTO_CHECK_TICK_TIMEOUT_MS);
+    await advance(WIKI_AUTO_CHECK_SETTLE_MS);
+    expect(item.listDirectory.mock.calls[0]![1].aborted).toBe(true);
+    expect(item.reportError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining("did not finish") }));
+    expect(item.enqueue.mock.calls.map(([input]) => input.path)).toEqual(["wiki/page.md"]);
+    hung.resolve({ entries: [], nextCursor: "late-cursor" }); await advance(WIKI_AUTO_CHECK_SETTLE_MS);
+    expect(item.releaseInventory).toHaveBeenCalledWith("/project", "late-cursor");
+    expect(item.enqueue).toHaveBeenCalledTimes(1);
+    item.scheduler.dispose();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("releases late native cursors and consumes empty pages without losing later entries", async () => {

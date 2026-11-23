@@ -1,5 +1,8 @@
 import type { TranscriptItem } from "./transcript-types";
 
+export type SessionSkillsResult = { names: string[]; source: "file" | "chat" | "error" };
+export type FindSessionSkills = (sessionId: string, signal: AbortSignal) => Promise<SessionSkillsResult>;
+
 /** Collect observed loads from the transcript already in memory, in transcript order. */
 export function loadedSessionSkills(items: readonly TranscriptItem[]): string[] {
   const names = new Set<string>();

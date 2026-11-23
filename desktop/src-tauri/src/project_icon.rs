@@ -374,6 +374,7 @@ fn project_pi_directory(root: &Path) -> Result<PathBuf, String> {
 pub(crate) fn save_project_icon_from(
     workspace: &Path,
     data_base64: &str,
+    only_if_missing: bool,
 ) -> Result<String, String> {
     let bytes = BASE64
         .decode(data_base64.trim())
@@ -386,6 +387,30 @@ pub(crate) fn save_project_icon_from(
     let root = crate::canonical_workspace(workspace)?;
     let directory = project_pi_directory(&root)?;
     let target = directory.join(format.file_name());
+    let relative = format!(".pi/{}", format.file_name());
+    if only_if_missing {
+        let mut already_saved = false;
+        for name in PROJECT_ICON_FILE_NAMES {
+            let other = directory.join(name);
+            match fs::symlink_metadata(other) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Ok(metadata)
+                    if *name == format.file_name()
+                        && metadata.is_file()
+                        && read_project_icon_from(&root, &relative)
+                            .is_ok_and(|icon| icon.data_base64 == BASE64.encode(&bytes)) =>
+                {
+                    already_saved = true;
+                }
+                Ok(_) => return Err("Setup cannot replace an existing project icon".into()),
+                Err(error) => return Err(format!("Could not check for an existing icon: {error}")),
+            }
+        }
+        // The earlier attempt may have saved the same image but failed to save config.
+        if already_saved {
+            return Ok(relative);
+        }
+    }
     if fs::symlink_metadata(&target).is_ok_and(|metadata| !metadata.is_file()) {
         return Err(format!(".pi/{} is not a regular file", format.file_name()));
     }
@@ -401,7 +426,11 @@ pub(crate) fn save_project_icon_from(
             .open(&temp)?;
         file.write_all(&bytes)?;
         file.sync_all()?;
-        fs::rename(&temp, &target)
+        if only_if_missing {
+            fs::hard_link(&temp, &target)
+        } else {
+            fs::rename(&temp, &target)
+        }
     })();
     if let Err(error) = write {
         let _ = fs::remove_file(&temp);
@@ -409,6 +438,10 @@ pub(crate) fn save_project_icon_from(
             "failed to save .pi/{}: {error}",
             format.file_name()
         ));
+    }
+    if only_if_missing {
+        let _ = fs::remove_file(&temp);
+        return Ok(relative);
     }
     // Keep exactly one canonical icon so stale variants cannot reappear.
     for name in PROJECT_ICON_FILE_NAMES {
@@ -420,7 +453,7 @@ pub(crate) fn save_project_icon_from(
             let _ = fs::remove_file(&other);
         }
     }
-    Ok(format!(".pi/{}", format.file_name()))
+    Ok(relative)
 }
 
 /// Store a previewed logo as the canonical `.pi/project-icon.<ext>` file and
@@ -429,8 +462,16 @@ pub(crate) fn save_project_icon_from(
 pub(crate) async fn save_project_icon(
     workspace: String,
     data_base64: String,
+    only_if_missing: Option<bool>,
 ) -> Result<String, String> {
-    crate::run_blocking(move || save_project_icon_from(Path::new(&workspace), &data_base64)).await
+    crate::run_blocking(move || {
+        save_project_icon_from(
+            Path::new(&workspace),
+            &data_base64,
+            only_if_missing.unwrap_or_default(),
+        )
+    })
+    .await
 }
 
 pub(crate) fn read_project_icon_from(
@@ -519,7 +560,8 @@ mod tests {
         let workspace = TestDirectory::new("save");
         fs::create_dir(workspace.0.join(".pi")).unwrap();
         fs::write(workspace.0.join(".pi/project-icon.svg"), b"<svg/>").unwrap();
-        let path = save_project_icon_from(&workspace.0, &BASE64.encode(PNG)).expect("save icon");
+        let path =
+            save_project_icon_from(&workspace.0, &BASE64.encode(PNG), false).expect("save icon");
         assert_eq!(path, ".pi/project-icon.png");
         assert!(!workspace.0.join(".pi/project-icon.svg").exists());
         let image = read_project_icon_from(&workspace.0, &path).expect("read icon");
@@ -541,10 +583,30 @@ mod tests {
     #[test]
     fn creates_pi_directory_and_rejects_non_images() {
         let workspace = TestDirectory::new("create");
-        assert!(save_project_icon_from(&workspace.0, &BASE64.encode(b"not an image")).is_err());
+        assert!(
+            save_project_icon_from(&workspace.0, &BASE64.encode(b"not an image"), false).is_err()
+        );
         assert_eq!(
-            save_project_icon_from(&workspace.0, &BASE64.encode(PNG)).unwrap(),
+            save_project_icon_from(&workspace.0, &BASE64.encode(PNG), false).unwrap(),
             ".pi/project-icon.png"
+        );
+    }
+
+    #[test]
+    fn setup_icon_only_reuses_an_identical_image() {
+        let workspace = TestDirectory::new("setup");
+        let first = BASE64.encode(b"<svg/>");
+        let second = BASE64.encode(b"<svg>different</svg>");
+        assert_eq!(
+            save_project_icon_from(&workspace.0, &first, true).unwrap(),
+            ".pi/project-icon.svg"
+        );
+        assert!(save_project_icon_from(&workspace.0, &first, true).is_ok());
+        assert!(save_project_icon_from(&workspace.0, &second, true).is_err());
+        assert!(save_project_icon_from(&workspace.0, &BASE64.encode(PNG), true).is_err());
+        assert_eq!(
+            fs::read(workspace.0.join(".pi/project-icon.svg")).unwrap(),
+            b"<svg/>"
         );
     }
 

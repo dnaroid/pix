@@ -126,7 +126,8 @@ export function createDesktopStatusBarViewModel(options: {
 
     return {
       showSkeletons,
-      findSessionSkills: !draft && sessionId && !historyLoading ? options.findSessionSkills : undefined,
+      findSessionSkills: options.findSessionSkills,
+      skillsSessionId: !draft && sessionId && !historyLoading ? sessionId : undefined,
       configOptions: displayConfigOptions,
       changingConfig,
       promptRunning,

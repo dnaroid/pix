@@ -150,6 +150,7 @@ export class DesktopRegistryService {
 					case "pull-resources": await syncInstalledResources(executor, ctx, "pull"); break;
 					case "push-resources": await syncInstalledResources(executor, ctx, "push"); break;
 					case "install": await installResource(executor, ctx, request.type, request.name); break;
+					case "install-global": await installResource(executor, ctx, request.type, request.name, signal); break;
 					case "update": await updateResource(executor, ctx, request.type, request.name); break;
 					case "push": await pushResource(executor, ctx, request.type, request.name); break;
 					case "uninstall": await uninstallResource(ctx, request.type, request.name); break;

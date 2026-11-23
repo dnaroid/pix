@@ -19,7 +19,7 @@ function fixture(source?: string) {
       const created = args.parent ? `${String(args.parent)}/${String(args.name)}` : String(args.name);
       if (directories.has(created) || files.has(created)) throw new Error("Already exists");
       if (args.kind === "directory") directories.add(created);
-      else files.set(created, "");
+      else files.set(created, String(args.initialContent ?? ""));
       return { path: created, name: args.name, kind: args.kind };
     }
     if (command === "list_project_directory") {
@@ -29,11 +29,6 @@ function fixture(source?: string) {
     if (command === "read_project_file") {
       if (!files.has(path)) throw new Error("Missing file");
       return { path, content: files.get(path) };
-    }
-    if (command === "write_project_file") {
-      if (files.get(path) !== args.expectedContent) throw new Error("Changed while editing");
-      files.set(path, String(args.content));
-      return { path, content: args.content };
     }
     throw new Error(`Unexpected command: ${command}`);
   });
@@ -99,7 +94,7 @@ describe("project Wiki lifecycle", () => {
     f.send.mockClear();
     await f.controller.initialize();
     expect(f.files.get("docs/game/overview/home.md")).toBe("authored elsewhere");
-    expect(f.send.mock.calls.some(([command]) => command === "write_project_file")).toBe(false);
+    expect(f.send.mock.calls.some(([command]) => command === "create_project_entry")).toBe(false);
     f.controller.dispose();
   });
 

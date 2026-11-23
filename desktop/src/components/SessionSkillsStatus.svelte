@@ -1,12 +1,30 @@
 <script lang="ts">
   import GraduationCap from "@lucide/svelte/icons/graduation-cap";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import { onDestroy } from "svelte";
+  import type { FindSessionSkills, SessionSkillsResult } from "../lib/session-skills";
   import StatusBarPopover from "./StatusBarPopover.svelte";
 
-  let { findSkills }: { findSkills: () => string[] } = $props();
-  let names = $state<string[]>([]);
+  let { sessionId, findSkills }: {
+    sessionId: string;
+    findSkills: FindSessionSkills;
+  } = $props();
+  let result = $state<SessionSkillsResult>();
+  let loading = $state(false);
+  const lifetime = new AbortController();
+  onDestroy(() => { lifetime.abort(); });
+
+  async function search() {
+    if (loading) return;
+    loading = true;
+    const next = await findSkills(sessionId, lifetime.signal);
+    if (lifetime.signal.aborted) return;
+    result = next;
+    loading = false;
+  }
 </script>
 
-<StatusBarPopover label="Loaded skills" onOpen={() => { names = findSkills(); }}>
+<StatusBarPopover label="Loaded skills" onOpen={() => { void search(); }}>
   {#snippet trigger({ open, toggle, id })}
     <button
       class={[
@@ -26,15 +44,25 @@
 
   <div class="rounded-md border border-border bg-popover text-popover-foreground shadow-md">
     <h2 class="border-b border-border px-2.5 py-1.5 text-xs font-semibold">Loaded skills</h2>
-    {#if names.length}
-      <ul class="px-2.5 py-1.5 font-mono">
-        {#each names as name (name)}
-          <li class="break-words py-0.5">{name}</li>
-        {/each}
-      </ul>
-      <p class="border-t border-border px-2.5 py-1.5 text-muted-foreground">From loaded chat history</p>
-    {:else}
-      <p class="px-2.5 py-1.5 text-muted-foreground">No skill loads found in the loaded chat history.</p>
+    {#if loading}
+      <p class="flex items-center gap-1.5 px-2.5 py-1.5 text-muted-foreground" role="status">
+        <LoaderCircle class="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+        Searching session…
+      </p>
+    {:else if result}
+      {#if result.names.length}
+        <ul class="max-h-60 overflow-y-auto px-2.5 py-1.5 font-mono">
+          {#each result.names as name (name)}
+            <li class="break-words py-0.5">{name}</li>
+          {/each}
+        </ul>
+      {:else if result.source !== "error"}
+        <p class="px-2.5 py-1.5 text-muted-foreground">No skill loads found.</p>
+      {/if}
+      <p class="border-t border-border px-2.5 py-1.5 text-muted-foreground">
+        {result.source === "file" ? "From the session file and loaded chat" : result.source === "chat"
+          ? "From loaded chat history" : "Could not search the session file. Showing loaded chat only."}
+      </p>
     {/if}
   </div>
 </StatusBarPopover>

@@ -195,7 +195,7 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
     return saveSettings({ color, icon: { kind: "keep" } });
   }
 
-  async function saveSettings(draft: ProjectSettingsDraft): Promise<string | undefined> {
+  async function saveSettings(draft: ProjectSettingsDraft, onboarding = false): Promise<string | undefined> {
     const workspace = options.workspace();
     if (!workspace) return "Open a project before changing project settings.";
     const generation = ++colorSaveGeneration;
@@ -204,7 +204,7 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
     try {
       // The image is written first; config only references it after success.
       const iconPath = icon.kind === "image"
-        ? await invoke<string>("save_project_icon", { workspace, dataBase64: icon.image.dataBase64 })
+        ? await invoke<string>("save_project_icon", { workspace, dataBase64: icon.image.dataBase64, onlyIfMissing: onboarding })
         : undefined;
       if (generation !== colorSaveGeneration || options.workspace() !== workspace) {
         return "The active project changed before settings could be saved.";
@@ -226,9 +226,11 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
         return "The active project changed before settings could be saved.";
       }
       for (let attempt = 0; attempt < 3; attempt += 1) {
+        const existingIcon = onboarding ? projectIconPathFromWorkspaceConfig(current?.content) : undefined;
+        if (existingIcon && existingIcon !== iconPath) return "Setup cannot replace the configured project icon.";
         const content = workspaceConfigWithProjectSettings(
           current?.content,
-          icon.kind === "keep" ? { color } : { color, icon: iconPath },
+          { ...(!onboarding ? { color } : {}), ...(icon.kind !== "keep" ? { icon: iconPath } : {}) },
         );
         const result = await invoke<{ written: boolean; document: ProjectFilePreview | null }>(
           "write_project_workspace_config_if_unchanged",
@@ -259,6 +261,12 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
       if (generation !== colorSaveGeneration || options.workspace() !== workspace) return undefined;
       return error instanceof Error ? error.message : String(error);
     }
+  }
+
+  async function saveOnboardingIcon(target: string, image: ProjectIconImage): Promise<void> {
+    if (options.workspace() !== target) throw new Error("The active project changed.");
+    const error = await saveSettings({ color: undefined, icon: { kind: "image", image } }, true);
+    if (error) throw new Error(error);
   }
 
   async function pickIcon(): Promise<ProjectIconImage | undefined> {
@@ -336,6 +344,7 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
     refreshColors,
     saveColor,
     saveSettings,
+    saveOnboardingIcon,
     pickIcon,
     generateIcon,
     loadPreferences,

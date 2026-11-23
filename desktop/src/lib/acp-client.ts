@@ -210,6 +210,10 @@ export class AcpClient {
     return this.pix.sessionHistory(sessionId, full, cursor);
   }
 
+  sessionSkillReads(sessionId: string, signal: AbortSignal): Promise<string[] | null> {
+    return this.pix.sessionSkillReads(sessionId, signal);
+  }
+
   toolResult(sessionId: string, toolCallId: string): Promise<SessionUpdate> {
     return this.pix.toolResult(sessionId, toolCallId);
   }
@@ -342,8 +346,8 @@ export class AcpClient {
     return this.pix.queueState(sessionId);
   }
 
-  registryAction(cwd: string, action: RegistryActionRequest): Promise<RegistrySnapshot> {
-    return this.pix.registryAction(cwd, action);
+  registryAction(cwd: string, action: RegistryActionRequest, signal?: AbortSignal): Promise<RegistrySnapshot> {
+    return this.pix.registryAction(cwd, action, signal);
   }
 
   registryDiff(cwd: string, type: Exclude<RegistryResourceType, "project">, name: string): Promise<RegistryDiff> {

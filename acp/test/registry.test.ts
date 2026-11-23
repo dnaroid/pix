@@ -227,6 +227,40 @@ function item(snapshot: RegistryUiSnapshot, id: string): RegistryUiItem {
 	return found;
 }
 
+test("onboarding Registry install only uses global publications and never replaces local copies", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async t => {
+	const { project, seed, h } = await scopeFixture();
+	const svc = service();
+	const scoped = path.join(seed, "projects", "alpha", "skills", "scoped");
+	fs.mkdirSync(scoped, { recursive: true });
+	fs.writeFileSync(path.join(scoped, "SKILL.md"), "Project-only skill\n");
+	git(seed, ["add", "."]);
+	git(seed, ["commit", "-m", "Add project-only skill"]);
+	git(seed, ["push"]);
+	const install = (name: string) => svc.action({ cwd: project, action: "install-global", type: "skill", name }, h.ctx);
+	assert.match((await install("scoped")).error ?? "", /no longer available/);
+	const file = path.join(project, ".pi", "skills", "demo", "SKILL.md");
+	const rename = fs.promises.rename;
+	const fail = t.mock.method(fs.promises, "rename", async (source, destination) => {
+		if (destination === path.join(project, ".pi", "registry.jsonc")) {
+			assert.ok(fs.existsSync(file), "copy finished before the simulated provenance failure");
+			throw new Error("provenance write failed");
+		}
+		return rename(source, destination);
+	});
+	try {
+		assert.match((await install("demo")).error ?? "", /provenance write failed/);
+		assert.equal(fs.existsSync(path.dirname(file)), false, "rollback removes only the failed install");
+	} finally {
+		fail.mock.restore();
+	}
+	assert.equal((await install("demo")).error, undefined);
+	assert.equal((await install("demo")).error, undefined, "identical completed install can be retried");
+	fs.writeFileSync(file, "Local edits\n");
+	assert.match((await install("demo")).error ?? "", /cannot replace it/);
+	assert.equal(fs.readFileSync(file, "utf8"), "Local edits\n");
+	assert.equal(h.confirmations.length, 0);
+});
+
 test("supervisor Registry confirmation binds an exact publication and preserves local copies", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
 	const { project, seed, h } = await scopeFixture();
 	const svc = service();

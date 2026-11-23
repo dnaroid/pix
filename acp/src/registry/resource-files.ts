@@ -144,7 +144,9 @@ export async function hasCanonicalResourceFiles(path: string): Promise<boolean> 
 	return false;
 }
 
-export async function copyTree(source: string, destination: string, relativePath = "", mode: "resource" | "plans" = "resource"): Promise<void> {
+export async function copyTree(source: string, destination: string, relativePath = "", mode: "resource" | "plans" | "new-resource" = "resource",
+	onCreated?: (path: string, directory: boolean) => void,
+): Promise<void> {
 	const stat = await fs.lstat(source);
 	if (stat.isSymbolicLink()) throw new Error(`Registry resources cannot contain symbolic links: ${relativePath || source}`);
 	if (stat.isFile()) {
@@ -153,11 +155,14 @@ export async function copyTree(source: string, destination: string, relativePath
 			const current = await fs.lstat(destination);
 			if (!current.isFile() || current.isSymbolicLink()) throw new Error(`Plan destination must be a regular file: ${destination}`);
 		}
-		await fs.copyFile(source, destination);
+		await fs.copyFile(source, destination, mode === "new-resource" ? fs.constants.COPYFILE_EXCL : 0);
+		onCreated?.(destination, false);
 		return;
 	}
 	if (!stat.isDirectory()) throw new Error(`Unsupported registry resource entry: ${relativePath || source}`);
-	await fs.mkdir(destination, { recursive: true });
+	if (mode === "new-resource") await fs.mkdir(dirname(destination), { recursive: true });
+	await fs.mkdir(destination, { recursive: mode !== "new-resource" });
+	onCreated?.(destination, true);
 	if (mode === "plans") {
 		const actual = await fs.lstat(destination);
 		if (!actual.isDirectory() || actual.isSymbolicLink()) throw new Error(`Plan destination must be a real directory: ${destination}`);
@@ -165,7 +170,7 @@ export async function copyTree(source: string, destination: string, relativePath
 	const entries = (await fs.readdir(source, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
 	for (const entry of entries) {
 		if (!canonicalRegistryEntryName(entry.name)) continue;
-		if (mode === "resource" && entry.isDirectory() && !(await hasCanonicalResourceFiles(join(source, entry.name)))) continue;
+		if (mode !== "plans" && entry.isDirectory() && !(await hasCanonicalResourceFiles(join(source, entry.name)))) continue;
 		if (mode === "plans") {
 			if (entry.isFile() && !canonicalPlanFileName(entry.name)) continue;
 			if (entry.isDirectory() && !(await hasTrackableFiles(join(source, entry.name)))) continue;
@@ -173,7 +178,7 @@ export async function copyTree(source: string, destination: string, relativePath
 		}
 		const childRel = relativePath ? `${relativePath}/${entry.name}` : entry.name;
 		if (entry.isSymbolicLink()) throw new Error(`Registry resources cannot contain symbolic links: ${childRel}`);
-		await copyTree(join(source, entry.name), join(destination, entry.name), childRel, mode);
+		await copyTree(join(source, entry.name), join(destination, entry.name), childRel, mode, onCreated);
 	}
 }
 

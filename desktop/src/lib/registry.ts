@@ -79,7 +79,7 @@ export type RegistryActionRequest =
   | { readonly action: "refresh" | "configure" | "project-key" | "push-project-resources" | "keep-project-key" | "migrate-project-key" }
   | { readonly action: "pull-resources" | "push-resources" }
   | {
-      readonly action: "install" | "update" | "push" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope";
+      readonly action: "install" | "install-global" | "update" | "push" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope";
       readonly type: "skill" | "agent";
       readonly name: string;
     }

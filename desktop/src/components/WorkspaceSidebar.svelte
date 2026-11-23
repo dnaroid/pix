@@ -785,6 +785,11 @@
   }
 
   /** Reveal Source Control without toggling it closed when already active. */
+  export function refreshProjectSetup(): void {
+    wikiPanel?.refresh();
+    projectTreeRefreshKey += 1;
+  }
+
   export function refreshLaunchCommands(): void {
     void launchController.refreshLaunchCommands();
   }

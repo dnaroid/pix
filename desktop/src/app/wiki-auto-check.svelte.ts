@@ -7,9 +7,12 @@ import type { WikiAutoCheckView } from "../lib/wiki-auto-check-config";
 import {
   MAX_ACTIVE_KNOWLEDGE_JOBS, type ManualKnowledgeCheckInput, type ProjectKnowledgeJob,
 } from "./project-knowledge-queue.svelte";
+import { planWikiAutoCheckRetry, type WikiAutoCheckRetry } from "./wiki-auto-check-retry";
 
 export const WIKI_AUTO_CHECK_POLL_MS = 5_000;
 export const WIKI_AUTO_CHECK_SETTLE_MS = 750;
+/** A scheduler step (config, inventory or one bounded read) never legitimately takes this long. */
+export const WIKI_AUTO_CHECK_TICK_TIMEOUT_MS = 120_000;
 export const MAX_WIKI_AUTO_CHECK_FILES = 50_000;
 export const MAX_WIKI_AUTO_CHECK_RAW_BYTES = MAX_KNOWLEDGE_DOCUMENT_CHARS * 4
   + MAX_KNOWLEDGE_REPORT_BYTES + MAX_KNOWLEDGE_STAMP_BYTES;
@@ -81,6 +84,8 @@ interface Observation {
   processedHash?: string;
   jobId?: number;
   jobHash?: string;
+  /** In-memory retry budget of a transiently failed or incomplete version in this pass. */
+  retry?: WikiAutoCheckRetry;
   eligible: boolean;
   phase: "unknown" | "waiting" | "active" | "done" | "green" | "skipped";
 }
@@ -127,6 +132,7 @@ export function createWikiAutoCheckScheduler(options: SchedulerOptions) {
   let request: AbortController | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let timerAt = 0;
+  let watchdog: ReturnType<typeof setTimeout> | undefined;
   let nextConfigAt = 0;
   let nextScanAt = 0;
   let boundWorkspace = "";
@@ -371,15 +377,24 @@ export function createWikiAutoCheckScheduler(options: SchedulerOptions) {
       ]);
       if (!current()) return;
       item.hash = hash;
+      if (item.retry && item.retry.hash !== hash) item.retry = undefined;
       if (stamp) {
         cancelWaiting(item);
-        item.processedHash = hash;
+        item.processedHash = hash; item.retry = undefined;
         clearJob(item); phase(item, item.eligible ? "done" : "green");
         return;
       }
-      if ((attempt?.current && attempt.runId === currentOwner.runId
+      // A scheduled retry outranks this pass's checkpoint for the same body, but
+      // only once due: our own checkpoint write must not trigger it early.
+      const retry = item.retry?.at !== undefined ? item.retry : undefined;
+      if (retry && retry.at! > Date.now()) {
+        item.processedHash = undefined; item.stableAt = retry.at!;
+        clearJob(item); phase(item, "waiting", true);
+        return;
+      }
+      if (!retry && ((attempt?.current && attempt.runId === currentOwner.runId
         && (attempt.maxDocumentChars ?? MAX_KNOWLEDGE_CHUNK_CHARS) >= Math.min(body.length, MAX_KNOWLEDGE_DOCUMENT_CHARS))
-        || item.processedHash === hash) {
+        || item.processedHash === hash)) {
         item.processedHash = hash; clearJob(item); phase(item, "done", true);
         return;
       }
@@ -392,12 +407,12 @@ export function createWikiAutoCheckScheduler(options: SchedulerOptions) {
       }
       const duplicate = options.jobs().find(job => activeJob(job) && job.workspace === currentOwner.workspace
         && job.path === item.path && job.persistStamp && job.content === body);
-      if (duplicate) { track(item, duplicate.id, hash); return; }
+      if (duplicate) { if (retry) retry.at = undefined; track(item, duplicate.id, hash); return; }
       phase(item, "waiting", true);
       if (!hasRoom()) return;
       const id = options.enqueue({ path: item.path, content: body, expectedContent: file.content,
         persistStamp: true, origin: "background", autoCheckRunId: currentOwner.runId });
-      if (id !== undefined) track(item, id, hash);
+      if (id !== undefined) { if (retry) retry.at = undefined; track(item, id, hash); }
     } catch (error) {
       if (!current()) return;
       phase(item, "skipped", true);
@@ -437,8 +452,34 @@ export function createWikiAutoCheckScheduler(options: SchedulerOptions) {
     let delay = Math.min(nextConfigAt, nextScanAt) - now;
     const firstUnread = observations.get(unread.values().next().value ?? "");
     if (firstUnread) delay = Math.min(delay, Math.max(WORK_SLICE_MS, firstUnread.stableAt - now));
-    if (waiting.size > 0 && hasRoom()) delay = Math.min(delay, WORK_SLICE_MS);
+    if (waiting.size > 0 && hasRoom()) {
+      // A version waiting for a scheduled retry must not keep the poller hot.
+      for (const path of waiting) {
+        const item = observations.get(path);
+        if (!item || unread.has(path)) continue;
+        delay = Math.min(delay, item.stableAt - now);
+        if (delay <= WORK_SLICE_MS) break;
+      }
+    }
     return Math.max(WORK_SLICE_MS, delay);
+  }
+
+  /**
+   * A step whose native call or injected promise never settles would otherwise
+   * keep its generation busy forever. Fence it like a reset and rediscover the
+   * pass: checkpoints make already processed versions cheap to skip again.
+   */
+  function stalled(ownedGeneration: number): void {
+    watchdog = undefined;
+    if (!started || disposed || generation !== ownedGeneration || busyGeneration !== ownedGeneration) return;
+    generation++;
+    busyGeneration = undefined;
+    request?.abort(new Error("Automatic Wiki check step timed out."));
+    request = undefined;
+    clearOwner();
+    nextConfigAt = 0; nextScanAt = 0;
+    report(new Error(`An automatic Wiki check step did not finish within ${WIKI_AUTO_CHECK_TICK_TIMEOUT_MS / 1000} s; the pass was restarted.`));
+    schedule(0);
   }
 
   async function tick(): Promise<void> {
@@ -449,6 +490,9 @@ export function createWikiAutoCheckScheduler(options: SchedulerOptions) {
     if (!workspace || workspace !== boundWorkspace) { reset(); return; }
     const ownedGeneration = generation;
     busyGeneration = ownedGeneration;
+    if (watchdog !== undefined) clearTimeout(watchdog);
+    const deadline = setTimeout(() => stalled(ownedGeneration), WIKI_AUTO_CHECK_TICK_TIMEOUT_MS);
+    watchdog = deadline;
     const controller = new AbortController();
     request = controller;
     const valid = () => started && !disposed && generation === ownedGeneration
@@ -480,6 +524,7 @@ export function createWikiAutoCheckScheduler(options: SchedulerOptions) {
     } catch (error) {
       if (valid()) report(error);
     } finally {
+      if (watchdog === deadline) { clearTimeout(deadline); watchdog = undefined; }
       if (request === controller) request = undefined;
       if (busyGeneration === ownedGeneration) busyGeneration = undefined;
       if (started && !disposed) schedule(valid() ? nextDelay() : 0);
@@ -492,6 +537,8 @@ export function createWikiAutoCheckScheduler(options: SchedulerOptions) {
     request?.abort();
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
+    if (watchdog !== undefined) clearTimeout(watchdog);
+    watchdog = undefined;
     clearOwner();
     nextConfigAt = 0; nextScanAt = 0; boundWorkspace = "";
   }
@@ -519,7 +566,12 @@ export function createWikiAutoCheckScheduler(options: SchedulerOptions) {
       if (job.id !== item.jobId && (!job.result || job.result.documentHash !== item.hash)) return;
       item.processedHash = job.result?.documentHash ?? item.jobHash;
       clearJob(item);
-      phase(item, item.hash === item.processedHash ? "done" : "waiting");
+      const retry = job.autoCheckRunId === owner.runId && item.processedHash && item.hash === item.processedHash
+        ? planWikiAutoCheckRetry(item.retry, job, item.processedHash, Date.now()) : undefined;
+      // Any settled check of this version (including a manual one) replaces its retry plan.
+      item.retry = retry;
+      if (retry) item.stableAt = retry.at!;
+      phase(item, item.hash === item.processedHash && !retry ? "done" : "waiting");
       if (unread.has(item.path)) waiting.delete(item.path);
       nextScanAt = 0;
       publish(); schedule(0);

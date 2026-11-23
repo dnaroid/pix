@@ -282,6 +282,15 @@ export class AcpPixExtensions {
     };
   }
 
+  async sessionSkillReads(sessionId: string, signal: AbortSignal): Promise<string[] | null> {
+    const response = await this.request<unknown>("pix/session/skill_reads", { sessionId }, null, signal);
+    if (response === null) return null;
+    if (!Array.isArray(response) || response.some((name) => typeof name !== "string")) {
+      throw new Error("pix/session/skill_reads returned an invalid response");
+    }
+    return response;
+  }
+
   async toolResult(sessionId: string, toolCallId: string): Promise<SessionUpdate> {
     const response = await this.request<unknown>("pix/session/tool_result", { sessionId, toolCallId }, null);
     if (!isRecord(response) || !isRecord(response.update) || typeof response.update.sessionUpdate !== "string") {
@@ -531,8 +540,8 @@ export class AcpPixExtensions {
     return parseQueueState(await this.request<unknown>("pix/session/queue_state", { sessionId }, null));
   }
 
-  async registryAction(cwd: string, action: RegistryActionRequest): Promise<RegistrySnapshot> {
-    const response = await this.request<unknown>("pix/registry/action", { cwd, ...action }, registryActionTimeoutMs(action));
+  async registryAction(cwd: string, action: RegistryActionRequest, signal?: AbortSignal): Promise<RegistrySnapshot> {
+    const response = await this.request<unknown>("pix/registry/action", { cwd, ...action }, registryActionTimeoutMs(action), signal);
     if (!isRecord(response)) throw new Error("pix/registry/action returned an invalid response");
     const snapshot = parseRegistrySnapshot(response.snapshot);
     if (!snapshot) throw new Error("pix/registry/action returned an invalid registry snapshot");

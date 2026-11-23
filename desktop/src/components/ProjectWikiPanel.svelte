@@ -58,7 +58,7 @@
   export function create(kind: "new-file" | "new-directory"): void { wikiTree?.create(kind); }
   export function exportHtml(): void { void wikiTree?.exportHtml(); }
   export function showInFiles(): void { wikiTree?.showInFiles(); }
-  export function refresh(): void { wikiTree?.refresh(); }
+  export function refresh(): void { void controller.refresh(); wikiTree?.refresh(); }
   export function openChecks(): void { checkQueue?.open(); }
   $effect(() => { const target = workspace; untrack(() => { void controller.selectWorkspace(target); }); });
   onDestroy(controller.dispose);

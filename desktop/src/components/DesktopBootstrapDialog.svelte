@@ -20,11 +20,13 @@
     onCredentialsChanged,
     onOpenClaudeLoginTerminal,
     onError,
+    onReady,
   }: {
     onCredentialsChanged: () => void | Promise<void>;
     /** Opens the project terminal with a command; unavailable without an open project. */
     onOpenClaudeLoginTerminal?: (command: string) => Promise<void>;
     onError?: (error: unknown) => void;
+    onReady?: () => void;
   } = $props();
 
   let dialogElement = $state<HTMLDialogElement | null>(null);
@@ -52,7 +54,9 @@
     let disposed = false;
     void (async () => {
       try {
-        if (await desktopOnboardingCompleted() || disposed) return;
+        const complete = await desktopOnboardingCompleted();
+        if (disposed) return;
+        if (complete) { onReady?.(); return; }
         visible = true;
         await refresh();
       } catch (cause) {
@@ -117,6 +121,7 @@
     try {
       await completeDesktopOnboarding();
       visible = false;
+      onReady?.();
       return true;
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);

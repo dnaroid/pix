@@ -1,13 +1,14 @@
 import { RegistryContext, RegistryExecutor, confirmOverwrite, notify } from "./context.js";
 import { RegistryRuntime, ResourceType, SKILL_FILE } from "./model.js";
 import { pathExists, projectResourcePath, registryResourcePath, registryResourceRelativePath, resourceKey, validateName } from "./paths.js";
-import { join, relative } from "node:path";
-import { agentCompanion, agentGitPaths, assertValidAgentDefinition, hashResource, replaceAgent, replaceResource } from "./resource-files.js";
+import { dirname, join, relative } from "node:path";
+import { agentCompanion, agentCompanionStat, agentGitPaths, assertValidAgentDefinition, copyTree, hashResource, replaceAgent, replaceResource } from "./resource-files.js";
 import { ensureRegistryCache, resourceRevision, runGit } from "./git.js";
 import { clearResourceProvenance, readProvenance, recordProvenance } from "./provenance.js";
 import { loadRuntimeConfig } from "./config.js";
 import { promises as fs } from "node:fs";
 import { assertOtherProjectsAbsent, samePublication, selectPublicationRuntime } from "./publication-location.js";
+import { acpFileLogger } from "../logging.js";
 
 export async function installResourceWithRuntime(
 	executor: RegistryExecutor,
@@ -16,6 +17,7 @@ export async function installResourceWithRuntime(
 	type: ResourceType,
 	name: string,
 	beforeWrite?: () => Promise<void>,
+	allowOverwrite = true,
 ): Promise<void> {
 	validateName(name);
 	const source = registryResourcePath(runtime.cacheDir, type, name, runtime);
@@ -23,23 +25,65 @@ export async function installResourceWithRuntime(
 	if (type === "skill" && !(await pathExists(join(source, SKILL_FILE)))) throw new Error(`Registry skill "${name}" is missing ${SKILL_FILE}.`);
 	if (type === "agent") await assertValidAgentDefinition(source, name);
 	const destination = projectResourcePath(ctx, type, name);
-	if (await pathExists(destination)) {
+	if (allowOverwrite && await pathExists(destination)) {
 		const confirmed = await confirmOverwrite(ctx, "Resource already exists", `Overwrite project ${type} "${name}" from the registry?`);
 		if (!confirmed) throw new Error(`Project ${type} "${name}" already exists; install cancelled.`);
 	}
 	const revision = await resourceRevision(executor, runtime, type, name);
 	if (!revision) throw new Error(`Cannot determine registry revision for ${type} "${name}".`);
 	if (beforeWrite) await beforeWrite();
+	if (!allowOverwrite) {
+		await hashResource(type, source);
+		const parent = dirname(destination);
+		for (const directory of [dirname(parent), parent]) {
+			try { await fs.mkdir(directory); }
+			catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+			if (!(await fs.lstat(directory)).isDirectory()) throw new Error(`Registry destination must be a real directory: ${directory}`);
+		}
+		const tracked = (await readProvenance(ctx)).resources[resourceKey(type, name)];
+		if (tracked && samePublication(tracked, runtime) && await pathExists(destination)
+			&& tracked.hash === await hashResource(type, destination)) return;
+		for (const path of type === "agent" ? [destination, agentCompanion(destination)] : [destination]) {
+			try { await fs.lstat(path); }
+			catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; throw error; }
+			throw new Error(`Project ${type} "${name}" already exists; setup cannot replace it.`);
+		}
+		const created: Array<{ path: string; directory: boolean }> = [];
+		const recordCreated = (path: string, directory: boolean) => { created.push({ path, directory }); };
+		try {
+			await beforeWrite?.();
+			await copyTree(source, destination, "", "new-resource", recordCreated);
+			if (type === "agent" && await agentCompanionStat(source)) {
+				await copyTree(agentCompanion(source), agentCompanion(destination), "", "new-resource", recordCreated);
+			}
+			await recordProvenance(ctx, runtime, type, name, revision, await hashResource(type, destination));
+		} catch (error) {
+			for (const entry of created.reverse()) {
+				try {
+					if (entry.directory) await fs.rmdir(entry.path);
+					else await fs.unlink(entry.path);
+				} catch (cleanupError) {
+					const code = (cleanupError as NodeJS.ErrnoException).code;
+					if (code !== "ENOENT") {
+						try { await acpFileLogger.log("warn", "registry:install-rollback-failed", { code }); } catch { /* Keep the original error. */ }
+					}
+				}
+			}
+			throw error;
+		}
+		return;
+	}
 	if (type === "agent") await replaceAgent(source, destination);
 	else await replaceResource(source, destination);
 	await recordProvenance(ctx, runtime, type, name, revision, await hashResource(type, destination));
 }
 
-export async function installResource(executor: RegistryExecutor, ctx: RegistryContext, type: ResourceType, name: string): Promise<void> {
+export async function installResource(executor: RegistryExecutor, ctx: RegistryContext, type: ResourceType, name: string, globalOnly?: AbortSignal): Promise<void> {
 	let runtime = loadRuntimeConfig(ctx.cwd);
 	await ensureRegistryCache(executor, runtime);
 	runtime = await selectPublicationRuntime(executor, ctx, runtime, type, name);
-	await installResourceWithRuntime(executor, ctx, runtime, type, name);
+	if (globalOnly && runtime.publicationScope !== "global") throw new Error(`Global ${type} "${name}" is no longer available.`);
+	await installResourceWithRuntime(executor, ctx, runtime, type, name, () => Promise.resolve(globalOnly?.throwIfAborted()), !globalOnly);
 	const destination = projectResourcePath(ctx, type, name);
 	notify(ctx, `Installed ${type} "${name}" → ${relative(ctx.cwd, destination)}.`);
 }

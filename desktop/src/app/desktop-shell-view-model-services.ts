@@ -58,7 +58,17 @@ export function createDesktopShellViewModelServices(
     sessionActivity: () => options.presentation.activeSessionActivity,
     sessionSubagentSnapshot: () => options.presentation.activeSubagentSnapshot,
     sessionTodoSnapshot: () => options.presentation.activeTodoSnapshot,
-    findSessionSkills: () => loadedSessionSkills(options.state.transcript.items),
+    findSessionSkills: async (sessionId, signal) => {
+      const client = options.client();
+      const loaded = loadedSessionSkills(options.state.transcript.items);
+      try {
+        const saved = await client?.sessionSkillReads(sessionId, signal);
+        return { names: [...new Set([...(saved ?? []), ...loaded])], source: saved ? "file" : "chat" };
+      } catch (error) {
+        if (!signal.aborted) options.errors.report(error);
+        return { names: loaded, source: "error" };
+      }
+    },
     sessionNeedsInput: () => options.presentation.activePendingElicitation !== null,
     canClearTodos: () => Boolean(
       options.state.sessionId && todoActions.canClear(options.state.sessionId),

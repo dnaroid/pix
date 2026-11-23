@@ -29,6 +29,7 @@
   import ToastViewport from "./components/ToastViewport.svelte";
   import { toasts } from "./app/toasts.svelte";
   import DesktopBootstrapDialog from "./components/DesktopBootstrapDialog.svelte";
+  import ProjectOnboardingDialog from "./components/ProjectOnboardingDialog.svelte";
   import DeleteConfirmationHost from "./components/DeleteConfirmationHost.svelte";
   import ModelSetupDialog from "./components/ModelSetupDialog.svelte";
   import { workbenchSessionTabId, type WorkbenchTabId } from "./lib/workbench-tabs";
@@ -91,6 +92,7 @@
   const desktopUpdaterEnabled = import.meta.env.VITE_PIX_DESKTOP_UPDATER === "1";
 
   let workspace = $state("");
+  let bootstrapReady = $state(false);
   let searchOpen = $state(false);
   const searchMemory = new SearchDialogMemory();
   const activeSessionState = createActiveSessionState();
@@ -136,6 +138,7 @@
     closeProjectSwitcher: () => void;
     openProjectSettings: () => void;
     refreshLaunchCommands: () => void;
+    refreshProjectSetup: () => void;
   } | null>(null);
   let localMessageId = 0;
   let onSessionActivityChanged = (_sessionId: string): void => {};
@@ -427,6 +430,13 @@
     reportError,
   });
   setContext(WIKI_CONSISTENCY_CONTEXT, projectServices.wikiConsistency);
+  function refreshProjectSetup(target: string): void {
+    if (workspace !== target) return;
+    workspaceSidebar?.refreshProjectSetup();
+    void projectServices.git.refreshExplorer();
+    void projectServices.loadDocuments(target);
+    projectServices.registry.refresh({ background: true });
+  }
   const projectTasks = projectServices.tasks;
   const tasksSaving = $derived(projectTasks.saving);
 
@@ -1184,10 +1194,18 @@
     }} />
 {/if}
 <DesktopBootstrapDialog
+  onReady={() => bootstrapReady = true}
   onCredentialsChanged={reconnect}
   onOpenClaudeLoginTerminal={workspace ? openInteractiveTerminal : undefined}
   onError={reportError}
 />
+{#if bootstrapReady && workspace}
+  {#key workspace}
+    <ProjectOnboardingDialog {workspace} {client}
+      pickIcon={projectServices.workspace.pickIcon} generateIcon={projectServices.workspace.generateIcon}
+      saveIcon={projectServices.workspace.saveOnboardingIcon} onChanged={refreshProjectSetup} />
+  {/key}
+{/if}
 <DeleteConfirmationHost />
 {#if supervisorMandate.editor && supervisorMandate.mandate}
   <SupervisorMandateDialog mandate={supervisorMandate.mandate} enable={supervisorMandate.editor.enable}

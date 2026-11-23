@@ -33,6 +33,34 @@ Make a packaged Pix Desktop usable on a clean computer without requiring a syste
 - Import/install actions are independent and optional. A failure stays in the dialog and does not mark setup complete.
 - A successful credential import reconnects Desktop ACP so newly available auth can be observed by a fresh runtime.
 
+## Project onboarding (empty folders)
+
+- After app bootstrap, Desktop offers a one-time **Set up project** dialog for a
+  workspace folder that is physically empty. Empty means no entries except a
+  file named `.DS_Store`, or a `.pi` directory containing only regular files
+  named `project-id` and `registry-project-key`. Any other entry (including
+  `.git`, `.gitignore`, `README.md`, `.pi/workspace.jsonc`, or a symlink) makes
+  the folder ineligible.
+- The decision receipt lives in the app config directory under
+  `project-onboarding/`, keyed by the folder's filesystem identity and creation
+  time, so a new folder at a former path is treated as new. Skip and Set up both
+  claim the receipt before any mutation; the dialog is not shown again for that
+  folder. Only the window that wins the claim applies changes; a folder that is
+  no longer empty at claim time is refused.
+- Defaults: Initialize Git with the default ignores, create a starter Wiki, and
+  enable the Knowledge search source. Knowledge enablement does not configure a
+  provider or start a standalone embedding job.
+- Opt-in: background Wiki checks (requires Wiki and Knowledge), selected
+  global Registry agents/skills (installed without replacing existing copies;
+  a differing local copy fails that step), and a chosen or generated project
+  icon, saved last. Setup never replaces an existing project icon; retrying with
+  the identical image succeeds. A failed Registry install removes the resource
+  files and directories it created before failing; parent directories it
+  created may remain.
+- Steps run in order. An error stops the run and shows the failed step; **Retry**
+  in the same dialog resumes from that step, and completed steps stay applied.
+  Progress is not saved across closing the dialog.
+
 ## Credential migration
 
 - **OpenCode:** first-run calls the tools suite's existing importOpencodeAccounts() implementation. Its provider mapping, Antigravity support, validation, secure writes, and non-overwrite behavior remain the single source of truth. Existing Pi credentials are preserved unless the source is already identical; first-run never passes overwrite=true.

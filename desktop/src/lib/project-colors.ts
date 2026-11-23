@@ -46,12 +46,12 @@ export function workspaceConfigWithProjectColor(source: string | undefined, colo
 }
 
 /**
- * Update the identity color and, when present in `settings`, the logo path.
- * `icon: undefined` removes the logo; omitting `icon` preserves it.
+ * Update only the identity fields present in `settings`.
+ * Explicit `undefined` removes a field; omission preserves it.
  */
 export function workspaceConfigWithProjectSettings(
   source: string | undefined,
-  settings: { color: string | undefined; icon?: string | undefined },
+  settings: { color?: string | undefined; icon?: string | undefined },
 ): string {
   const base = source?.trim() ? source : "{}\n";
   const errors: ParseError[] = [];
@@ -63,7 +63,7 @@ export function workspaceConfigWithProjectSettings(
   const normalized = color === undefined ? undefined : normalizeProjectColor(color);
   if (color !== undefined && !normalized) throw new Error("Project color must be a hex color.");
   const formattingOptions = { insertSpaces: true, tabSize: 2, eol: "\n" } as const;
-  let next = applyEdits(base, modify(base, ["color"], normalized, { formattingOptions }));
+  let next = "color" in settings ? applyEdits(base, modify(base, ["color"], normalized, { formattingOptions })) : base;
   if ("icon" in settings) {
     const icon = settings.icon === undefined ? undefined : normalizeProjectIconPath(settings.icon);
     if (settings.icon !== undefined && !icon) throw new Error("Project logo must be a canonical .pi/project-icon file.");

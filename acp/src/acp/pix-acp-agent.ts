@@ -224,6 +224,7 @@ import {
 	PIX_SESSION_USAGE_METHOD,
 	PIX_SESSION_IMAGE_METHOD,
 	PIX_SESSION_HISTORY_METHOD,
+	PIX_SESSION_SKILL_READS_METHOD,
 	PIX_TAKE_AUTO_MESSAGE_METHOD,
 	PIX_TOOL_RESULT_METHOD,
 	PIX_USER_MESSAGE_ACTION_METHOD,
@@ -395,6 +396,7 @@ import {
 	type DeferredSessionHistory,
 	type DeferredToolResult,
 } from "./session-replay.js";
+import { scanSessionSkillReads } from "./session-skill-reads.js";
 import { loadTuiTabSnapshot, type TuiTabSnapshot } from "./tui-tabs.js";
 import { cancelledResponse, fromElicitationResponse, isQuestionElicitation, toElicitationRequest } from "./ui-request-bridge.js";
 import {
@@ -1212,6 +1214,11 @@ export class PixAcpAgent {
 			.onRequest(PIX_RESUME_PATH_METHOD, parseDesktopResumePathRequest, (ctx) => this.withRequestLogging(PIX_RESUME_PATH_METHOD, ctx.params, ctx.signal, () => this.withSessionLifecycle(ctx.params.sessionId, () => this.resumePath(ctx.params))),
 			)
 			.onRequest(PIX_SESSION_HISTORY_METHOD, parseDesktopSessionHistoryRequest, (ctx) => this.withRequestLogging(PIX_SESSION_HISTORY_METHOD, ctx.params, ctx.signal, () => this.desktopSessionHistory(ctx.params)),
+			)
+			.onRequest(PIX_SESSION_SKILL_READS_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_SESSION_SKILL_READS_METHOD, ctx.params, ctx.signal, async () => {
+				const record = await this.sessionMap.get(ctx.params.sessionId);
+				return record?.piSessionPath ? scanSessionSkillReads(record.piSessionPath, ctx.signal) : null;
+			}),
 			)
 			.onRequest(PIX_TOOL_RESULT_METHOD, parseDesktopToolResultRequest, (ctx) => this.withRequestLogging(PIX_TOOL_RESULT_METHOD, ctx.params, ctx.signal, () => this.desktopToolResult(ctx.params)),
 			)

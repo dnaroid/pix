@@ -4,9 +4,9 @@ import { readWorkspaceConfig } from "../app/workspace-config-persistence";
 import type { ProjectFilePreview } from "../lib/project-files";
 import type { ProjectTreeEntry } from "../lib/project-tree";
 import { getProjectWikiConfig, type ProjectWikiConfig } from "../lib/project-wiki";
+import { initializeProjectWiki, STARTER_WIKI_INDEX } from "../lib/initialize-project-wiki";
 
-/** Placeholder written by "Create Wiki"; a Wiki holding only this page is still empty. */
-export const STARTER_WIKI_INDEX = "# Project wiki\n\nDescribe the project, its requirements and rules here.\n\n## Contents\n\nCreate pages and sections in the Wiki sidebar, then link them from this index.\n";
+export { STARTER_WIKI_INDEX } from "../lib/initialize-project-wiki";
 
 type Send = <T>(command: string, args: Record<string, unknown>) => Promise<T>;
 interface Options {
@@ -118,33 +118,10 @@ export function createProjectWikiController(options: Options) {
     try {
       release = await options.prepare?.();
       if (!current()) return;
-      const directory = config.indexPath.slice(0, config.indexPath.lastIndexOf("/"));
-      // Create only missing parents, one level at a time. Native exclusive creation
-      // rejects symlinks/collisions; never replace an existing folder or index.
-      let parent = "";
-      for (const name of directory.split("/")) {
-        const path = parent ? `${parent}/${name}` : name;
-        const exists = await send<boolean>("project_directory_exists", { workspace: target, path });
-        if (!current()) return;
-        if (!exists) {
-          await send("create_project_entry", { workspace: target, parent: parent || null, name, kind: "directory" });
-          if (!current()) return;
-        }
-        parent = path;
-      }
-      const indexExists = await send<boolean>("project_file_exists", { workspace: target, path: config.indexPath });
+      await initializeProjectWiki(target, config, () => {
+        if (!current()) throw new DOMException("Wiki initialization lost its project.", "AbortError");
+      }, send);
       if (!current()) return;
-      if (!indexExists) {
-        await send("create_project_entry", {
-          workspace: target, parent, name: config.indexPath.slice(parent.length + 1), kind: "file",
-        });
-        if (!current()) return;
-        await send("write_project_file", {
-          workspace: target, path: config.indexPath, expectedContent: "",
-          content: STARTER_WIKI_INDEX,
-        });
-        if (!current()) return;
-      }
       state.starter = await onlyStarterIndex(target, config);
       if (!current()) return;
       state.exists = true;

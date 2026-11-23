@@ -31,6 +31,7 @@
     observer = null,
     backgroundJobs = null,
     findSessionSkills,
+    skillsSessionId,
     canConfigure,
     modelThinkingOpen,
     runtimeStatus,
@@ -78,7 +79,8 @@
       onOpenSettings: () => void;
     } | null;
     backgroundJobs?: import("svelte").ComponentProps<typeof BackgroundJobsStatus> | null;
-    findSessionSkills?: () => string[];
+    findSessionSkills?: import("../lib/session-skills").FindSessionSkills;
+    skillsSessionId?: string;
     canConfigure: boolean;
     modelThinkingOpen: boolean;
     runtimeStatus?: RuntimeStatus;
@@ -225,8 +227,10 @@
 
   <div class="flex h-full shrink-0 items-center gap-0.5" data-status-right>
   {#key observer?.sessionId}
-  {#if findSessionSkills}
-    <SessionSkillsStatus findSkills={findSessionSkills} />
+  {#if findSessionSkills && skillsSessionId}
+    {#key skillsSessionId}
+      <SessionSkillsStatus sessionId={skillsSessionId} findSkills={findSessionSkills} />
+    {/key}
   {/if}
   {#if observer}
     <ObserverStatus {...observer} />

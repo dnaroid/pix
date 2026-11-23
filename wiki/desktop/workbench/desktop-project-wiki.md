@@ -407,11 +407,25 @@ automatic snapshots share one job. Every completed non-green version receives
 a small `pix:wiki-check` footer with `status: "attempted"`, its body hash and pass
 ID and the supported document-size budget. This is a checkpoint, never a green consistency mark. A failed model request
 retains the previous full report and its original hash while recording the new
-attempt. Manual saved checks can satisfy the currently enabled automatic pass.
+attempt; the retry rules above decide whether the same version is sent again. Manual saved checks can satisfy the currently enabled automatic pass.
 
-The same pass does not repeatedly send an unchanged red, yellow or failed version
-to the model, including after restarting the app. Editing its logical body makes
-it eligible again; rewriting only report/check metadata does not. New and renamed
+Within the current pass, a transiently failed version is retried: a failed job, or
+an incomplete result whose notices name an application race or malformed model
+output (corpus/document/inventory changes, empty or invalid model responses, and
+source changes during opening, reading or path resolution), is retried twice, after
+1 minute and then 5 minutes. Any other incomplete result (for example an
+unverifiable quotation) gets one retry after 10 minutes, also once transient retries
+are spent. Conflicts results and "needs clarification" results (incomplete with
+grounded uncertainties and no notices) are never retried; explicit cancellation stays
+terminal. Otherwise the same pass does not repeatedly send an unchanged red, yellow or
+failed version to the model, including after restarting the app. The retry budget is
+in memory per logical body hash and pass: editing the body, a manual check of that
+version, a project switch, an app restart, a pass change or a watchdog restart drops it. The attempted
+checkpoint footer is still written; after restart the checkpoint is honored and no
+retry is made. The page's own checkpoint write does not trigger a retry early; while a
+retry waits, the page counts as pending (not processed) and the poller is not kept hot.
+Editing its logical body makes it eligible again; rewriting only report/check metadata
+does not. New and renamed
 files are discovered without opening their folders. After a checker budget increase,
 a page skipped under the older size budget is eligible once under the new budget;
 an unchanged supported page still resumes its checkpoint. A new explicit off/on cycle
@@ -426,6 +440,13 @@ late automatic write outside the new Wiki. Project replacement invalidates all
 owners and cancels their requests; final disposal releases timers, cursors and
 pending ownership. The busy gate is per generation, so a hung tick whose invoke
 ignores abort cannot block automatic checks after a reset or workspace switch.
+A per-tick watchdog (120 s) covers config, inventory, read and skipped-record
+steps as well: if one does not settle, its request is aborted, the generation
+is fenced like a reset, owner state is cleared, the error
+"An automatic Wiki check step did not finish within 120 s; the pass was restarted."
+is reported inline and in diagnostic logs, and scheduling resumes at once. The
+pass ID is kept, so attempted checkpoints still skip processed versions, but the in-memory retry budget is dropped. A late
+reply is ignored and its native cursor released.
 Oversized/unreadable files produce a bounded inline diagnostic
 without a model request. The inventory supports up to 50,000 files and reports its
 limit without claiming exhaustive completion; later smaller inventories recover.
@@ -814,7 +835,8 @@ Contradiction-check verification uses the following focused targets:
 - Strict raw baselines, cancellation before queued writes and committed-baseline publication.
 - FIFO ordering, snapshot identity, navigation survival, explicit cancellation, history limits and background marker writes without overwriting newer content.
 - Completion notifications, workspace-safe actions and background writes that cannot replace another Preview.
-- Bounded discovery and backpressure, hash/pass deduplication, external changes, incremental inventory limits, source readiness, project replacement, cancellation and late cursor cleanup.
+- Bounded discovery and backpressure, hash/pass deduplication, external changes, incremental inventory limits, source readiness, project replacement, cancellation, late cursor cleanup and the per-tick watchdog (non-settling step restarts the pass; late reply ignored; timers cleared on dispose).
+- Automatic retry policy: transient failures and race-caused incomplete results (1 min, then 5 min), one later retry for other incomplete results (10 min), no retry for conflicts or needs-clarification results, budget reset by body edits, manual checks, project switch, app restart, pass change or watchdog restart, checkpoint honored after restart, and the page's own checkpoint write not triggering early.
 - Actual store/queue integration, model serialization, raw guarded checkpoints, restart, failed rechecks and metadata writes that wait for active comparisons.
 - JSONC preservation, explicit toggles, pass initialization, stale owners and saved checkbox state.
 - Grounded-conflict-only notifications, aggregation, persisted evidence deduplication and safe actions.

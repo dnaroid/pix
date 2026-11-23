@@ -163,6 +163,7 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     const item = snapshot?.items.find((item) => item.type === request.type && item.name === request.name);
     if (!item) return false;
     if (request.action === "set-agent-model" || request.action === "reset-agent-model") return !!item.agentModel;
+    if (request.action === "install-global") return registryPublicationScope(item) === "global" && item.actions.includes("install") && !item.local;
     return item.actions.includes(request.action);
   }
 
