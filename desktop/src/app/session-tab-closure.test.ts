@@ -44,6 +44,7 @@ function createHarness(
   const tabs = {
     closeSelector: vi.fn(),
     markClosed: vi.fn(),
+    replace: vi.fn(),
     show: vi.fn(),
     forgetActive: vi.fn(),
   };
@@ -98,6 +99,22 @@ function createHarness(
 }
 
 describe("session tab closure", () => {
+  it("replaces only the retired supervisor tab after the new one is selected, even with a stale catalog marker", async () => {
+    const h = createHarness("fresh", ["ordinary", "old", "fresh"], async () => ({}));
+    h.options.catalog.sessions.find((session) => session.sessionId === "old")!._meta = { "pix.supervisor": true };
+    h.setActiveSession("ordinary");
+    await expect(h.closure.replaceRetiredSupervisorTab("old", "fresh")).resolves.toBe(false);
+    h.setActiveSession("fresh");
+    await expect(h.closure.replaceRetiredSupervisorTab("not-open", "fresh")).resolves.toBe(false);
+    await expect(h.closure.replaceRetiredSupervisorTab("old", "fresh")).resolves.toBe(true);
+    expect(h.tabs.replace).toHaveBeenCalledExactlyOnceWith("old", "fresh");
+    expect(h.options.retargetWorkbenchAnchors).toHaveBeenCalledWith("old", "fresh");
+    expect(h.client.closeSession).toHaveBeenCalledExactlyOnceWith("old");
+    expect(h.client.deleteSession).not.toHaveBeenCalled();
+    expect(h.loadSession).not.toHaveBeenCalled();
+    expect(confirmSupervisorTabClose).not.toHaveBeenCalled();
+  });
+
   it("asks before closing an idle supervisor tab and keeps it on cancel", async () => {
     const h = createHarness("active", ["active", "background"], async () => ({}));
     (h.options.catalog.sessions[0] as { _meta?: Record<string, unknown> })._meta = { "pix.supervisor": true };

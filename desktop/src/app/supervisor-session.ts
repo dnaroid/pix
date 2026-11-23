@@ -5,7 +5,7 @@ import { SvelteSet } from "svelte/reactivity";
 import { supervisionActions, type SupervisionState } from "../lib/session-supervision";
 import { sessionIsSupervisor, sessionSupervisedMode } from "../lib/session-tabs";
 import { isSubagentSession } from "../lib/session-subagent-link";
-import type { SupervisorCloseTabRequest, SupervisorCloseTabResponse } from "../../../acp/src/acp/supervisor-contract";
+import type { SupervisorCloseTabRequest, SupervisorCloseTabResponse, SupervisorOpenResponse } from "../../../acp/src/acp/supervisor-contract";
 
 /** Matches `supervisor_menu::EVENT` in desktop/src-tauri/src/supervisor_menu.rs. */
 export const SUPERVISOR_MENU_EVENT = "pix-open-supervisor";
@@ -16,7 +16,7 @@ export const SUPERVISOR_MENU_EVENT = "pix-open-supervisor";
  * creation, deduplication and the supervisor-only tool; Desktop only opens it.
  */
 type SupervisorClient = {
-  openSupervisor(cwd: string, fresh?: boolean): Promise<{ sessionId: string; created: boolean }>;
+  openSupervisor(cwd: string, fresh?: boolean): Promise<SupervisorOpenResponse>;
 };
 
 export type SupervisorSessionOptions<C extends SupervisorClient> = {
@@ -25,6 +25,7 @@ export type SupervisorSessionOptions<C extends SupervisorClient> = {
   refreshSessions: () => Promise<void>;
   loadSession: (sessionId: string) => Promise<void>;
   activateTab: (sessionId: string) => void;
+  replaceRetiredTab: (previousId: string, sessionId: string) => Promise<boolean>;
   reportError: (error: unknown) => void;
 };
 
@@ -33,13 +34,15 @@ export function createSupervisorSessionAction<C extends SupervisorClient>(option
 
   async function openOnce(client: C, workspace: string, fresh: boolean, current: () => boolean): Promise<void> {
     try {
-      const { sessionId } = await (fresh ? client.openSupervisor(workspace, true) : client.openSupervisor(workspace));
+      const { sessionId, previousSessionId } = await (fresh ? client.openSupervisor(workspace, true) : client.openSupervisor(workspace));
       if (!current()) return;
       // A just-created session must be in the catalog before its tab is shown.
       await options.refreshSessions();
       if (!current()) return;
       await options.loadSession(sessionId);
-      if (current()) options.activateTab(sessionId);
+      if (!current()) return;
+      options.activateTab(sessionId);
+      if (fresh && previousSessionId) await options.replaceRetiredTab(previousSessionId, sessionId);
     } catch (error) {
       if (current()) options.reportError(error);
     }

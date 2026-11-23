@@ -36,8 +36,10 @@ decision outside its mandate.
   context. In the active supervisor conversation, a bare `/new` runs the same
   fresh-conversation action; in ordinary sessions `/new` still opens a session
   start tab. `/new_tab` is unchanged. Existing gates apply: a `/new` sent while
-  the current turn is running is ignored. The previous conversation remains in
-  history and no longer controls the project. The previous conversation must be idle (no running turn, pending
+  the current turn is running is ignored. If the previous supervisor tab is
+  open, the new conversation replaces it instead of leaving two tabs. The
+  previous conversation remains in history and no longer controls the project.
+  The previous conversation must be idle (no running turn, pending
   dialog, streaming or compaction); otherwise the command is refused and
   nothing changes.
 - A new conversation keeps the saved mandate (including pause and budget
@@ -389,9 +391,11 @@ rationale.
   opens share one operation and a reopen returns the registered session. The
   new-conversation command uses `fresh: true`: ACP prepares a blank runtime
   with a new session ID, copies any queued wakes, then switches the active ID
-  in `registry.json` and records the old ID in `previousSupervisors`. The old
-  runtime is not stopped and keeps its history. If preparation fails, the
-  previous conversation stays active. A recorded but
+  in `registry.json` and records the old ID in `previousSupervisors`. The
+  open response returns `previousSessionId`; Desktop replaces that open tab
+  with the new session and closes the old tab's runtime without deleting its
+  saved history or changing other tabs. If preparation fails or rotation is
+  refused, the previous conversation and tab stay in place. A recorded but
   missing session is journaled (`supervisor-missing`) and replaced by a new
   one. Other ACP clients are refused. `session/list` marks the session with
   `_meta["pix.supervisor"]`, and Desktop shows a radar icon on its row.

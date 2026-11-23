@@ -168,6 +168,24 @@ describe("native session catalog updates", () => {
     expect(tabs()).toEqual([expect.objectContaining({ sessionId: "worker", running: true, supervised: true })]);
   });
 
+  it("keeps a just-created tab whose ACP record is not listed yet, until a list confirms it", async () => {
+    const f = fixture(vi.fn()
+      .mockResolvedValueOnce(result("other"))
+      .mockResolvedValueOnce(result("other"))
+      .mockResolvedValueOnce({ sessions: [...result("worker").sessions, ...result("other").sessions] })
+      .mockResolvedValue(result("other")));
+    f.catalog.ensureProvisional("worker", "/workspace");
+    f.setSavedTabs(["other", "worker"]);
+
+    await f.catalog.refresh();
+    expect(f.catalog.sessions.map(s => s.sessionId)).toEqual(["worker", "other"]);
+    expect(f.mergeRestored).toHaveBeenLastCalledWith("/workspace", null, ["worker", "other"]);
+
+    await f.catalog.refresh(); // Registered: the provisional guard is released.
+    await f.catalog.refresh(); // A later authoritative omission may now prune it.
+    expect(f.catalog.sessions.map(s => s.sessionId)).toEqual(["other"]);
+  });
+
   it("ignores notifications for old workspace or replaced ACP connection", async () => {
     const stale = deferred<ListSessionsResponse>();
     const f = fixture(() => stale.promise);

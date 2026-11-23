@@ -19,6 +19,8 @@ export function createSessionCatalog(options: SessionCatalogOptions) {
   let initialListings = 0;
   let pendingNativeRefresh: { client: AcpClient; workspace: string } | null = null;
   let generation = 0;
+  /** Sessions created locally whose ACP record may not be listed yet. */
+  const provisionalIds = new Set<string>();
 
   function responseIsCurrent(
     requestClient: AcpClient,
@@ -59,11 +61,15 @@ export function createSessionCatalog(options: SessionCatalogOptions) {
 
     // The request cannot confirm that tabs opened after it began are gone.
     // Keep their local catalog entries until a later list can reconcile them.
+    // A just-created session can be listed before ACP registers its record
+    // (lazy runtime start); its tab must survive until a list includes it.
     const requested = new Set(requestedTabs);
     const listed = new Set(response.sessions.map((session) => session.sessionId));
+    for (const sessionId of listed) provisionalIds.delete(sessionId);
     const currentTabs = new Set(options.tabs.sessionTabsForProject(requestWorkspace) ?? []);
     const newer = sessions.filter(({ sessionId, cwd }) => cwd === requestWorkspace
-      && currentTabs.has(sessionId) && !requested.has(sessionId) && !listed.has(sessionId));
+      && currentTabs.has(sessionId) && !listed.has(sessionId)
+      && (!requested.has(sessionId) || provisionalIds.has(sessionId)));
     const reconciled = newer.length ? { ...response, sessions: [...newer, ...response.sessions] } : response;
     applyResponse(reconciled);
     return reconciled;
@@ -150,10 +156,12 @@ export function createSessionCatalog(options: SessionCatalogOptions) {
 
   function ensureProvisional(sessionId: string, cwd: string): void {
     if (sessions.some((session) => session.sessionId === sessionId)) return;
+    provisionalIds.add(sessionId);
     sessions = [{ sessionId, cwd, updatedAt: new Date().toISOString() }, ...sessions];
   }
 
   function remove(sessionId: string): void {
+    provisionalIds.delete(sessionId);
     sessions = sessions.filter((session) => session.sessionId !== sessionId);
   }
 
@@ -172,6 +180,7 @@ export function createSessionCatalog(options: SessionCatalogOptions) {
 
   function reset(): void {
     invalidate();
+    provisionalIds.clear();
     sessions = [];
   }
 

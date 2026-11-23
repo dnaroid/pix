@@ -564,6 +564,7 @@
     refreshSessions: () => sessionCatalog.refresh(),
     loadSession: (sessionId) => sessionTabController.loadSession(sessionId),
     activateTab: (sessionId) => { activeWorkbenchTabId = workbenchSessionTabId(sessionId); },
+    replaceRetiredTab: (previousId, sessionId) => sessionTabController.replaceRetiredSupervisorTab(previousId, sessionId),
     reportError,
   });
 

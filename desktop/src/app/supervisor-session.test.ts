@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createSupervisorHandover, createSupervisorSessionAction, createSupervisorTabAutoClose, handleSupervisorMenu, SUPERVISOR_MENU_UNAVAILABLE } from "./supervisor-session";
 import { sessionIsSupervisor } from "../lib/session-tabs";
 import { COMMAND_PALETTE_IDS, desktopCommandDefinition } from "../lib/desktop-commands";
+import type { SupervisorOpenResponse } from "../../../acp/src/acp/supervisor-contract";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -10,7 +11,7 @@ function deferred<T>() {
 }
 
 function fixture() {
-  const client = { openSupervisor: vi.fn(async () => ({ sessionId: "sup", created: true })) };
+  const client = { openSupervisor: vi.fn(async (): Promise<SupervisorOpenResponse> => ({ sessionId: "sup", created: true })) };
   let current: typeof client | null = client;
   let workspace = "/p";
   const calls: string[] = [];
@@ -20,6 +21,7 @@ function fixture() {
     refreshSessions: async () => { calls.push("refresh"); },
     loadSession: async (id) => { calls.push(`load:${id}`); },
     activateTab: (id) => { calls.push(`tab:${id}`); },
+    replaceRetiredTab: async (old, id) => { calls.push(`replace:${old}:${id}`); return true; },
     reportError: (error) => { calls.push(`error:${(error as Error).message}`); },
   });
   return {
@@ -51,7 +53,7 @@ describe("project supervisor session action", () => {
   it("runs a fresh open after an ordinary open and shows only the replacement", async () => {
     const { client, calls, action } = fixture();
     const gate = deferred<{ sessionId: string; created: boolean }>();
-    client.openSupervisor.mockReturnValueOnce(gate.promise).mockResolvedValueOnce({ sessionId: "fresh", created: true });
+    client.openSupervisor.mockReturnValueOnce(gate.promise).mockResolvedValueOnce({ sessionId: "fresh", created: true, previousSessionId: "old" });
     const ordinary = action.open();
     await Promise.resolve();
     const fresh = action.open(true);
@@ -60,17 +62,17 @@ describe("project supervisor session action", () => {
     gate.resolve({ sessionId: "old", created: false });
     await Promise.all([ordinary, fresh]);
     expect(client.openSupervisor.mock.calls).toEqual([["/p"], ["/p", true]]);
-    expect(calls).toEqual(["refresh", "load:fresh", "tab:fresh"]);
+    expect(calls).toEqual(["refresh", "load:fresh", "tab:fresh", "replace:old:fresh"]);
   });
 
   it("drops a stale reply after a workspace switch and reports only current errors", async () => {
     const { client, calls, action, setWorkspace } = fixture();
-    const gate = deferred<{ sessionId: string; created: boolean }>();
+    const gate = deferred<SupervisorOpenResponse>();
     client.openSupervisor.mockReturnValueOnce(gate.promise);
-    const pending = action.open();
+    const pending = action.open(true);
     await Promise.resolve();
     setWorkspace("/other");
-    gate.resolve({ sessionId: "sup", created: true });
+    gate.resolve({ sessionId: "sup", created: true, previousSessionId: "old" });
     await pending;
     expect(calls).toEqual([]);
 

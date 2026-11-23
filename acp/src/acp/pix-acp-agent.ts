@@ -3159,7 +3159,7 @@ export class PixAcpAgent {
 			? { kind: "supervisor-rotated", sessionId, detail: { previousSessionId: previous.sessionId } }
 			: { kind: "supervisor-created", sessionId })
 			.catch((error: unknown) => this.options.logger.warn(`supervisor ledger append failed: ${stringifyUnknown(error)}`, { module: "supervisor" }));
-		return { sessionId, created: true };
+		return { sessionId, created: true, ...(previous ? { previousSessionId: previous.sessionId } : {}) };
 	}
 
 	/** Deleting the supervisor or a managed session unregisters it and journals the event. */

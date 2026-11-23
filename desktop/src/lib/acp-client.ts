@@ -358,7 +358,7 @@ export class AcpClient {
     return this.pix.planLaunches(request);
   }
 
-  openSupervisor(cwd: string, fresh?: boolean): Promise<{ sessionId: string; created: boolean }> {
+  openSupervisor(cwd: string, fresh?: boolean) {
     return this.pix.openSupervisor(cwd, fresh);
   }
 

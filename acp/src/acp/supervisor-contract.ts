@@ -72,6 +72,8 @@ export interface SupervisorOpenRequest {
 export interface SupervisorOpenResponse {
 	sessionId: string;
 	created: boolean;
+	/** The conversation retired by this rotation, if any. */
+	previousSessionId?: string;
 }
 
 export interface SupervisorHandoverRequest {
@@ -178,9 +180,14 @@ export function parseSupervisorOpenRequest(value: unknown): SupervisorOpenReques
 
 export function parseSupervisorOpenResponse(value: unknown): SupervisorOpenResponse {
 	const row = record(value, "Invalid supervisor open response");
+	const previousSessionId = row.previousSessionId;
 	if (typeof row.sessionId !== "string" || !row.sessionId || row.sessionId.length > MAX_SESSION_ID
-		|| typeof row.created !== "boolean") throw new Error("Invalid supervisor open response");
-	return { sessionId: row.sessionId, created: row.created };
+		|| typeof row.created !== "boolean"
+		|| (previousSessionId !== undefined && (typeof previousSessionId !== "string" || !previousSessionId
+			|| previousSessionId.length > MAX_SESSION_ID || previousSessionId === row.sessionId || !row.created))) {
+		throw new Error("Invalid supervisor open response");
+	}
+	return { sessionId: row.sessionId, created: row.created, ...(previousSessionId ? { previousSessionId } : {}) };
 }
 
 export function parseSupervisorHandoverRequest(value: unknown): SupervisorHandoverRequest {

@@ -87,7 +87,7 @@ import type {
 } from "../src/acp/autocomplete.js";
 import { SessionMapStore } from "../src/acp/session-map.js";
 import type { SessionEvent } from "../src/acp/session-events.js";
-import { parseSupervisorMandateResponse, SUPERVISOR_QUESTION_RESOLVED_CHANNEL, SUPERVISOR_WORKER_PREAMBLE } from "../src/acp/supervisor-contract.js";
+import { parseSupervisorMandateResponse, parseSupervisorOpenResponse, SUPERVISOR_QUESTION_RESOLVED_CHANNEL, SUPERVISOR_WORKER_PREAMBLE } from "../src/acp/supervisor-contract.js";
 import { PIX_SESSION_CATALOG_CHANGED_METHOD } from "../src/acp/session-catalog-contract.js";
 import { createSupervisorStore } from "../src/acp/supervisor-store.js";
 import type { PersistedDesktopQueues } from "../src/acp/queue-store.js";
@@ -6444,7 +6444,7 @@ test("project supervisor: a clean conversation inherits workers, queued wakes an
 	try {
 		await connectAs(harness.adapter, "pix-desktop", async (cx) => {
 			await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientCapabilities: {}, clientInfo: { name: "pix-desktop", version: "test" } });
-			const open = (fresh?: boolean) => cx.request("pix/supervisor/open", { cwd, fresh }) as Promise<{ sessionId: string; created: boolean }>;
+			const open = async (fresh?: boolean) => parseSupervisorOpenResponse(await cx.request("pix/supervisor/open", { cwd, fresh }));
 			const take = (sessionId: string) => cx.request(PIX_TAKE_AUTO_MESSAGE_METHOD, { sessionId });
 			const mandate = "pix/supervisor/mandate";
 			const old = await open();
@@ -6482,6 +6482,7 @@ test("project supervisor: a clean conversation inherits workers, queued wakes an
 
 			const [fresh, duplicate] = await Promise.all([open(true), open(true)]);
 			assert.notEqual(fresh.sessionId, old.sessionId);
+			assert.equal(fresh.previousSessionId, old.sessionId);
 			assert.deepEqual(duplicate, fresh);
 			assert.deepEqual(await open(), { sessionId: fresh.sessionId, created: false });
 			assert.deepEqual((await store.readRegistry(cwd)).sessions, before.sessions);

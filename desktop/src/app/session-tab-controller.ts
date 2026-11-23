@@ -14,6 +14,7 @@ export function createSessionTabController(options: SessionTabControllerOptions)
     replaceCurrentTabWithSession: selection.replaceCurrentTabWithSession,
     closeWorkspaceSessions: closure.closeWorkspaceSessions,
     closeSessionTab: closure.closeSessionTab,
+    replaceRetiredSupervisorTab: closure.replaceRetiredSupervisorTab,
     handleSessionTabClick: selection.handleSessionTabClick,
     openSessionSelector: selector.openSessionSelector,
     closeSessionSelector: selector.closeSessionSelector,

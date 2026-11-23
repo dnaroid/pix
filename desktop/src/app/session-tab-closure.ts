@@ -58,10 +58,22 @@ export function createSessionTabClosure(
     options.resetSessionActivity();
   }
 
-  async function closeSessionTab(
+  function closeSessionTab(sessionId: string, preferredNextSessionId?: string, onClosing?: () => void): Promise<boolean> {
+    return closeTab(sessionId, preferredNextSessionId, onClosing);
+  }
+
+  function replaceRetiredSupervisorTab(sessionId: string, replacementId: string): Promise<boolean> {
+    if (options.state.sessionId !== replacementId || !options.tabSessionIds().includes(sessionId)) {
+      return Promise.resolve(false);
+    }
+    return closeTab(sessionId, replacementId, undefined, replacementId);
+  }
+
+  async function closeTab(
     sessionId: string,
     preferredNextSessionId?: string,
     onClosing?: () => void,
+    replacementId?: string,
   ): Promise<boolean> {
     options.tabs.closeSelector();
     if (options.sessionMutationRunning() || sessionActions.isBusy(sessionId)) return false;
@@ -87,7 +99,8 @@ export function createSessionTabClosure(
     }
 
     const closingSession = options.catalog.sessions.find((session) => session.sessionId === sessionId);
-    const supervisor = closingSession ? sessionIsSupervisor(closingSession) : false;
+    // Rotation is confirmed by ACP even if a catalog refresh still shows the old marker.
+    const supervisor = !replacementId && !!closingSession && sessionIsSupervisor(closingSession);
     if (supervisor || options.promptRunning(sessionId)) {
       const running = options.promptRunning(sessionId);
       const title = closingSession?.title || "Untitled conversation";
@@ -99,6 +112,7 @@ export function createSessionTabClosure(
         if (confirmationClient !== options.client()
           || confirmationWorkspace !== options.workspace()
           || options.sessionMutationRunning()
+          || (replacementId && options.state.sessionId !== replacementId)
           || !options.tabSessionIds().includes(sessionId)) return false;
       } catch (error) {
         options.reportError(error);
@@ -126,13 +140,14 @@ export function createSessionTabClosure(
     }
     options.setErrorMessage(null);
     onClosing?.();
-    options.tabs.markClosed(sessionId);
+    if (replacementId) options.tabs.replace(sessionId, replacementId);
+    else options.tabs.markClosed(sessionId);
     // Retire ownership now, not on completion: pending sends, history and late
     // updates must not revive the closed view while ACP is stopping its runtime.
     // Keep transcript/composer snapshots until success so failure can restore it.
     options.forgetRuntime(sessionId);
     options.clearSessionActivity(sessionId);
-    options.retargetWorkbenchAnchors(sessionId, nextSessionId);
+    options.retargetWorkbenchAnchors(sessionId, replacementId ?? nextSessionId);
     let navigation: Promise<void> | undefined;
     if (wasActive) {
       options.history.cancel();
@@ -234,5 +249,5 @@ export function createSessionTabClosure(
     }
   }
 
-  return { closeWorkspaceSessions, closeSessionTab, deleteSelectedSession };
+  return { closeWorkspaceSessions, closeSessionTab, replaceRetiredSupervisorTab, deleteSelectedSession };
 }
