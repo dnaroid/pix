@@ -163,7 +163,7 @@ test("large records do not bypass identity, parent links or the file-size cap",a
   assert.equal(await readSessionTranscript(f.root,{...f.candidate,id:"wrong"},signal(),skip),undefined);
   await truncate(f.candidate.path,64*1024*1024+1);
   assert.equal(await readSessionTranscript(f.root,f.candidate,signal(),skip),undefined);
-  assert.deepEqual(diagnostics.map(d=>d.reason),["missing_parent","session_id_mismatch","file_exceeds_64_mib"]);
+  assert.deepEqual(diagnostics.map(d=>d.reason),["missing_parent","session_id_mismatch","file_exceeds_configured_limit"]);
 });
 test("missing parent diagnostics identify the child line and missing ID without repairing history",async t=>{
   const f=await fixture(t),diagnostics:unknown[]=[];

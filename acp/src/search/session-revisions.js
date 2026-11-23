@@ -68,17 +68,17 @@ export class SessionRevisionCatalog {
       this.watchers.set(directory, watcher);
     } catch { /* No watcher: every request reconciles instead of certifying stale data. */ }
   }
-  list(directory, extraPaths, signal) {
-    const operation = this.queue.catch(() => {}).then(() => this.refresh(directory, extraPaths, signal));
+  list(directory, extraPaths, signal, maxBytes = Infinity) {
+    const operation = this.queue.catch(() => {}).then(() => this.refresh(directory, extraPaths, signal, maxBytes));
     this.queue = operation;
     return operation;
   }
-  async refresh(directory, extraPaths, signal) {
+  async refresh(directory, extraPaths, signal, maxBytes) {
     signal.throwIfAborted();
     if (this.stopped) throw new Error("Session observer disposed");
     directory = resolve(directory);
     const extras = [...new Set(extraPaths.map(p => resolve(p)))].sort();
-    const scope = JSON.stringify([directory, extras]);
+    const scope = JSON.stringify([directory, extras, maxBytes]);
     if (extras.length > 10000) throw new Error("Session bound");
     if (scope !== this.scope) {
       for (const watcher of this.watchers.values()) watcher.close();
@@ -113,7 +113,7 @@ export class SessionRevisionCatalog {
     for (const filename of paths) {
       signal.throwIfAborted();
       const info = await lstat(filename).catch(e => { if (e.code !== "ENOENT") throw e; });
-      if (!regularSessionFile(info)) { next.delete(filename); continue; }
+      if (!regularSessionFile(info) || info.size > maxBytes) { next.delete(filename); continue; }
       const previous = this.files.get(filename);
       const createdAt = previous?.identity === `${info.dev}:${info.ino}` ? previous.createdAt : await creationTime(filename, info, signal);
       if (!createdAt) throw new Error("Session creation time unavailable");

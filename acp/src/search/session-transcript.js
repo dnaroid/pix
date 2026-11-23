@@ -6,9 +6,10 @@ import { sessionByteLines } from "./session-byte-lines.js";
 import { parseSessionRecord } from "./session-record.js";
 import { SESSION_TEXT_VERSION } from "./session-text.js";
 
+import { loadSessionMaxFileBytes } from "./session-size-settings.js";
+
 // Protocol twin in acp/src/search; parity is tested. Only public conversation text.
 export const CHUNK_CHARS = 1600;
-const MAX_BYTES = 64 * 1024 * 1024;
 const hash = text => createHash("sha256").update(text).digest("hex");
 const stamp = s => `${s.dev}:${s.ino}:${s.size}:${s.mtimeMs}:${s.ctimeMs}`;
 export function messageChunks(text) {
@@ -36,7 +37,9 @@ export async function readSessionTranscript(root, candidate, signal, onSkip = ()
   if (before.isSymbolicLink()) return skip("symbolic_link");
   if (!before.isFile()) return skip("not_regular_file");
   if (before.nlink !== 1) return skip("multiple_hard_links");
-  if (before.size > MAX_BYTES) return skip("file_exceeds_64_mib");
+  const maxBytes = await loadSessionMaxFileBytes();
+  if (before.size > maxBytes) return skip("file_exceeds_configured_limit");
+  signal.throwIfAborted();
   const file = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   const nodes = new Map();
   let header, leaf, name = "";
@@ -45,7 +48,7 @@ export async function readSessionTranscript(root, candidate, signal, onSkip = ()
   try {
     if (stamp(await file.stat()) !== stamp(before)) return skip("file_changed");
     // Bound the actual read, not just the initial stat, if a writer appends.
-    stream = file.createReadStream({ autoClose: false, signal, end: MAX_BYTES });
+    stream = file.createReadStream({ autoClose: false, signal, end: maxBytes });
     let lineNumber = 0;
     for await (const { line, byteOffset, byteLength } of sessionByteLines(stream, signal)) {
       lineNumber++;
@@ -102,10 +105,11 @@ export async function readSessionTranscript(root, candidate, signal, onSkip = ()
  * Avoid reparsing megabytes of unrelated history after every small paid batch. */
 export async function transcriptUnchanged(snapshot, signal) {
   signal.throwIfAborted();
+  const maxBytes = await loadSessionMaxFileBytes();
   const current = await lstat(snapshot.path).catch(() => undefined);
   signal.throwIfAborted();
   return Boolean(current?.isFile() && !current.isSymbolicLink() && current.nlink === 1
-    && stamp(current) === snapshot.fileStamp);
+    && current.size <= maxBytes && stamp(current) === snapshot.fileStamp);
 }
 
 /** Entire downstream suffix or an explicit gap notice: never silently drop late instructions. */

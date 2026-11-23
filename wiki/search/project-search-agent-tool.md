@@ -118,8 +118,12 @@ saved-name vectors and require a second Continue to populate them.
   Native header ID and project cwd authenticate each file; unsafe/corrupt files
   fail closed. Message chunks are UTF-16-safe, at most 1,600 characters, with
   message ID, role, order and offsets. Up to **1,000** sessions are inspected per
-  query; full-message reading skips files over 64 MiB or records whose combined
-  public text exceeds 1,048,576 UTF-16 characters (never truncated). Large JSONL
+  query. The global `search.sessionMaxFileMiB` setting in `~/.config/pi/pi-tools-suite.jsonc`
+  accepts whole MiB from 1 through 64 (default and invalid-value fallback: 64).
+  Larger saved session files are excluded from discovery, indexing and cached
+  search results, without making a pass partial or changing session history.
+  Full-message reading also skips records whose combined public text exceeds
+  1,048,576 UTF-16 characters (never truncated). Large JSONL
   records containing images, thinking or tool data are parsed fully in a cancellable
   worker (30-second deadline per large record), retaining only ancestry and public text; the excluded
   payload is not indexed or embedded. Small records parse locally. Malformed JSON,

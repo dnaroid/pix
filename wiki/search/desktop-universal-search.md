@@ -416,9 +416,11 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   text rows, and live retrieval never ranks removed source via cached vectors.
   Unchanged prose hashes continue to reuse compatible paid embeddings.
   Corrupt, incomplete, redirected, oversized or cyclic transcripts fail closed.
-  For this public-message reader, the file cap remains 64 MiB; the per-record
-  text cap is 1,048,576 UTF-16 characters of combined public text, not raw JSONL
-  size. Large image/tool/thinking records are fully validated in a cancellable
+  For this public-message reader, the file cap is the global
+  `search.sessionMaxFileMiB` value (whole MiB 1–64; default and invalid-value
+  fallback 64). Larger files are skipped before headers are read, without a
+  history reset. The per-record text cap is 1,048,576 UTF-16 characters of
+  combined public text, not raw JSONL size. Large image/tool/thinking records are fully validated in a cancellable
   worker with a 30-second deadline per large record, retaining ancestry and public text only.
   Ordinary small records parse locally. Invalid JSON, worker failures/timeouts
   and oversized public text reject the session without truncation. These rules

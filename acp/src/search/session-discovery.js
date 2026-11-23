@@ -6,9 +6,10 @@ import { parseSessionRecord } from "./session-record.js";
 import { SessionRevisionCatalog, sessionRevisionDigest } from "./session-revisions.js";
 import { SessionReadCache } from "./session-read-cache.js";
 
+import { loadSessionMaxFileBytes } from "./session-size-settings.js";
+
 const stamp = s => `${s.dev}:${s.ino}:${s.size}:${s.mtimeMs}:${s.ctimeMs}`;
 const regular = s => s?.isFile() && !s.isSymbolicLink() && s.nlink === 1;
-const MAX_BYTES = 64 * 1024 * 1024;
 const titleCache = new SessionReadCache();
 export function nativeSessionDirectory(root, agentDir) {
   return join(agentDir, "sessions", `--${resolve(root).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`);
@@ -19,7 +20,8 @@ export class SessionCandidateCatalog {
   constructor(options) { this.cache = new Map(); this.revisions = new SessionRevisionCatalog(options); }
   dispose() { this.revisions.dispose(); this.cache.clear(); }
   async snapshot(root, agentDir, signal, extraPaths = [], mapping = []) {
-    const rows = await this.revisions.list(nativeSessionDirectory(root, agentDir), extraPaths, signal);
+    const maxBytes = await loadSessionMaxFileBytes();
+    const rows = await this.revisions.list(nativeSessionDirectory(root, agentDir), extraPaths, signal, maxBytes);
     const live = new Set(rows.map(r => r.path));
     const aliases = mapping.filter(r => live.has(resolve(r.piSessionPath)))
       .map(r => [resolve(r.piSessionPath), r.sessionId, r.piSessionId, r.namedTitle, r.title]).sort();
@@ -27,7 +29,8 @@ export class SessionCandidateCatalog {
   }
   async list(root, agentDir, signal, extraPaths = []) {
     signal.throwIfAborted();
-    const rows = await this.revisions.list(nativeSessionDirectory(root, agentDir), extraPaths, signal);
+    const maxBytes = await loadSessionMaxFileBytes();
+    const rows = await this.revisions.list(nativeSessionDirectory(root, agentDir), extraPaths, signal, maxBytes);
     const live = new Set(), candidates = [];
     for (const row of rows) {
       signal.throwIfAborted();
@@ -69,7 +72,9 @@ export class SessionCandidateCatalog {
 export async function readSessionTitle(root, candidate, signal) {
   signal.throwIfAborted();
   const before = await lstat(candidate.path).catch(e => { if (e.code !== "ENOENT") throw e; });
-  if (!regular(before) || before.size > MAX_BYTES) return;
+  if (!regular(before)) return;
+  const maxBytes = await loadSessionMaxFileBytes();
+  if (before.size > maxBytes) return;
   signal.throwIfAborted();
   const cacheKey = JSON.stringify([resolve(root), candidate.id, candidate.path]);
   const cached = titleCache.get(cacheKey, stamp(before));
@@ -78,7 +83,7 @@ export async function readSessionTitle(root, candidate, signal) {
   let stream, lines;
   try {
     if (stamp(await file.stat()) !== stamp(before)) return;
-    stream = file.createReadStream({ encoding: "utf8", autoClose: false, signal, end: MAX_BYTES });
+    stream = file.createReadStream({ encoding: "utf8", autoClose: false, signal, end: maxBytes });
     lines = createInterface({ input: stream, crlfDelay: Infinity });
     let header, name, firstMessage = "";
     for await (const line of lines) {

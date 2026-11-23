@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 // Writer (ACP) and observer (native probe) must share identical coverage/revision logic.
 const suite = new URL("../../external/pi-tools-suite/src/project-search/", import.meta.url);
 const acp = new URL("../src/search/", import.meta.url);
-const MIRRORED = ["source-coverage", "commit-stamp", "task-snapshot", "session-watermark", "session-index-revision", "source-work"];
+const MIRRORED = ["source-coverage", "commit-stamp", "task-snapshot", "session-watermark", "session-index-revision", "session-size-settings", "source-work"];
 
 for (const name of MIRRORED) {
   test(`${name} is mirrored verbatim from pi-tools-suite`, async () => {

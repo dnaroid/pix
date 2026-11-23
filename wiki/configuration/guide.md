@@ -520,6 +520,11 @@ microphone permission.
   [native search contract](../search/native-repository-search.md#optional-semantic-retrieval).
   Legacy project and external-search data/configuration is not read, migrated,
   deleted or modified by this integration.
+- **Session search size:** `search.sessionMaxFileMiB` in
+  `~/.config/pi/pi-tools-suite.jsonc` accepts whole MiB from 1 through 64
+  (default and invalid-value fallback: 64). Saved session files above the limit
+  are excluded from search discovery, indexing and cached results; history is
+  not changed. See [project-search-agent-tool](../search/project-search-agent-tool.md).
 
 ## Local project instructions
 

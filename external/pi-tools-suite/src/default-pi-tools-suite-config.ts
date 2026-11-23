@@ -1,3 +1,4 @@
+import { SESSION_MAX_FILE_MIB } from "./project-search/session-size-settings.mjs";
 import { codeDefaults, knowledgeDefaults } from "./project-search/source-extension-settings.mjs";
 
 // Default user config written when pi-tools-suite.jsonc is missing.
@@ -11,6 +12,8 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
     // Optional OpenRouter reranking across Code/Knowledge/Sessions/Tasks/Commits.
     // Uploads query and candidate text; charges may apply. Empty disables it.
     // "rerankerModel": "voyageai/rerank-3-lite",
+    // Skip saved session files larger than this limit (1–64 MiB); history is unchanged.
+    "sessionMaxFileMiB": ${SESSION_MAX_FILE_MIB},
     "codeExtensions": ${JSON.stringify(codeDefaults)},
     "knowledgeExtensions": ${JSON.stringify(knowledgeDefaults)}
   },

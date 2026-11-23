@@ -1433,6 +1433,13 @@
     "search": {
       "type": "object",
       "properties": {
+        "sessionMaxFileMiB": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "default": 64,
+          "description": "Maximum saved session file size in MiB for search and indexing. Larger session files are skipped without changing history."
+        },
         "codeExtensions": {
           "type": "array",
           "items": {

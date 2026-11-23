@@ -24,7 +24,7 @@ const SKIP_REASONS = new Set([
   "missing_parent", "line_exceeds_limit", "invalid_json", "file_changed",
   "stat_failed", "empty_transcript", "session_id_mismatch", "workspace_mismatch",
   "cyclic_parent_chain", "unreadable", "unrecognized_format", "invalid_session",
-  "file_exceeds_64_mib",
+  "file_exceeds_configured_limit",
 ]);
 const NUMERIC_FIELDS = [
   "sessionsTotal", "sessionsChecked", "sessionsSkipped", "chunksDiscovered",

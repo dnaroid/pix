@@ -4,12 +4,14 @@ import { setImmediate as yieldTask } from "node:timers/promises";
 import { storage, exists, valid, decode, INDEX_META, RANGES, SESSION_CHUNK_FORMAT } from "./session-chunk-store.js";
 import { requireSourceEnabled } from "./source-policy.js";
 
+import { loadSessionMaxFileBytes } from "./session-size-settings.js";
+
 const stamp = s => `${s.dev}:${s.ino}:${s.size}:${s.mtimeMs}:${s.ctimeMs}`;
-async function current(row, signal) {
+async function current(row, signal, maxBytes) {
   signal.throwIfAborted();
   const info = await lstat(row.path).catch(() => undefined);
   signal.throwIfAborted();
-  return Boolean(info?.isFile() && !info.isSymbolicLink() && info.nlink === 1 && stamp(info) === row.file_stamp);
+  return Boolean(info?.isFile() && !info.isSymbolicLink() && info.nlink === 1 && info.size <= maxBytes && stamp(info) === row.file_stamp);
 }
 async function indexedFiles(db, root, candidates, signal) {
   if (!exists(db, INDEX_META) || !exists(db, RANGES)) return [];
@@ -17,8 +19,9 @@ async function indexedFiles(db, root, candidates, signal) {
   const rows = db.prepare(`SELECT * FROM ${INDEX_META} WHERE cwd=? AND format=? LIMIT 10001`).all(resolve(root), SESSION_CHUNK_FORMAT);
   if (rows.length > 10000) throw new Error("Session index candidate limit exceeded");
   const result = [];
+  const maxBytes = await loadSessionMaxFileBytes();
   for (const row of rows) {
-    if ((!allowed || allowed.get(row.session_id) === row.path) && await current(row,signal)) result.push(row);
+    if ((!allowed || allowed.get(row.session_id) === row.path) && await current(row,signal,maxBytes)) result.push(row);
   }
   return result;
 }
@@ -80,7 +83,8 @@ export async function searchSessionChunks(root,candidates,query,signal,embedding
       }
     }
     // File or branch changes during a long vector scan cannot return stale rows.
-    for(const file of files) if(best.has(file.session_id) && !await current(file,signal)) best.delete(file.session_id);
+    const maxBytes = await loadSessionMaxFileBytes();
+    for(const file of files) if(best.has(file.session_id) && !await current(file,signal,maxBytes)) best.delete(file.session_id);
     await requireSourceEnabled(root,"sessions",signal);
     return [...best.values()].sort((a,b)=>b.score-a.score || a.id.localeCompare(b.id));
   } finally {
@@ -102,7 +106,7 @@ export async function hasSessionChunkVectors(root,candidates,signal,embedding) {
       JOIN pix_session_chunk_vectors v ON v.hash=c.hash AND v.identity=? WHERE c.session_id=? AND r.active=1`);
     for(const file of files) {
       signal.throwIfAborted();
-      if(lookup.all(`session-chunks-v1:${embedding.identity}`,file.session_id).some(r=>decode(r.vector,embedding.dimension)) && await current(file,signal)) {
+      if(lookup.all(`session-chunks-v1:${embedding.identity}`,file.session_id).some(r=>decode(r.vector,embedding.dimension)) && await current(file,signal,await loadSessionMaxFileBytes())) {
         await requireSourceEnabled(root,"sessions",signal); return true;
       }
       await yieldTask();
