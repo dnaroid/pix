@@ -28,11 +28,18 @@ function restoreEnv(name: "PI_WEB_SEARCH_TIMEOUT_MS" | "TAVILY_API_KEY" | "PI_TO
 	else process.env[name] = value;
 }
 
-async function registeredWebSearch(braveFetch: FetchMock = async () => new Response('<main id="mixed-main"></main>')) {
-	const { __setBraveTransportForTests, default: webSearch } = await import("../src/web-search/index.js");
-	// Default to an empty Brave page for tests exercising downstream providers.
+async function registeredWebSearch(
+	braveFetch: FetchMock = async () => new Response('<main id="mixed-main"></main>'),
+	ddgFetch: FetchMock = async () => new Response('<html><body><div class="serp__results"><div id="links" class="results"></div></div></body></html>'),
+) {
+	const { __setBraveTransportForTests, __setDdgTransportForTests, default: webSearch } = await import("../src/web-search/index.js");
+	// Default to empty DuckDuckGo/Brave pages for tests exercising downstream providers.
 	__setBraveTransportForTests(async (url, signal) => {
 		const response = await braveFetch(url, { signal });
+		return { status: response.status, body: await response.text() };
+	});
+	__setDdgTransportForTests(async (url, signal) => {
+		const response = await ddgFetch(url, { signal });
 		return { status: response.status, body: await response.text() };
 	});
 	const tools: RegisteredTool[] = [];
@@ -47,8 +54,8 @@ async function registeredWebSearch(braveFetch: FetchMock = async () => new Respo
 	};
 }
 
-async function registeredTools(braveFetch?: FetchMock) {
-	return (await registeredWebSearch(braveFetch)).tools;
+async function registeredTools(braveFetch?: FetchMock, ddgFetch?: FetchMock) {
+	return (await registeredWebSearch(braveFetch, ddgFetch)).tools;
 }
 
 function mockFetch(handler: FetchMock) {
@@ -137,38 +144,78 @@ describe("web-search tools", () => {
 		expect(prompted).toBe(false);
 	});
 
-	test("web_search uses keyless Brave first and skips Tavily on a hit", async () => {
+	test("web_search uses keyless DuckDuckGo first and skips Brave and Tavily on a hit", async () => {
 		process.env.TAVILY_API_KEY = "tvly-test-secret";
 		const requests: Array<{ url: string; authorization?: string }> = [];
+		const ddgHtml = `<html><body><div class="serp__results"><div id="links" class="results">
+			<div class="result results_links results_links_deep web-result"><div class="links_main links_deep result__body">
+				<h2 class="result__title"><a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fone%3Fx%3D1&amp;rut=abc">First &amp; best</a></h2>
+				<a class="result__snippet" href="#">Snippet <strong>one</strong></a>
+			</div></div>
+			<div class="result results_links results_links_deep web-result"><div class="links_main links_deep result__body">
+				<h2 class="result__title"><a class="result__a" href="https://example.com/two">Second</a></h2>
+			</div></div>
+			<div class="result results_links results_links_deep web-result"><div class="links_main links_deep result__body">
+				<h2 class="result__title"><a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fthree&amp;rut=def">Third</a></h2>
+			</div></div>
+		</div></div></body></html>`;
+		mockFetch(async (url, init) => {
+			requests.push({ url: String(url), authorization: new Headers(init?.headers).get("Authorization") ?? undefined });
+			throw new Error("Unexpected fallback request");
+		});
+
+		const tools = await registeredTools(undefined, async (url, init) => {
+			requests.push({ url: String(url), authorization: new Headers(init?.headers).get("Authorization") ?? undefined });
+			return new Response(ddgHtml);
+		});
+		const result = await tools.web_search.execute("call-1", { query: "pi news", max_results: 2 });
+
+		expect(requests).toEqual([{ url: "https://html.duckduckgo.com/html/?q=pi+news", authorization: undefined }]);
+		expect(result.content[0]?.text).toContain("1. First & best\n   URL: https://example.com/one?x=1\n   Snippet one");
+		expect(result.content[0]?.text).not.toContain("Third");
+		expect(result.details).toMatchObject({
+			provider: "duckduckgo",
+			host: "https://html.duckduckgo.com",
+			resultCount: 2,
+			emptyProviders: [],
+		});
+	});
+
+	test("web_search falls back from empty DuckDuckGo results to a Brave hit", async () => {
+		const requests: string[] = [];
 		const braveHtml = `<html><body><main><section id="mixed-main">
 			<div class="snippet svelte-x" data-pos="0" data-type="web"><a href="https://example.com/one"><div class="title search-snippet-title" title="First &amp; best">First</div></a>
 				<div class="generic-snippet"><div class="content">Snippet <strong>one</strong></div></div></div>
 			<div class="snippet svelte-x" data-pos="1" data-type="web"><a href="https://example.com/two"><div class="title">Second</div></a></div>
 			<div class="snippet svelte-x" data-pos="2" data-type="web"><a href="https://example.com/three"><div class="title">Third</div></a></div>
 		</section></main></body></html>`;
-		mockFetch(async (url, init) => {
-			requests.push({ url: String(url), authorization: new Headers(init?.headers).get("Authorization") ?? undefined });
+		mockFetch(async (url) => {
+			requests.push(String(url));
 			throw new Error("Unexpected fallback request");
 		});
 
-		const tools = await registeredTools(async (url, init) => {
-			requests.push({ url: String(url), authorization: new Headers(init?.headers).get("Authorization") ?? undefined });
+		const tools = await registeredTools(async (url) => {
+			requests.push(String(url));
 			return new Response(braveHtml);
+		}, async (url) => {
+			requests.push(String(url));
+			return new Response('<html><body><div class="serp__results"><div id="links" class="results"></div></div></body></html>');
 		});
 		const result = await tools.web_search.execute("call-1", { query: "pi news", max_results: 2 });
 
-		expect(requests).toEqual([{ url: "https://search.brave.com/search?q=pi+news&source=web", authorization: undefined }]);
+		expect(requests).toEqual(["https://html.duckduckgo.com/html/?q=pi+news", "https://search.brave.com/search?q=pi+news&source=web"]);
 		expect(result.content[0]?.text).toContain("1. First & best\n   URL: https://example.com/one\n   Snippet one");
 		expect(result.content[0]?.text).not.toContain("Third");
 		expect(result.details).toMatchObject({
 			provider: "brave",
 			host: "https://search.brave.com",
 			resultCount: 2,
-			emptyProviders: [],
+			emptyProviders: ["duckduckgo"],
 		});
+		expect(result.details?.failures).toBeUndefined();
 	});
 
-	test("web_search continues past empty Brave results to Tavily", async () => {
+	test("web_search continues past empty DuckDuckGo and Brave results to Tavily", async () => {
 		process.env.TAVILY_API_KEY = "tvly-test-secret";
 		const hosts: string[] = [];
 		mockFetch(async (url) => {
@@ -180,12 +227,15 @@ describe("web-search tools", () => {
 		const tools = await registeredTools(async (url) => {
 			hosts.push(new URL(String(url)).hostname);
 			return new Response('<main id="mixed-main"></main>');
+		}, async (url) => {
+			hosts.push(new URL(String(url)).hostname);
+			return new Response('<html><body><div class="serp__results"><div id="links" class="results"></div></div></body></html>');
 		});
 		const result = await tools.web_search.execute("call-1", { query: "pi news" });
 
-		expect(hosts).toEqual(["search.brave.com", "api.tavily.com"]);
+		expect(hosts).toEqual(["html.duckduckgo.com", "search.brave.com", "api.tavily.com"]);
 		expect(result.content[0]?.text).toStartWith("Provider: tavily\n\n1. Tavily hit");
-		expect(result.details).toMatchObject({ provider: "tavily", resultCount: 1, emptyProviders: ["brave"] });
+		expect(result.details).toMatchObject({ provider: "tavily", resultCount: 1, emptyProviders: ["duckduckgo", "brave"] });
 		expect(result.details?.failures).toBeUndefined();
 	});
 
@@ -201,7 +251,7 @@ describe("web-search tools", () => {
 
 		expect(requests).toEqual([]);
 		expect(result.content[0]?.text).toBe("Provider: brave\n\nNo results found.");
-		expect(result.details).toMatchObject({ provider: "brave", resultCount: 0, emptyProviders: ["brave"] });
+		expect(result.details).toMatchObject({ provider: "brave", resultCount: 0, emptyProviders: ["duckduckgo", "brave"] });
 	});
 
 	test("web_search preserves an empty response when Tavily fails", async () => {
@@ -214,22 +264,28 @@ describe("web-search tools", () => {
 		expect(result.details).toMatchObject({
 			provider: "brave",
 			resultCount: 0,
-			emptyProviders: ["brave"],
+			emptyProviders: ["duckduckgo", "brave"],
 			failures: [{ provider: "tavily", error: expect.stringContaining("429") }],
 		});
 	});
 
-	test("web_search falls back after a Brave CAPTCHA and reports both failures in order", async () => {
+	test("web_search falls back after provider challenges and reports every failure in order", async () => {
 		process.env.TAVILY_API_KEY = "tvly-must-not-leak";
 		const urls: string[] = [];
 		mockFetch(async (url) => {
 			urls.push(String(url));
 			return new Response("{}", { status: 432 });
 		});
-		const tools = await registeredTools(async (url) => {
-			urls.push(String(url));
-			return new Response("<html><body>Please solve the captcha</body></html>", { status: 200 });
-		});
+		const tools = await registeredTools(
+			async (url) => {
+				urls.push(String(url));
+				return new Response("<html><body>Please solve the captcha</body></html>", { status: 200 });
+			},
+			async (url) => {
+				urls.push(String(url));
+				return new Response("<html><body>anomaly detected, enable JavaScript</body></html>", { status: 200 });
+			},
+		);
 
 		try {
 			await tools.web_search.execute("call-1", { query: "latest pi" });
@@ -237,11 +293,12 @@ describe("web-search tools", () => {
 		} catch (error) {
 			const message = (error as Error).message;
 			expect(message).toContain("Tavily search fallback also failed");
-			expect(message).toStartWith("Brave Search failed");
+			expect(message).toStartWith("DuckDuckGo Search failed");
+			expect(message).toContain("Brave Search fallback also failed");
 			expect(message).toContain("possible CAPTCHA");
 			expect(message).not.toContain("tvly-must-not-leak");
 		}
-		expect(urls.map((url) => new URL(url).host)).toEqual(["search.brave.com", "api.tavily.com"]);
+		expect(urls.map((url) => new URL(url).host)).toEqual(["html.duckduckgo.com", "search.brave.com", "api.tavily.com"]);
 	});
 
 	test("web_fetch rejects unsupported targets and honours cancellation without using search providers", async () => {
@@ -260,7 +317,7 @@ describe("web-search tools", () => {
 		expect(requests).toEqual([]);
 	});
 
-	test("does not start a fallback after cancellation during Brave", async () => {
+	test("does not start a fallback after cancellation during the first provider", async () => {
 		process.env.TAVILY_API_KEY = "tvly-test-secret";
 		const controller = new AbortController();
 		let requestCount = 0;
@@ -271,10 +328,50 @@ describe("web-search tools", () => {
 			});
 		});
 
-		const pending = (await registeredTools(globalThis.fetch)).web_search.execute("call-1", { query: "latest pi" }, controller.signal);
+		const pending = (await registeredTools(undefined, globalThis.fetch)).web_search.execute("call-1", { query: "latest pi" }, controller.signal);
 		controller.abort();
 
 		await expectRejectsWithMessage(pending, "cancelled");
 		expect(requestCount).toBe(1);
+	});
+});
+
+describe("parseDdgSearchHtml", () => {
+	const page = (results: string) => `<html><body><div class="serp__results"><div id="links" class="results">${results}</div></div></body></html>`;
+	const block = (href: string, title: string, snippet = "", extraClass = "") =>
+		`<div class="result results_links results_links_deep web-result ${extraClass}"><div class="links_main links_deep result__body">` +
+		`<h2 class="result__title"><a class="result__a" href="${href}">${title}</a></h2>` +
+		(snippet ? `<a class="result__snippet" href="#">${snippet}</a>` : "") +
+		`</div></div>`;
+
+	test("decodes uddg targets, keeps direct links and skips ads, duplicates and internal links", async () => {
+		const { parseDdgSearchHtml } = await import("../src/web-search/ddg-search.js");
+		const html = page([
+			block("//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fone%3Fx%3D1&amp;rut=abc", "First &amp; best", "Snippet <strong>one</strong>"),
+			block("//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fone%3Fx%3D1&amp;rut=xyz", "Duplicate"),
+			block("https://example.com/two", "Second", "Snippet two"),
+			block("//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fad&amp;rut=zzz", "Ad", "Buy now", "result--ad"),
+			block("/y.js?q=internal&ad_provider=ddg", "Internal"),
+		].join(""));
+
+		expect(parseDdgSearchHtml(html)).toEqual([
+			{ title: "First & best", url: "https://example.com/one?x=1", content: "Snippet one" },
+			{ title: "Second", url: "https://example.com/two", content: "Snippet two" },
+		]);
+	});
+
+	test("treats a recognized results container without hits as empty and throws on foreign pages", async () => {
+		const { parseDdgSearchHtml } = await import("../src/web-search/ddg-search.js");
+		expect(parseDdgSearchHtml(page(""))).toEqual([]);
+		expect(parseDdgSearchHtml('<html><body><div class="result result--no-results">No results.</div></body></html>')).toEqual([]);
+
+		const challenge = '<html><body><form action="/html" method="post">challenge</form></body></html>';
+		let message = "";
+		try {
+			parseDdgSearchHtml(challenge);
+		} catch (error) {
+			message = (error as Error).message;
+		}
+		expect(message).toContain("possible CAPTCHA");
 	});
 });

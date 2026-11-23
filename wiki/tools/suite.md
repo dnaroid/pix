@@ -85,7 +85,7 @@ saved-provider safeguards.
 - `todo` — `todo` tool, `/todos`, `/todos-persist`, `/todos-scope`, and `/todos-clear` (also `/todos clear`); supports parent/subtask hierarchy, blockers, ready-task filtering, deferred out-of-scope items, batch operations, JSON/Markdown import/export, automatic clearing when all visible todos are completed, and optional project persistence via `/todos persist on` or `/todos-persist on`; clean Pi TUI sessions also show the active plan as a native widget, while Pix presentation remains renderer-owned; localization/i18n has been removed
 - `model-tools` — model-specific tool aliases such as Claude/GLM-style `Read` / `Edit` / `Write` / `Bash` / `Grep` / `Glob` / `LS`, GPT/Codex-style `shell`, and model-gated `apply_patch`. `/shell-workdir allow <path>`, `list`, and `revoke <path>` manage canonical extra workdir roots for the current session only; user-level `"restrictShellWorkdir": false` removes the workdir boundary; see [the shell workdir contract](../operations/shell-workdir-session-grants.md).
 - `usage` — `/usage` command and startup hint for read-only AI quota checks across OpenAI, Zhipu AI, Z.ai, and Google Antigravity, including Antigravity quota by model
-- `web-search` — `web_search` and `web_fetch` tools migrated from `@ollama/pi-web-search`; supports keyless Brave Search HTML as the first `web_search` provider with an optional Tavily Search fallback, fetches public pages directly with local HTML-to-Markdown extraction for `web_fetch`, provides `/web-credentials` for secure user-level Tavily key storage, supports request timeouts via `timeout_ms` / `PI_WEB_SEARCH_TIMEOUT_MS`, and reports provider-specific errors
+- `web-search` — `web_search` and `web_fetch` tools migrated from `@ollama/pi-web-search`; supports keyless DuckDuckGo HTML search as the first `web_search` provider, then keyless Brave Search, then an optional Tavily Search fallback, fetches public pages directly with local HTML-to-Markdown extraction for `web_fetch`, provides `/web-credentials` for secure user-level Tavily key storage, supports request timeouts via `timeout_ms` / `PI_WEB_SEARCH_TIMEOUT_MS`, and reports provider-specific errors
 - `dcp` — Dynamic Context Pruning ported from `opencode-dynamic-context-pruning` for the Pi SDK: explicit `compress` tool with range and message modes, `/dcp` commands (context, stats, sweep, manual, decompress, recompress, compress), same-call overlap validation, recoverable compressed-block rollups, grouped message-mode skip diagnostics, stable raw-message anchors when available, protected user/tool preservation, deduplication, error purging, and context nudges; clean Pi TUI sessions show a native context-capacity map driven by live SDK occupancy and the cached prepared DCP classification, while Pix keeps its existing renderer/Desktop visualization
 - `prompt-commands` — user slash-command builder: `/prompt-commands` opens a CRUD menu for saved prompt-backed slash commands, stores them under `promptCommands` in `~/.config/pi/pi-tools-suite.jsonc`, reloads after edits, and runs each saved prompt as a normal user message
 - Resource Registry is Desktop-only and runs directly in the Pix ACP service; tools-suite no longer registers `/registry` or a TUI Registry module. Existing `resourceRegistry` JSONC settings remain compatible with Desktop.
@@ -1196,7 +1196,7 @@ The default source is `OPENCODE_AUTH_CONTENT`, `OPENCODE_DATA_DIR/auth.json`, or
 
 ## Web search
 
-`src/web-search` registers `web_search` (keyless Brave Search HTML first, then optional Tavily), `web_fetch` (direct public-page fetch with local Markdown extraction), and the `/web-credentials` setup command:
+`src/web-search` registers `web_search` (keyless DuckDuckGo HTML first, then keyless Brave Search, then optional Tavily), `web_fetch` (direct public-page fetch with local Markdown extraction), and the `/web-credentials` setup command:
 
 - `web_search` posts `{ query, max_results }` and returns formatted title/URL/snippet results plus structured `details.results`.
 - `web_fetch` takes `{ url }`, fetches a direct public HTTP(S) page over Node HTTP(S) with a `Pix-Reader` user agent and a Markdown-preferring `Accept` header, retries once with a browser user agent after a 403, 429 or 503 response, passes Markdown responses through, and otherwise extracts Markdown locally from HTML with page chrome (ads, sidebars, navigation boxes, link bars and similar) removed (parse5 parses HTML only). Output is `Title:`, `URL:` (final URL) and `Content:` sections. It never uses Ollama, Tavily, rdrr, or site APIs; it rejects URLs with embedded credentials, non-public addresses (checked at connection time, including redirects), PDFs and other unsupported types, and responses over 1 MiB.
@@ -1204,9 +1204,11 @@ The default source is `OPENCODE_AUTH_CONTENT`, `OPENCODE_DATA_DIR/auth.json`, or
 
 `web_search` has no Ollama provider and no local Ollama daemon or autostart. Requests time out after 30 seconds by default. Override globally with `PI_WEB_SEARCH_TIMEOUT_MS` or per call with `timeout_ms` (maximum 120000 ms). Tool results include `host`, `timeoutMs`, and truncation metadata in `details`; `web_fetch` results use `provider: "local"`, and its timeout bounds the whole fetch, download and extraction.
 
-Configure a Tavily key to enable a fallback for `web_search`. After keyless Brave Search fails or returns no results, `web_search` retries through `https://api.tavily.com/search`. `web_fetch` has no fallback provider. The Tavily key is sent only in Tavily's bearer authorization header and is never accepted as a tool parameter or included in result details. Tavily results set `details.provider` to `tavily` and Brave results to `brave`. Fallback results include the first provider failure under `details.fallbackFrom` and every earlier failure, in order, under `details.failures`.
+Configure a Tavily key to enable a final fallback for `web_search`. After keyless DuckDuckGo and Brave Search both fail or return no results, `web_search` retries through `https://api.tavily.com/search`. `web_fetch` has no fallback provider. The Tavily key is sent only in Tavily's bearer authorization header and is never accepted as a tool parameter or included in result details. Tavily results set `details.provider` to `tavily`, Brave results to `brave` and DuckDuckGo results to `duckduckgo`. Fallback results include the first provider failure under `details.fallbackFrom` and every earlier failure, in order, under `details.failures`.
 
-The keyless Brave Search provider needs no key and runs first, before Tavily. It fetches `https://search.brave.com/search?q=<query>&source=web` through the system `curl` binary (no shell), parses the returned HTML locally, and caps the response at 4 MiB. This is best-effort parsing of a public page, not a documented API.
+The keyless DuckDuckGo provider needs no key and runs first. It fetches `https://html.duckduckgo.com/html/?q=<query>` over native Node HTTPS (no `curl`) with a browser user agent and `Accept-Encoding: identity`, follows at most 4 redirects, caps the response at 2 MiB, and parses the results page locally (about 10 results per query, no pagination). HTTP 202 is reported as a challenge and HTTP 429 as a rate-limit error. This is best-effort parsing of a public page, not a documented API.
+
+The keyless Brave Search provider needs no key and runs second, after DuckDuckGo and before Tavily. It fetches `https://search.brave.com/search?q=<query>&source=web` through the system `curl` binary (no shell), parses the returned HTML locally, and caps the response at 4 MiB. This is best-effort parsing of a public page, not a documented API.
 
 The recommended interactive setup is:
 
@@ -1226,7 +1228,7 @@ Environment variables remain supported and take precedence over stored keys:
 export TAVILY_API_KEY="tvly-..."
 ```
 
-For `web_search`, the timeout applies independently to each provider attempt, so a failed Brave request followed by Tavily can take up to roughly twice the configured timeout (one attempt without a Tavily key). Tavily Search fallback uses basic search and clamps `max_results` to Tavily's documented maximum of 20.
+For `web_search`, the timeout applies independently to each provider attempt, so failed DuckDuckGo and Brave requests followed by Tavily can take up to roughly three times the configured timeout (two attempts without a Tavily key). Tavily Search fallback uses basic search and clamps `max_results` to Tavily's documented maximum of 20.
 
 Troubleshooting:
 
@@ -1234,6 +1236,7 @@ Troubleshooting:
 | --- | --- |
 | `Tavily ... rejected TAVILY_API_KEY` | Update the Tavily key through `/web-credentials` or `TAVILY_API_KEY`. |
 | `Tavily ... limit was exceeded` | Check Tavily usage/plan limits in the Tavily dashboard. |
+| `DuckDuckGo Search returned a challenge page (HTTP 202)` or `DuckDuckGo Search returned an unrecognized page` | DuckDuckGo challenged the request or changed its results page; the chain continues to Brave Search. Wait and retry later. |
 | `Brave Search rate limit was exceeded (HTTP 429)` | Brave throttles keyless search; the chain continues to Tavily when a key is configured, or wait and retry. |
 | `Brave Search returned an unrecognized page (possible CAPTCHA or layout change)` | Brave served a CAPTCHA or changed layout; open https://search.brave.com in a browser to confirm. |
 | `curl is not installed` | Install the system `curl` binary; keyless Brave Search requires it. |
@@ -1243,7 +1246,7 @@ Troubleshooting:
 | `Page exceeds the 1 MiB limit` / `Server ignored uncompressed content request` | `web_fetch` reads at most 1 MiB of uncompressed content; use a smaller page. |
 | `web_fetch request timed out` | Increase per-call `timeout_ms` or `PI_WEB_SEARCH_TIMEOUT_MS`. |
 
-Do not send secrets, tokens, private repository text, or credential-bearing URLs through these tools. `web_search` sends its query to Brave Search and, on fallback, Tavily; `web_fetch` requests the given URL directly from this machine.
+Do not send secrets, tokens, private repository text, or credential-bearing URLs through these tools. `web_search` sends its query to DuckDuckGo, then Brave Search and, on fallback, Tavily; `web_fetch` requests the given URL directly from this machine.
 
 ## Layout
 

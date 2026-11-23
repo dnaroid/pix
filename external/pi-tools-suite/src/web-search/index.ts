@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { request as httpsRequest } from "node:https";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -10,6 +11,7 @@ import { Type } from "typebox";
 import { WEB_SEARCH_TOOL_DESCRIPTIONS } from "../tool-descriptions";
 import { suiteDiagnostics } from "../lib/suite-diagnostics.js";
 import { BRAVE_SEARCH_HEADERS, BRAVE_SEARCH_HOST, braveSearchUrl, parseBraveSearchHtml } from "./brave-search.js";
+import { DDG_SEARCH_HEADERS, DDG_SEARCH_HOST, ddgSearchUrl, parseDdgSearchHtml } from "./ddg-search.js";
 import { downloadPublicPage, parsePublicPageUrl } from "./public-page.js";
 
 interface SearchResult {
@@ -22,7 +24,7 @@ interface SearchResponse {
 	results: SearchResult[];
 }
 
-type Provider = "tavily" | "brave";
+type Provider = "tavily" | "brave" | "duckduckgo";
 
 interface ProviderFailure {
 	provider: Provider;
@@ -342,7 +344,8 @@ function normalizeBraveError(error: unknown, timeoutMs: number, timedOut: boolea
 const BRAVE_MAX_BYTES = 4 * 1024 * 1024;
 const STATUS_MARKER = "\n__PI_HTTP_STATUS__:";
 
-export type BraveTransport = (url: string, signal: AbortSignal) => Promise<{ status: number; body: string }>;
+export type HtmlSearchTransport = (url: string, signal: AbortSignal) => Promise<{ status: number; body: string }>;
+export type BraveTransport = HtmlSearchTransport;
 
 /**
  * Brave rejects Node/Bun TLS clients (HTTP 429) but serves curl, so the keyless search
@@ -393,6 +396,95 @@ async function searchBrave(query: string, maxResults: number, signal: AbortSigna
 		return { results: parseBraveSearchHtml(body).slice(0, limit) };
 	} catch (error) {
 		throw normalizeBraveError(error, timeoutMs, requestSignal.timedOut(), signal);
+	} finally {
+		requestSignal.cleanup();
+	}
+}
+
+function normalizeDdgError(error: unknown, timeoutMs: number, timedOut: boolean, parentSignal: AbortSignal | undefined): Error {
+	if (timedOut) return new Error(`DuckDuckGo Search request timed out after ${timeoutMs}ms.`);
+	if (isAbortError(error) && parentSignal?.aborted) return new Error("DuckDuckGo Search request was cancelled.");
+	if (errorIncludes(error, "ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT")) {
+		const details = collectErrorText(error);
+		return new Error(`Connection to DuckDuckGo Search failed.${details ? ` ${details}` : ""}`);
+	}
+	return error instanceof Error ? error : new Error(String(error));
+}
+
+const DDG_MAX_BYTES = 2 * 1024 * 1024;
+const DDG_MAX_REDIRECTS = 4;
+
+type DdgTransport = HtmlSearchTransport;
+
+/**
+ * Unlike Brave, DuckDuckGo's HTML endpoint serves plain Node https clients, so the first-choice
+ * keyless provider needs no external process. Follows up to DDG_MAX_REDIRECTS redirects manually.
+ */
+function fetchDdgOnce(url: string, signal: AbortSignal): Promise<{ status: number; body: string; location?: string }> {
+	return new Promise((resolve, reject) => {
+		const request = httpsRequest(url, {
+			agent: false,
+			headers: { ...DDG_SEARCH_HEADERS, "Accept-Encoding": "identity" },
+			signal,
+		}, (response) => {
+			const status = response.statusCode ?? 0;
+			const location = status >= 300 && status < 400 ? response.headers.location : undefined;
+			const chunks: Buffer[] = [];
+			let bytes = 0;
+			let settled = false;
+			response.on("data", (chunk: Buffer) => {
+				bytes += chunk.byteLength;
+				if (bytes > DDG_MAX_BYTES) {
+					settled = true;
+					response.destroy();
+					reject(new Error(`DuckDuckGo Search response exceeded ${DDG_MAX_BYTES} bytes.`));
+					return;
+				}
+				chunks.push(chunk);
+			});
+			response.on("end", () => {
+				if (!settled) resolve({ status, body: Buffer.concat(chunks).toString("utf8"), location });
+			});
+			response.on("error", (error) => {
+				if (!settled) reject(error);
+			});
+		});
+		request.on("error", reject);
+		request.end();
+	});
+}
+
+const httpsDdgTransport: DdgTransport = async (url, signal) => {
+	let current = url;
+	for (let redirects = 0; redirects <= DDG_MAX_REDIRECTS; redirects += 1) {
+		const response = await fetchDdgOnce(current, signal);
+		if (!response.location) return { status: response.status, body: response.body };
+		const next = URL.parse(response.location, current)?.toString();
+		if (!next) throw new Error(`DuckDuckGo Search returned an invalid redirect: ${response.location}`);
+		current = next;
+	}
+	throw new Error("DuckDuckGo Search exceeded its redirect limit.");
+};
+
+let ddgTransport: DdgTransport = httpsDdgTransport;
+
+export function __setDdgTransportForTests(next: DdgTransport | undefined): void {
+	ddgTransport = next ?? httpsDdgTransport;
+}
+
+/** Keyless first choice: fetches DuckDuckGo's plain-HTML results page and parses it locally. */
+async function searchDdg(query: string, maxResults: number, signal: AbortSignal | undefined, timeoutMs: number): Promise<SearchResponse> {
+	const requestSignal = createRequestSignal(signal, timeoutMs);
+
+	try {
+		const response = await ddgTransport(ddgSearchUrl(query), requestSignal.signal);
+		if (response.status === 202) throw new Error("DuckDuckGo Search returned a challenge page (HTTP 202).");
+		if (response.status === 429) throw new Error("DuckDuckGo Search rate limit was exceeded (HTTP 429).");
+		if (response.status < 200 || response.status >= 300) throw new Error(`DuckDuckGo Search returned HTTP ${response.status}.`);
+		const limit = Math.max(0, Math.trunc(maxResults));
+		return { results: parseDdgSearchHtml(response.body).slice(0, limit) };
+	} catch (error) {
+		throw normalizeDdgError(error, timeoutMs, requestSignal.timedOut(), signal);
 	} finally {
 		requestSignal.cleanup();
 	}
@@ -532,6 +624,11 @@ export default function webSearch(pi: ExtensionAPI) {
 			const timeoutMs = resolveRequestTimeoutMs(params.timeout_ms);
 
 			const attempts: SearchAttempt[] = [{
+				provider: "duckduckgo",
+				label: "DuckDuckGo Search",
+				host: DDG_SEARCH_HOST,
+				request: () => searchDdg(params.query, maxResults, signal, timeoutMs),
+			}, {
 				provider: "brave",
 				label: "Brave Search",
 				host: BRAVE_SEARCH_HOST,
