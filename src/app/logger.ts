@@ -150,6 +150,17 @@ export function logPixEvent(level: PixLogLevel, event: string, details?: PixLogD
 	void pixLogger.log(level, event, details, scope);
 }
 
+/** TUI entrypoint only: keep Node's warning printer off the rendered terminal. */
+export function routePixNodeWarnings(scope: PixLogContext, logger = pixLogger): void {
+	// Supported Node versions register their stderr printer as `onWarning`.
+	// Preserve other listeners and warning emission, unlike overriding emitWarning.
+	const printer = process.listeners("warning").find(listener => listener.name === "onWarning");
+	if (printer) process.off("warning", printer);
+	process.on("warning", warning => {
+		void logger.log("warn", "process:warning", { warning }, scope);
+	});
+}
+
 // In-process optional bridge for separately installed pi-tools-suite copies.
 // No extension or standalone Pi process has to import Pix's implementation.
 const PIX_DIAGNOSTIC_SINK = Symbol.for("pix.diagnostics.sink");

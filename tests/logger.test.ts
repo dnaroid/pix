@@ -128,4 +128,23 @@ describe("unified JSONL diagnostics", () => {
     assert.equal(rows[0]?.event, "process:uncaught");
     assert.equal(rows[0]?.project.path, "/projects/fatal");
   }));
+  it("routes Node warnings to JSONL without writing to stderr or silencing other listeners", async () => fixture(async directory => {
+    const child = spawnSync(process.execPath, ["--trace-warnings", "--import", "tsx", "--input-type=module", "-e", `
+      import { PixFileLogger, routePixNodeWarnings } from './src/app/logger.ts';
+      const logger = new PixFileLogger({ directory: ${JSON.stringify(directory)} });
+      process.once('warning', warning => { process.stdout.write(warning.message); });
+      routePixNodeWarnings({ project: '/projects/tui', module: 'process' }, logger);
+      process.emitWarning('test runtime warning');
+      await new Promise(resolve => setImmediate(resolve));
+      await logger.flush();
+    `], { cwd: process.cwd(), encoding: "utf8" });
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(child.stderr, "");
+    assert.equal(child.stdout, "test runtime warning");
+    const [record] = await records(directory);
+    assert.equal(record?.event, "process:warning");
+    assert.equal(record?.level, "warn");
+    assert.equal(record?.project.path, "/projects/tui");
+    assert.equal(record?.details.warning.message, "test runtime warning");
+  }));
 });

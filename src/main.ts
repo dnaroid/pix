@@ -1,20 +1,25 @@
 import { parseArgs } from "./app/cli/cli.js";
-import { PiUiExtendApp } from "./app/app.js";
-import { stringifyUnknown } from "./app/rendering/message-content.js";
-import { installPixProcessLogging, pixLogger } from "./app/logger.js";
+import { installPixProcessLogging, pixLogger, routePixNodeWarnings } from "./app/logger.js";
 
 async function main(): Promise<void> {
 	const options = parseArgs(process.argv.slice(2));
-	installPixProcessLogging({ project: options.cwd, module: "process" });
+	const scope = { project: options.cwd, module: "process" };
+	routePixNodeWarnings(scope);
+	installPixProcessLogging(scope);
+	const { PiUiExtendApp } = await import("./app/app.js");
 	const app = new PiUiExtendApp(options);
 	try { await app.start(); }
 	catch (error) {
-		await pixLogger.log("error", "process:fatal", { error }, { project: options.cwd, module: "process" });
+		await pixLogger.log("error", "process:fatal", { error }, scope);
 		throw error;
 	}
 }
 
 main().catch(async (error: unknown) => {
-	console.error(error instanceof Error ? error.message : stringifyUnknown(error));
+	if (error instanceof Error) console.error(error.message);
+	else {
+		const { stringifyUnknown } = await import("./app/rendering/message-content.js");
+		console.error(stringifyUnknown(error));
+	}
 	process.exitCode = 1;
 });

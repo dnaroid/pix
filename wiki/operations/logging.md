@@ -54,6 +54,13 @@ native errors and lifecycle/panic records, plus frontend reports and
 uncaught/unhandled handlers. Third-party logs are not generally captured, and
 this is not a guarantee that every error is captured.
 
+The TUI entrypoint (`src/main.ts`) routes Node runtime warnings to the shared
+logger as warn-level `process:warning` records (module `process`, payload
+`warning`) before loading the app. It removes only Node's default `onWarning`
+stderr printer, so the warnings no longer render in the terminal; other
+`warning` listeners and warning emission are preserved. This is not general
+stdout/stderr capture. ACP and CLI install/update entrypoints are unchanged.
+
 ACP request failures are attributed to their actual registered RPC method,
 not to the generic `session/cancel` notification. A pending elicitation
 rejected after its session has been closed is treated as an expected teardown
