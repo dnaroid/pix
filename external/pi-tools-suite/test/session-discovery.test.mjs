@@ -26,8 +26,9 @@ async function fixture(t) {
 }
 test("catalog reads bounded headers, never transcript bodies; warm polls read no headers", async t => {
   const f = await fixture(t), a = await f.save("a"), b = await f.save("b");
-  // Invalid and very large bodies would make SDK list parse the whole corpus.
-  await appendFile(a.path, "INVALID PRIVATE BODY"); await truncate(b.path, 128 * 1024 * 1024);
+  // Exercise bodies larger than the header read without crossing even the
+  // lowest supported search cap (oversize filtering is tested separately).
+  await appendFile(a.path, "INVALID PRIVATE BODY"); await truncate(b.path, 512 * 1024);
   // Watch delivery is injected in session-revisions tests; test header caching independently.
   const catalog = new SessionCandidateCatalog({ watching: false });
   t.after(() => catalog.dispose());

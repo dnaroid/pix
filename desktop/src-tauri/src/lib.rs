@@ -1468,7 +1468,8 @@ async fn git_repository_state(workspace: String) -> Result<GitRepositoryState, S
 async fn git_initialize(workspace: String, ensure_ignores: Option<bool>) -> Result<(), String> {
     run_blocking(move || {
         git_initialize_from(Path::new(&workspace), ensure_ignores.unwrap_or_default())
-    }).await
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2542,9 +2543,14 @@ fn create_project_entry_from(
             // Publish a complete file without replacing an entry created since
             // the existence check or leaving an empty file after a failed write.
             let temporary = directory.join(format!(".pix-create-{}.tmp", uuid::Uuid::new_v4()));
-            let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&temporary)
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temporary)
                 .map_err(|error| format!("failed to stage {}: {error}", target.display()))?;
-            let result = file.write_all(content.as_bytes()).and_then(|()| file.sync_all());
+            let result = file
+                .write_all(content.as_bytes())
+                .and_then(|()| file.sync_all());
             drop(file);
             let result = result.and_then(|()| fs::hard_link(&temporary, &target));
             let _ = fs::remove_file(&temporary);
@@ -2946,7 +2952,11 @@ fn git_initialize_from(workspace: &Path, ensure_ignores: bool) -> Result<(), Str
     let root = canonical_workspace(workspace)?;
     let state = git_repository_state_from_root(&root)?;
     if state.initialized {
-        return if ensure_ignores { git_ignore::ensure_default_ignores(&root) } else { Ok(()) };
+        return if ensure_ignores {
+            git_ignore::ensure_default_ignores(&root)
+        } else {
+            Ok(())
+        };
     }
     if let Some(repository_root) = state.repository_root {
         return Err(format!(
@@ -9488,11 +9498,19 @@ mod tests {
         )
         .expect("create project file");
         assert_eq!(created.path, "src/notes.txt");
-        assert_eq!(fs::read_to_string(workspace.join(&created.path)).unwrap(), "Starter\n");
+        assert_eq!(
+            fs::read_to_string(workspace.join(&created.path)).unwrap(),
+            "Starter\n"
+        );
 
-        let directory =
-            create_project_entry_from(&workspace, None, "docs", ProjectTreeEntryKind::Directory, None)
-                .expect("create project directory");
+        let directory = create_project_entry_from(
+            &workspace,
+            None,
+            "docs",
+            ProjectTreeEntryKind::Directory,
+            None,
+        )
+        .expect("create project directory");
         assert_eq!(directory.path, "docs");
 
         let renamed =

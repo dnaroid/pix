@@ -501,7 +501,7 @@ Check the project conventions before approving changes.
 		);
 		expect(result.systemPrompt).toContain("<available_subagent_types>");
 		expect(result.systemPrompt).toContain("- house-review: Review changes using this project's house rules.");
-		expect(result.systemPrompt).toContain("- research: Read-only evidence gathering");
+		expect(result.systemPrompt).toMatch(/^- research: \S[^\r\n]*$/m);
 		expect(result.systemPrompt).toContain("Project-local `.pi/agents/*.md` roles are included");
 
 		const withoutSubagents = await handler(
