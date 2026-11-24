@@ -291,7 +291,7 @@ export function isGlmModel(modelRef: string | undefined): boolean {
 export function isVisionCapableGlmModel(modelRef: string | undefined): boolean {
 	if (!modelRef) return false;
 	const normalized = modelRef.trim().toLowerCase();
-	return normalized === "zai/glm-5.3-flash" || normalized === "glm-5.3-flash";
+	return /^(?:zai\/)?glm-5\.(?:3-flash|4)$/.test(normalized);
 }
 
 function isBlindGlmModel(modelRef: string | undefined): boolean {

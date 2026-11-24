@@ -31,7 +31,7 @@ export interface FrontierConfig {
 
 export const DEFAULT_FRONTIER_MODELS: readonly FrontierModelEntry[] = Object.freeze([
 	{ model: "openai-codex/gpt-6.2-astra", expensive: true, aliases: ["*gpt*astra*"], roles: ["oracle"] },
-	{ model: "zai/glm-5.3" },
+	{ model: "zai/glm-5.4" },
 	{ model: "anthropic/claude-opus-5-5", expensive: true, aliases: ["*opus*"] },
 ]);
 

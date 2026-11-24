@@ -13,6 +13,20 @@ function tempDir(): string {
 }
 
 describe("DCP config", () => {
+  test("starter config keeps the 1M-token GLM compression thresholds", () => {
+    const homeDir = tempDir();
+    mkdirSync(join(homeDir, ".config", "pi"), { recursive: true });
+    writeFileSync(join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"), DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC);
+    const config = loadConfig({ homeDir });
+    for (const ref of ["zai/glm-5.4", "zai/glm-5.3-flash"]) {
+      const { compress } = resolveModelConfig(config, [ref]);
+      expect(compress.minContextPercent).toBe("8%");
+      expect(compress.maxContextPercent).toBe("15%");
+      expect(compress.autoCandidates.minContextPercent).toBe(0.08);
+      expect(compress.messageMode.minContextPercent).toBe(0.08);
+    }
+  });
+
   test("keeps Claude family policies aligned in omission defaults and starter config", () => {
     const homeDir = tempDir();
     mkdirSync(join(homeDir, ".config", "pi"), { recursive: true });

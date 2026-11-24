@@ -89,10 +89,10 @@ describe("council config", () => {
 		expect([...DEFAULT_FRONTIER_MODELS]).toEqual(SUITE_DEFAULT_FRONTIER.map((entry) => entry.model));
 		const config = loadCouncilConfig(layout({}));
 		expect(config.models).toEqual([...DEFAULT_FRONTIER_MODELS]);
-		expect(thinkingForModel(config, "zai/glm-5.3")).toBe("max");
+		expect(thinkingForModel(config, "zai/glm-5.4")).toBe("max");
 		expect(thinkingForModel(config, "anthropic/claude-opus-5-5")).toBe("high");
 		const cleared = loadCouncilConfig(layout({ brainstorm: { thinkingOverrides: null } }));
-		expect(thinkingForModel(cleared, "zai/glm-5.3")).toBe("high");
+		expect(thinkingForModel(cleared, "zai/glm-5.4")).toBe("high");
 	});
 
 	test("run-only models carry per-model effort", () => {

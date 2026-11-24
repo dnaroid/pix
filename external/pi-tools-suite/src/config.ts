@@ -82,7 +82,7 @@ const ENABLED_BUILTIN_AGENT_LIST_KEYS = ["enabledBuiltinAgents"];
 const DEFAULT_DISABLED_MODULES = new Set<string>(
 	PI_TOOLS_SUITE_MODULE_CATALOG.filter((module) => !module.defaultEnabled).map((module) => module.name),
 );
-const DEFAULT_TODO_THINKING_OVERRIDES = new Map<string, TodoThinkingPolicy>([["zai/glm-5.3", { min: "max", max: "max" }]]);
+const DEFAULT_TODO_THINKING_OVERRIDES = new Map<string, TodoThinkingPolicy>([["zai/glm-5.4", { min: "max", max: "max" }]]);
 const DEFAULT_RESOURCE_REGISTRY_BRANCH = "main";
 
 export function getPiToolsSuiteUserConfigPath(homeDir = process.env.HOME?.trim() || homedir()): string {

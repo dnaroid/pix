@@ -335,7 +335,7 @@ Todo thinking can be enabled globally and limited by per-model Min/Max ranges. O
 {
   "todoThinking": true,
   "todoThinkingOverrides": {
-    "zai/glm-5.3": { "min": "max", "max": "max" },
+    "zai/glm-5.4": { "min": "max", "max": "max" },
     "anthropic/claude-opus-*": { "min": "low", "max": "medium" }
   }
 }
@@ -725,7 +725,7 @@ Explicit task/CLI model overrides suppress automatic fallbacks. Setting
 strips conflicting model arguments; this is not the economical default.
 
 The seven built-in modes are `implement-core` (Sol, then Claude Sonnet, for approved
-implementation handoffs), `mechanical` (Luna, then Claude Haiku, then GLM-5.3, for
+implementation handoffs), `mechanical` (Luna, then Claude Haiku, then GLM-5.4, for
 sufficiently large prescribed behavior-preserving
 edits with deterministic checks), `research` (evidence gathering and focused
 review, with Markdown report writing), `verify` (run checks and diagnose logs without fixing
@@ -1077,7 +1077,7 @@ release can be added as a config edit:
 {
   "frontierModels": [
     { "model": "openai-codex/gpt-6.2-astra", "expensive": true, "aliases": ["*gpt*astra*"], "roles": ["oracle"] },
-    { "model": "zai/glm-5.3" },
+    { "model": "zai/glm-5.4" },
     { "model": "anthropic/claude-opus-5-5", "expensive": true, "aliases": ["*opus*"] }
   ],
   "economy": false

@@ -75,7 +75,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   // one level. Supports provider/model or bare-model keys with * / ? globs.
   // Set an inherited key to null in a later config layer to remove it.
   "todoThinkingOverrides": {
-    "zai/glm-5.3": { "min": "max", "max": "max" }
+    "zai/glm-5.4": { "min": "max", "max": "max" }
   },
   // Vision-capable model used by the coding-discipline lookup tool for blind-model
   // screenshot/image questions. Remove or set to null to disable lookup.
@@ -90,7 +90,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   // refs), and "roles" (limit the entry to listed roles).
   "frontierModels": [
     { "model": "openai-codex/gpt-6.2-astra", "expensive": true, "aliases": ["*gpt*astra*"], "roles": ["oracle"] },
-    { "model": "zai/glm-5.3" },
+    { "model": "zai/glm-5.4" },
     { "model": "anthropic/claude-opus-5-5", "expensive": true, "aliases": ["*opus*"] }
   ],
   // Economy mode: no sub-agent role selects an "expensive" frontier model.
@@ -112,7 +112,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   // copies only the final proposal to docs/brainstorms/.
   "brainstorm": {
     "thinking": "high",
-    "thinkingOverrides": { "zai/glm-5.3": "max" },
+    "thinkingOverrides": { "zai/glm-5.4": "max" },
     "timeoutSeconds": 600,
     "outputDir": ".pi/brainstorms"
   },
@@ -214,10 +214,10 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
           "messageMode": { "minContextPercent": 0.16 }
         }
       },
-      // GLM-5.3 and GLM-5.3-Flash expose ~1M-token windows. Use 8%/15%
+      // GLM-5.4 and GLM-5.3-Flash expose ~1M-token windows. Use 8%/15%
       // (~80K/~150K) as a conservative long-session policy while other zai/*
       // models keep 16%/30%.
-      "zai/glm-5.3": {
+      "zai/glm-5.4": {
         "compress": {
           "minContextPercent": "8%",
           "maxContextPercent": "15%",

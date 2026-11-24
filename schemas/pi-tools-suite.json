@@ -409,7 +409,7 @@
               "type": "null"
             }
           ],
-          "description": "Per-model thinking level keyed by provider/model (or bare model id). Default: zai/glm-5.3 = max. null removes an inherited entry."
+          "description": "Per-model thinking level keyed by provider/model (or bare model id). Default: zai/glm-5.4 = max. null removes an inherited entry."
         },
         "timeoutSeconds": {
           "type": "integer",

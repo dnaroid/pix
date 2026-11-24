@@ -12,7 +12,7 @@ policy, not a price oracle.
 - `implement-core`: Sol, then Claude Sonnet as quota fallback, for approved
   implementation handoffs, including explicit user delegation or a concrete
   capability gap; no automatic fallback to a weaker model tier.
-- `mechanical`: Luna, then Claude Haiku, then GLM-5.3, for sufficiently large prescribed behavior-preserving edits
+- `mechanical`: Luna, then Claude Haiku, then GLM-5.4, for sufficiently large prescribed behavior-preserving edits
   with an exact scope and deterministic acceptance check, never broad migrations,
   interface redesign or semantic changes to regression tests.
 - `verify`: run checks and interpret logs, without fixing source or tests.
@@ -102,7 +102,7 @@ usable candidate among the remaining vendors.
 ```jsonc
 "frontierModels": [
   { "model": "openai-codex/gpt-6.2-astra", "expensive": true, "aliases": ["*gpt*astra*"], "roles": ["oracle"] },
-  { "model": "zai/glm-5.3" },
+  { "model": "zai/glm-5.4" },
   { "model": "anthropic/claude-opus-5-5", "expensive": true, "aliases": ["*opus*"] }
 ],
 "economy": false
@@ -212,7 +212,7 @@ disabled built-in.
 ### Coding quality and acceptance
 
 `implement-core` (Sol, then Claude Sonnet) and `mechanical` (Luna, then Claude
-Haiku, then GLM-5.3) are the retained
+Haiku, then GLM-5.4) are the retained
 implementation roles. Mechanical is for prescribed behavior-preserving work
 large enough to amortize handoff overhead. Research, verification, UI QA,
 documentation maintenance and the cross-vendor oracle retain their separate

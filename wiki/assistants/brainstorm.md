@@ -75,7 +75,7 @@ the run state untouched, `1` run marked incomplete.
   else the enabled `frontierModels` (ordered, deduplicated, max 6), starting
   from the suite's built-in frontier list; `frontierModels: null` restores it. Settings:
   `thinking` (default `high`), `thinkingOverrides` (default
-  `zai/glm-5.3: max`), `timeoutSeconds` (default 600), optional `quorum` (default
+  `zai/glm-5.4: max`), `timeoutSeconds` (default 600), optional `quorum` (default
   max(2, n−1); above the roster size fails), `outputDir` (default
   `.pi/brainstorms`). Parity tests check the frontier roster and the mirrored
   built-in list against `loadPiToolsSuiteConfig` and `DEFAULT_FRONTIER_MODELS`. Run-only `--models` replaces the roster and

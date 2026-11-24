@@ -19,7 +19,7 @@ Allow per-model inclusive Min/Max bounds on todo thinking, including a fixed lev
 - Add `todoThinkingOverrides` to layered pi-tools-suite configuration.
 - Match exact or wildcard provider/model and bare-model keys.
 - Clamp thinking on create/update and batch create/update mutations while `todoThinking` is enabled.
-- Default `zai/glm-5.3` to `{ "min": "max", "max": "max" }`.
+- Default `zai/glm-5.4` to `{ "min": "max", "max": "max" }`.
 
 ## Non-goals
 

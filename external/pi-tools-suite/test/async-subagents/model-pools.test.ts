@@ -41,7 +41,7 @@ describe("role-owned model candidates", () => {
 		const config = loadSubagentConfig(temp(), {});
 		for (const [role, models] of [
 			["implement-core", ["openai-codex/gpt-6.2-sol", "pi-claude-code-provider/sonnet"]],
-			["mechanical", ["openai-codex/gpt-6-luna", "pi-claude-code-provider/haiku", "zai/glm-5.3"]],
+			["mechanical", ["openai-codex/gpt-6-luna", "pi-claude-code-provider/haiku", "zai/glm-5.4"]],
 		] as const) {
 			const resolved = resolveAgentTaskConfig(task(role), config, { parentModel: "openai-codex/gpt-6-luna" });
 			expect([resolved.task.model, ...resolved.fallbackModels]).toEqual([...models]);

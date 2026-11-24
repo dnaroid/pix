@@ -71,6 +71,8 @@ describe("coding discipline", () => {
 		expect(isVisionCapableGlmModel("zai/glm-5.3-flash")).toBe(true);
 		expect(isVisionCapableGlmModel("glm-5.3-flash")).toBe(true);
 		expect(isVisionCapableGlmModel("zai/glm-5.3")).toBe(false);
+		expect(isVisionCapableGlmModel("zai/glm-5.4")).toBe(true);
+		expect(isVisionCapableGlmModel("glm-5.4")).toBe(true);
 	});
 
 	test("keeps lookup active only for text-only GLM models", async () => {

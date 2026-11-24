@@ -90,7 +90,7 @@ in memory; it exposes tool + slash-command interfaces. `[confirmed by code]`
   `research`, `verify`, `ui-qa`, `oracle`, and `knowledge-auditor`.
   `implement-core` (Sol, then Claude Sonnet) handles approved capability-driven or explicitly
   requested implementation handoffs. `mechanical` (Luna, then Claude Haiku, then
-  GLM-5.3) handles prescribed
+  GLM-5.4) handles prescribed
   behavior-preserving transformations large enough to amortize handoff overhead,
   not a few replacements. Broad migrations and semantic test changes must not
   go to `mechanical`. Workers verify interfaces/types and focused regressions
@@ -233,7 +233,7 @@ in memory; it exposes tool + slash-command interfaces. `[confirmed by code]`
    guarantee. Oracle relies on that runtime check instead of refusing work when
    the task brief omits the parent's identity; unknown-parent and same-vendor
    launches remain blocked by model selection.
-   The shipped frontier list is Astra, GLM-5.3, and
+   The shipped frontier list is Astra, GLM-5.4, and
    `anthropic/claude-opus-5-5` with alias `*opus*` (any serving provider).
    Sol is not frontier. Astra is enabled for `oracle` in the default list.
    Economy mode excludes both expensive candidates for OpenAI, Anthropic, and
@@ -254,7 +254,7 @@ in memory; it exposes tool + slash-command interfaces. `[confirmed by code]`
    the parent-owned implementation and role-retirement policy is recorded in
    [decision 0069](../../decisions/0069-parent-owned-implementation.md).
    The retained `implement-core` role uses Sol with a Claude Sonnet fallback;
-   `mechanical` uses Luna, then Claude Haiku, then GLM-5.3.
+   `mechanical` uses Luna, then Claude Haiku, then GLM-5.4.
    Other retained role candidate policies are unchanged. Project-local profiles
    with retired names remain valid; there are no aliases.
    Shipped defaults use `openai-codex/gpt-6.2-sol` and

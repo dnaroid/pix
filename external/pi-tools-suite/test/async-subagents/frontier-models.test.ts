@@ -97,8 +97,9 @@ describe("model identity", () => {
 describe("oracle frontier selection", () => {
 	test("frontier GLM parent gets frontier GPT and Opus", () => {
 		const config = configWith();
-		expect(oracle(config, "zai/glm-5.3")).toEqual(["openai-codex/gpt-6.2-astra", "anthropic/claude-opus-5-5"]);
-		expect(oracle(config, "zai-coding/glm-5.3")).toEqual(["openai-codex/gpt-6.2-astra", "anthropic/claude-opus-5-5"]);
+		expect(oracle(config, "zai/glm-5.4")).toEqual(["openai-codex/gpt-6.2-astra", "anthropic/claude-opus-5-5"]);
+		expect(oracle(config, "zai-coding/glm-5.4")).toEqual(["openai-codex/gpt-6.2-astra", "anthropic/claude-opus-5-5"]);
+		expect(isFrontierModel("zai/glm-5.3", defaultFrontierConfig())).toBe(false);
 	});
 
 	test("an OpenAI parent is paired with Anthropic, whatever provider serves the parent", () => {
@@ -160,12 +161,12 @@ describe("oracle frontier selection", () => {
 
 	test("confirmation covers the filtered fallback chain, not just the initial model", () => {
 		const config = configWith();
-		const resolved = resolveAgentTaskConfig({ id: "o", task: "Second opinion", subagentType: "oracle" }, config, { parentModel: "zai/glm-5.3" });
+		const resolved = resolveAgentTaskConfig({ id: "o", task: "Second opinion", subagentType: "oracle" }, config, { parentModel: "zai/glm-5.4" });
 		expect(resolved.fallbackModels.length).toBeGreaterThan(0);
 		for (const model of [resolved.task.model!, ...resolved.fallbackModels]) {
 			expect(modelVendor(model, config.frontier!)).not.toBe("zai");
 			const prompt = generatePrompt({ ...resolved.task, model });
-			expect(prompt).toContain("Parent model: zai/glm-5.3; vendor: zai.");
+			expect(prompt).toContain("Parent model: zai/glm-5.4; vendor: zai.");
 			expect(prompt).toContain("Runtime model-selection confirmation:");
 		}
 	});
@@ -174,7 +175,7 @@ describe("oracle frontier selection", () => {
 		const config = configWith();
 		for (const parentProviderPolicy of ["any", "prefer-other"] as const) {
 			config.types.oracle = { ...config.types.oracle, parentProviderPolicy };
-			const resolved = resolveAgentTaskConfig({ id: "o", task: "Second opinion", subagentType: "oracle" }, config, { parentModel: "zai/glm-5.3" });
+			const resolved = resolveAgentTaskConfig({ id: "o", task: "Second opinion", subagentType: "oracle" }, config, { parentModel: "zai/glm-5.4" });
 			expect(generatePrompt(resolved.task)).not.toContain("Runtime model-selection confirmation:");
 		}
 	});
@@ -219,11 +220,11 @@ describe("oracle frontier selection", () => {
 		fs.mkdirSync(path.dirname(file), { recursive: true });
 		// Same-name project roles replace built-ins completely, so the project
 		// oracle owns its cross-vendor policy instead of inheriting the built-in's.
-		fs.writeFileSync(file, "---\nmodels: [anthropic/claude-opus-5, zai/glm-5.3]\nparentProviderPolicy: require-other-if-frontier\n---\nProject oracle.\n");
+		fs.writeFileSync(file, "---\nmodels: [anthropic/claude-opus-5, zai/glm-5.4]\nparentProviderPolicy: require-other-if-frontier\n---\nProject oracle.\n");
 		const config = loadSubagentConfig(cwd, {});
 		expect(config.types.oracle.modelSelection).toBeUndefined();
 		expect(config.types.oracle.parentProviderPolicy).toBe("require-other-if-frontier");
-		expect(oracle(config, "zai/glm-5.3")).toEqual(["anthropic/claude-opus-5"]);
+		expect(oracle(config, "zai/glm-5.4")).toEqual(["anthropic/claude-opus-5"]);
 	});
 
 	test("an omitted vendor policy does not fall through to the replaced built-in oracle", () => {
@@ -249,7 +250,7 @@ describe("frontierOracleCandidates", () => {
 	test("matches the resolver's oracle chain for every parent class and economy state", () => {
 		for (const economy of [false, true]) {
 			const config = configWith({ economy });
-			for (const parent of ["zai/glm-5.3", "openai-codex/gpt-6.1-sol", "openai/gpt-6-astra", "zai/glm-5.3-flash", "openai-codex/gpt-6-luna", "anthropic/claude-haiku-5"]) {
+			for (const parent of ["zai/glm-5.4", "openai-codex/gpt-6.1-sol", "openai/gpt-6-astra", "zai/glm-5.4-flash", "openai-codex/gpt-6-luna", "anthropic/claude-haiku-5"]) {
 				const expected = frontierOracleCandidates(parent, config.frontier!, "oracle", config.types.oracle.vendorsByParentVendor);
 				if (expected.length === 0) expect(() => oracle(config, parent)).toThrow();
 				else expect(oracle(config, parent)).toEqual(expected);
@@ -265,13 +266,13 @@ describe("economy mode", () => {
 		const core = resolveAgentTaskConfig({ id: "i", task: "x", subagentType: "implement-core" }, config);
 		expect([core.task.model, ...core.fallbackModels]).toEqual(["openai-codex/gpt-6.2-sol", "pi-claude-code-provider/sonnet"]);
 		const mechanical = resolveAgentTaskConfig({ id: "m", task: "x", subagentType: "mechanical" }, config);
-		expect([mechanical.task.model, ...mechanical.fallbackModels]).toEqual(["openai-codex/gpt-6-luna", "pi-claude-code-provider/haiku", "zai/glm-5.3"]);
+		expect([mechanical.task.model, ...mechanical.fallbackModels]).toEqual(["openai-codex/gpt-6-luna", "pi-claude-code-provider/haiku", "zai/glm-5.4"]);
 	});
 
 	test("reports economy as the reason when nothing remains, and hides the oracle", () => {
 		const config = configWith({ economy: true });
-		expect(() => oracle(config, "zai/glm-5.3")).toThrow(/economy mode excluded openai-codex\/gpt-6.2-astra, anthropic\/claude-opus-5-5/);
-		expect(buildSubagentCatalogPrompt(config, "zai/glm-5.3")).not.toContain("- oracle:");
+		expect(() => oracle(config, "zai/glm-5.4")).toThrow(/economy mode excluded openai-codex\/gpt-6.2-astra, anthropic\/claude-opus-5-5/);
+		expect(buildSubagentCatalogPrompt(config, "zai/glm-5.4")).not.toContain("- oracle:");
 		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6.1-sol")).not.toContain("- oracle:");
 		expect(buildSubagentCatalogPrompt(configWith(), "openai-codex/gpt-6.1-sol")).toContain("- oracle:");
 	});
@@ -284,7 +285,7 @@ describe("economy mode", () => {
 	});
 
 	test("env toggle overrides the file and is read fresh on every load", () => {
-		expect(oracle(configWith({ economy: true }, { PI_TOOLS_SUITE_ECONOMY: "0" }), "zai/glm-5.3")).toEqual(["openai-codex/gpt-6.2-astra", "anthropic/claude-opus-5-5"]);
+		expect(oracle(configWith({ economy: true }, { PI_TOOLS_SUITE_ECONOMY: "0" }), "zai/glm-5.4")).toEqual(["openai-codex/gpt-6.2-astra", "anthropic/claude-opus-5-5"]);
 		const home = temp();
 		const cwd = temp();
 		const file = path.join(home, ".config", "pi", "pi-tools-suite.jsonc");
@@ -300,7 +301,7 @@ describe("merged oracle architectural review", () => {
 	test("exposes oracle to frontier and ordinary parents and removes the duplicate role", () => {
 		const config = configWith();
 		expect(config.types["frontier-review"]).toBeUndefined();
-		for (const parent of ["openai-codex/gpt-6-astra", "zai/glm-5.3", "openrouter/~openai/gpt-astra-latest", "openai-codex/gpt-6.1-sol", "anthropic/claude-sonnet-5-5"]) {
+		for (const parent of ["openai-codex/gpt-6-astra", "zai/glm-5.4", "openrouter/~openai/gpt-astra-latest", "openai-codex/gpt-6.1-sol", "anthropic/claude-sonnet-5-5"]) {
 			expect(filterSubagentConfigForParentModel(config, parent).types.oracle).toBeDefined();
 			expect(oracle(config, parent).every(model => modelVendor(model, config.frontier!) !== modelVendor(parent, config.frontier!))).toBe(true);
 		}
