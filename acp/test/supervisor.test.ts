@@ -33,7 +33,7 @@ test("supervisor start survives the extension and runtime bridge with its model 
 	const previous = globals[host];
 	const sessionManager = { getSessionId: () => "owner" };
 	let execute: Parameters<ExtensionAPI["registerTool"]>[0]["execute"] | undefined;
-	supervisorExtension({ registerTool: (tool) => { execute = tool.execute; } } as Pick<ExtensionAPI, "registerTool"> as ExtensionAPI);
+	supervisorExtension({ on: () => () => {}, registerTool: (tool) => { execute = tool.execute; } } as Pick<ExtensionAPI, "on" | "registerTool"> as ExtensionAPI);
 	assert.ok(execute);
 	const bridge = createSupervisorBridge({ sessionManager }, (event: { requestId: string; request: unknown }) => {
 		void forwardSupervisorRequest({

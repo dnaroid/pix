@@ -128,6 +128,7 @@ export interface ModelSetupStatus {
 }
 export interface ModelSetupSlot {
   readonly id: string; readonly label: string; readonly group: string; readonly role: keyof ModelSetupRoles;
+  readonly file?: "pix" | "suite" | "desktop";
   readonly optional?: boolean; readonly vision?: boolean;
   readonly parent?: string; readonly list?: boolean; readonly thinking?: boolean; readonly openrouter?: boolean;
   readonly emptyLabel?: string; readonly thinkingDefaultLabel?: string;

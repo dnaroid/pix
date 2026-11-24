@@ -445,6 +445,152 @@
       },
       "description": "Desktop voice dictation configuration. DEEPGRAM_API_KEY remains an environment fallback."
     },
+    "supervisor": {
+      "type": "object",
+      "properties": {
+        "workerModels": {
+          "type": "object",
+          "properties": {
+            "simple": {
+              "type": "object",
+              "required": [
+                "modelRef"
+              ],
+              "properties": {
+                "modelRef": {
+                  "type": "string",
+                  "description": "Provider/model identifier."
+                },
+                "thinking": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "off"
+                    },
+                    {
+                      "type": "string",
+                      "const": "minimal"
+                    },
+                    {
+                      "type": "string",
+                      "const": "low"
+                    },
+                    {
+                      "type": "string",
+                      "const": "medium"
+                    },
+                    {
+                      "type": "string",
+                      "const": "high"
+                    },
+                    {
+                      "type": "string",
+                      "const": "xhigh"
+                    },
+                    {
+                      "type": "string",
+                      "const": "max"
+                    }
+                  ],
+                  "description": "Model thinking budget level."
+                }
+              }
+            },
+            "standard": {
+              "type": "object",
+              "required": [
+                "modelRef"
+              ],
+              "properties": {
+                "modelRef": {
+                  "type": "string",
+                  "description": "Provider/model identifier."
+                },
+                "thinking": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "off"
+                    },
+                    {
+                      "type": "string",
+                      "const": "minimal"
+                    },
+                    {
+                      "type": "string",
+                      "const": "low"
+                    },
+                    {
+                      "type": "string",
+                      "const": "medium"
+                    },
+                    {
+                      "type": "string",
+                      "const": "high"
+                    },
+                    {
+                      "type": "string",
+                      "const": "xhigh"
+                    },
+                    {
+                      "type": "string",
+                      "const": "max"
+                    }
+                  ],
+                  "description": "Model thinking budget level."
+                }
+              }
+            },
+            "complex": {
+              "type": "object",
+              "required": [
+                "modelRef"
+              ],
+              "properties": {
+                "modelRef": {
+                  "type": "string",
+                  "description": "Provider/model identifier."
+                },
+                "thinking": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "off"
+                    },
+                    {
+                      "type": "string",
+                      "const": "minimal"
+                    },
+                    {
+                      "type": "string",
+                      "const": "low"
+                    },
+                    {
+                      "type": "string",
+                      "const": "medium"
+                    },
+                    {
+                      "type": "string",
+                      "const": "high"
+                    },
+                    {
+                      "type": "string",
+                      "const": "xhigh"
+                    },
+                    {
+                      "type": "string",
+                      "const": "max"
+                    }
+                  ],
+                  "description": "Model thinking budget level."
+                }
+              }
+            }
+          },
+          "description": "Models for worker sessions launched by the project supervisor. No model router is used."
+        }
+      }
+    },
     "headsUp": {
       "type": "object",
       "properties": {

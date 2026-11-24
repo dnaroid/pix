@@ -199,6 +199,9 @@ fallback, vision Lookup and search-embedding settings (see
 [Pix Desktop](../desktop/guide.md)); skipping the first run is remembered, while cancelling
 a manual run changes nothing. Both write the same config files, including
 `search.embedding` / `search.rerankerModel` into `pi-tools-suite.jsonc` on request.
+The wizard also saves Desktop supervisor worker tiers (`supervisor.workerModels`
+in `pix-desktop.jsonc`): `simple`/`standard`/`complex` default to
+`fast`/`main`/`strong` and can be assigned separately.
 
 For provider setup and configuration details, see
 [Configuration and accounts](../configuration/guide.md).

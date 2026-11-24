@@ -95,8 +95,6 @@ decision outside its mandate.
     workers are excluded. Provider cost is never the limit. When the ceiling is
     absent, no budget check runs;
   - `stalledAfterMinutes`: 15 by default, allowed 5–60 (see `stalled`);
-  - `workerModelRef`: optional default for plan and prompt sessions (an explicit
-    `start` `modelRef` overrides it; tasks keep their saved `modelRef`);
   - free-text `policy`: what to escalate, priorities, areas not to touch.
 - Reaching a limit escalates; it never triggers a silent retry. Changing the
   mandate takes effect on the supervisor's next action; actions already started
@@ -167,6 +165,22 @@ decision outside its mandate.
   Deleting a managed session unregisters it and journals `closed_by_user`, with
   no wake. The task's status is not changed automatically.
 
+## Worker model tiers
+
+- Assignments live only in Desktop config: `supervisor.workerModels.{simple,standard,complex}`
+  as `{modelRef, thinking?}` in `pix-desktop.jsonc` (user: `~/.config/pi/`; project:
+  `<cwd>/.pi/`). A project replaces individual tiers whole. Invalid entries are
+  reported to the diagnostic logger and ignored.
+- In the Desktop model setup wizard, simple/standard/complex default to
+  `fast`/`main`/`strong`. Edit them under Models → Routing & desktop → Desktop.
+- There is no separate router. Every supervisor run injects the current tiers
+  into its system prompt; the supervisor chooses a tier per start and suggests
+  the exact `modelRef` (with thinking). A missing tier means omitting `modelRef`.
+- Launch precedence: saved task model > suggested `modelRef` > `standard` tier >
+  Desktop's normal default. Plans and prompts have no saved model, so they skip
+  the first step.
+- Existing sessions and `project_tasks` launches are unchanged.
+
 ## Supervisor tool
 
 One tool, `supervisor`, registered only in the supervisor session on Desktop
@@ -177,7 +191,7 @@ hosts. It calls ACP through a correlated request bridge modelled on
 |---|---|
 | `status` | Mandate, pause state, limits used, managed sessions with item, mode, run state, last stop reason, plan progress and rework count. |
 | `read` | A bounded digest of one managed session: last user/assistant turns, final report, pending questionnaires, tool errors, touched files. For managed sessions only, pending questionnaires expose each live `questionId` with its questions and choice values. Never a full transcript. |
-| `start` | Exactly one of `{taskId}` / `{planPath}` / `{text}`, plus optional `modelRef`. Desktop launches it in the window showing that project, through the same Tasks Run / Plan run path (prompts get a new session), with the worker rules prepended; ACP then registers the session `managed`. Model: explicit `modelRef`, else the task's saved model, else `workerModelRef` for plans and prompts. Enforces `maxConcurrent`; a task or plan that is already registered is refused, and Desktop refuses a task already linked to a session. |
+| `start` | Exactly one of `{taskId}` / `{planPath}` / `{text}`, plus optional `modelRef`. Desktop launches it in the window showing that project, through the same Tasks Run / Plan run path (prompts get a new session), with the worker rules prepended; ACP then registers the session `managed`. Model: see [worker model tiers](#worker-model-tiers) for the precedence (saved task model, then suggested `modelRef`, then the `standard` tier, then Desktop's normal default). Enforces `maxConcurrent`; a task or plan that is already registered is refused, and Desktop refuses a task already linked to a session. |
 | `send` | `{sessionId, text, kind: rework or note}`. Uses the normal ACP queue: steering while busy, a new turn while idle. `rework` counts against `maxReworkRounds`. `kind=answer` is refused; use `answer`. |
 | `answer` | `{sessionId, questionId, authority: mandate or user, rationale, selections}`. Answers a live questionnaire of a managed session; see *Worker questions*. |
 | `cancel` | Cancels the managed session's current turn. |
@@ -436,8 +450,9 @@ rationale.
   `start` runs under the same lock: it refuses an already registered task or
   plan and a full `maxConcurrent`, then sends Desktop `pix/supervisor/start`
   `{requestId, cwd, sourceSessionId, item, modelRef?}` through the supervisor
-  session's client. The model is the explicit `modelRef`, else the task's
-  saved model for tasks, else `workerModelRef` for plans and prompts. Desktop
+  session's client. The model follows [worker model tiers](#worker-model-tiers):
+  a task's saved model wins, otherwise the suggested `modelRef`, else the
+  `standard` tier, else Desktop's normal default. Desktop
   launches only in the window showing that project and when no other launch is
   preparing; it refuses a task already linked to a session (use `reopen` or a
   handover). It prepends `SUPERVISOR_WORKER_PREAMBLE` to the launch prompt
@@ -462,13 +477,10 @@ rationale.
   visible): state Off/Active/Paused, counters, **Set up** when disabled,
   **Pause**/**Resume** and **Edit mandate** (`SupervisorMandateDialog.svelte`:
   enable, parallel sessions 1–20, rework rounds 0–50, stalled 5–60 min,
-  token budget, default worker model, policy). The default worker model applies to plans and
-  prompts when `start` does not specify a model. Choose a model and supported
-  effort in the shared Desktop picker, then save the mandate. Reset the field
-  and save to use the session default. In the RPC patch, `workerModelRef: null`
-  clears the saved value, omission leaves it unchanged, and responses include
-  `workerModelRef` only when saved. The RPC accepts up to 512 characters and
-  trims surrounding whitespace before saving. For `budgetTokens`, omission
+  token budget, policy). The mandate no longer has a worker model field; worker
+  models come from Desktop config (see [worker model tiers](#worker-model-tiers)).
+  A legacy `workerModelRef` is ignored, removed from the editor and omitted after
+  the next mandate save. There is no automatic migration. For `budgetTokens`, omission
   keeps the ceiling, `null` clears it, and a positive integer is capped at
   `Number.MAX_SAFE_INTEGER`. Clearing the budget field in Desktop sends `null`.
   A configured ceiling with unavailable usage is shown as such, not as zero.

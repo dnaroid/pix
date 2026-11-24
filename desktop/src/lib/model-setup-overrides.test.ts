@@ -32,3 +32,11 @@ describe("wizard judge overrides", () => {
     expect(inherited.draft.picks["knowledge-judge-desktop"]).toBe("");
   });
 });
+
+it("allows resetting thinking while keeping a required Desktop worker model", () => {
+  const worker: ModelSetupSlot = {
+    id: "supervisor-simple", label: "Supervisor worker: simple", group: "Desktop", role: "fast", file: "desktop", thinking: true,
+  };
+  expect(modelSetupOverrides([worker], {}, {}, { "supervisor-simple": "" }))
+    .toEqual({ "supervisor-simple:thinking": "" });
+});

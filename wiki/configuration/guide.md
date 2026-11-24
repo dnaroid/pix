@@ -166,7 +166,9 @@ Desktop exposes routing in Settings → Models. Wizard-managed tiers (`simple`,
 `standard`, `complex`, `expert`) show model/thinking read-only with **Edit in
 wizard…**; custom tiers remain editable there. The router provider needs valid
 credentials independently of the target
-tier providers.
+tier providers. Desktop supervisor worker tiers (`supervisor.workerModels`) are
+separate from routing tiers and involve no router; see
+[worker model tiers](../work-management/project-supervisor.md#worker-model-tiers).
 
 ## Desktop configuration
 

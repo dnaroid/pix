@@ -40,7 +40,7 @@ function lock() {
 
 async function setup(
 	t: { after(fn: () => Promise<void>): void },
-	options: { mandate?: Partial<Omit<SupervisorMandate, "version" | "updatedAt">>; sessions?: Record<string, ManagedSession> } = {},
+	options: { mandate?: Partial<Omit<SupervisorMandate, "version" | "updatedAt">>; sessions?: Record<string, ManagedSession>; standardWorkerModel?: () => Promise<string | undefined> } = {},
 ) {
 	const cwd = await mkdtemp(join(tmpdir(), "pix-supervisor-actions-"));
 	t.after(() => rm(cwd, { recursive: true, force: true }));
@@ -66,6 +66,7 @@ async function setup(
 	const exclusive = lock();
 	const actions = createSupervisorActions({
 		store,
+		standardWorkerModel: options.standardWorkerModel ?? (async () => undefined),
 		runtime: {
 			exclusive,
 			deliver: async (sessionId, text) => {
@@ -406,7 +407,7 @@ test("supervisor reopen refuses a deleted session and a paused mandate", async (
 });
 
 test("supervisor start launches an item, registers it managed and briefed, and journals it", async (t) => {
-	const s = await setup(t, { sessions: {}, mandate: { workerModelRef: "p/worker" } });
+	const s = await setup(t, { sessions: {}, standardWorkerModel: async () => "p/worker:low" });
 	assert.deepEqual(await s.handle({ op: "start", item: { kind: "task", taskId: "t9" } }), {
 		started: true, sessionId: "new1", item: { kind: "task", taskId: "t9" },
 		note: "The session is running with the worker rules; you get a digest when it settles.",
@@ -414,7 +415,7 @@ test("supervisor start launches an item, registers it managed and briefed, and j
 	await s.handle({ op: "start", item: { kind: "plan", path: ".pi/plans/p.md" } });
 	await s.handle({ op: "start", item: { kind: "prompt", text: "fix the flaky test" }, modelRef: "p/explicit" });
 	assert.deepEqual(s.launches.map(({ modelRef, caller }) => [modelRef, caller]),
-		[[undefined, SUPERVISOR], ["p/worker", SUPERVISOR], ["p/explicit", SUPERVISOR]], "tasks keep their own model");
+		[["p/worker:low", SUPERVISOR], ["p/worker:low", SUPERVISOR], ["p/explicit", SUPERVISOR]]);
 	const sessions = (await s.store.readRegistry(s.cwd)).sessions;
 	assert.deepEqual(sessions.new3?.item, { kind: "prompt" });
 	for (const id of ["new1", "new2", "new3"]) assert.deepEqual([sessions[id]?.mode, sessions[id]?.briefed, sessions[id]?.reworkRounds, sessions[id]?.origin], ["managed", true, 0, "started"]);
@@ -437,6 +438,19 @@ test("supervisor start refuses duplicates, a paused mandate and a full concurren
 	await assert.rejects(s.handle({ op: "start", item: { kind: "prompt", text: "x" } }), /Desktop is busy/);
 	assert.deepEqual(Object.keys((await s.store.readRegistry(s.cwd)).sessions), ["w1"], "a failed launch registers nothing");
 	assert.deepEqual(await s.ledger(), []);
+});
+
+test("supervisor does not launch if its runtime retires while reading the fallback model", async (t) => {
+	const reading = Promise.withResolvers<void>();
+	const model = Promise.withResolvers<string>();
+	const s = await setup(t, { standardWorkerModel: () => { reading.resolve(); return model.promise; } });
+	let current = true;
+	const started = s.handle({ op: "start", item: { kind: "prompt", text: "x" } }, SUPERVISOR, () => current);
+	await reading.promise;
+	current = false;
+	model.resolve("p/worker");
+	await assert.rejects(started, /no longer the project supervisor/);
+	assert.deepEqual(s.launches, []);
 });
 
 test("concurrent supervisor starts cannot both pass maxConcurrent", async (t) => {

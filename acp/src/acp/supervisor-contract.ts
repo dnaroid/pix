@@ -9,7 +9,7 @@
  *   `project_tasks run`. Phase 2 adds mutating ops on managed sessions
  *   (`send`, `cancel`, `close`, `escalate`) behind atomic ACP checks.
  * - `pix/supervisor/mandate`: Desktop reads or patches the saved mandate
- *   (enable, pause/resume, limits, default worker model, policy).
+ *   (enable, pause/resume, limits and policy).
  */
 export const PIX_SUPERVISOR_OPEN_METHOD = "pix/supervisor/open";
 export const SUPERVISOR_RESPONSE_PREFIX = "\u0000pix:supervisor-response:";
@@ -130,7 +130,6 @@ export interface SupervisorMandatePatch {
 	/** Omit to keep the ceiling; null removes it. */
 	budgetTokens?: number | null;
 	/** Omit to keep the default; null removes it. */
-	workerModelRef?: string | null;
 	policy?: string;
 }
 export interface SupervisorMandateRequest {
@@ -148,7 +147,6 @@ export interface SupervisorMandateResponse {
 	/** Absent without a ceiling or when usage could not be read. */
 	budgetUsedTokens?: number;
 	budgetHeld?: true;
-	workerModelRef?: string;
 	policy: string;
 	/** Registry sessions the supervisor may act on. */
 	managed: number;
@@ -390,16 +388,6 @@ export function parseSupervisorMandateRequest(value: unknown): SupervisorMandate
 		if (typeof raw.policy !== "string" || raw.policy.length > MAX_SUPERVISOR_POLICY) throw new Error("Invalid supervisor mandate policy");
 		patch.policy = raw.policy;
 	}
-	if (raw.workerModelRef !== undefined) {
-		const ref = raw.workerModelRef;
-		if (ref === null) patch.workerModelRef = null;
-		else {
-			if (typeof ref !== "string" || ref.length > MAX_MODEL_REF || !/^[^/\s]+\/\S+$/.test(ref.trim())) {
-				throw new Error("Invalid supervisor mandate workerModelRef: expected provider/model[:thinking] or null");
-			}
-			patch.workerModelRef = ref.trim();
-		}
-	}
 	return { cwd, patch };
 }
 
@@ -413,18 +401,12 @@ export function parseSupervisorMandateResponse(value: unknown): SupervisorMandat
 	if (typeof row.enabled !== "boolean" || typeof row.paused !== "boolean" || typeof row.policy !== "string") {
 		throw new Error("Invalid supervisor mandate response");
 	}
-	// Older mandates may contain a manually saved value; display it so it can be edited or cleared.
-	const ref = row.workerModelRef;
-	if (ref !== undefined && (typeof ref !== "string" || ref.length === 0 || ref.length > MAX_MODEL_REF)) {
-		throw new Error("Invalid supervisor mandate response workerModelRef");
-	}
 	const budget = row.budgetTokens === undefined ? undefined : int("budgetTokens");
 	if (budget === 0 || (row.budgetHeld !== undefined && row.budgetHeld !== true)) throw new Error("Invalid supervisor mandate budget");
 	return {
 		enabled: row.enabled, paused: row.paused,
 		maxConcurrent: int("maxConcurrent"), maxReworkRounds: int("maxReworkRounds"), stalledAfterMinutes: int("stalledAfterMinutes"),
 		policy: row.policy, managed: int("managed"), manual: int("manual"), running: int("running"),
-		...(ref === undefined ? {} : { workerModelRef: ref }),
 		reworkRounds: int("reworkRounds"),
 		...(budget === undefined ? {} : { budgetTokens: budget }),
 		...(row.budgetUsedTokens === undefined ? {} : { budgetUsedTokens: int("budgetUsedTokens") }),

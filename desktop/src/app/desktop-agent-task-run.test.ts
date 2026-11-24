@@ -173,6 +173,18 @@ describe("supervisor start boundary", () => {
     expect(actions.runTaskFromAgent).toHaveBeenCalledOnce();
   });
 
+  it("uses the supervisor suggestion only for tasks without a saved model", async () => {
+    const { services, task } = fixture();
+    const signal = new AbortController().signal;
+    const request = start({ kind: "task", taskId: task.id }, { modelRef: "provider/simple:low" });
+    await services.startFromSupervisor(request, signal);
+    expect(actions.runTaskFromAgent).toHaveBeenLastCalledWith(task, signal, "provider/simple:low", prefix);
+    task.modelRef = "provider/saved:high";
+    await services.startFromSupervisor(request, signal);
+    expect(actions.runTaskFromAgent).toHaveBeenLastCalledWith(task, signal, undefined, prefix);
+    expect(task.modelRef).toBe("provider/saved:high");
+  });
+
   it.each(["task", "prompt"] as const)("returns focus to the origin tab after a %s worker is dispatched", async (kind) => {
     const { services, state, task, loadSession } = fixture();
     const launched = kind === "task" ? "child" : "worker";

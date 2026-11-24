@@ -201,7 +201,6 @@ export function createSupervisorService(deps: SupervisorServiceDeps): Supervisor
 				maxReworkRounds: mandate.maxReworkRounds,
 				...(mandate.budgetTokens !== undefined ? { budgetTokens: mandate.budgetTokens } : { budgetTokens: null }),
 				stalledAfterMinutes: mandate.stalledAfterMinutes,
-				...(mandate.workerModelRef ? { workerModelRef: mandate.workerModelRef } : {}),
 				policy: mandate.policy,
 			},
 			limits: { running, maxConcurrent: mandate.maxConcurrent },

@@ -119,6 +119,9 @@ models and Summarizer models. Wizard-managed routing tiers (simple, standard,
 complex, expert) show model/thinking read-only; custom tiers stay editable, as
 do non-model settings such as Auto by default, routing fallback tier, visible
 models, RAG thinking effort, autocomplete limits, frontier flags and economy.
+Under Routing & desktop → Desktop, each Supervisor worker tier (simple,
+standard, complex) has a model and thinking level (`supervisor.workerModels`);
+see [worker model tiers](../work-management/project-supervisor.md#worker-model-tiers).
 
 Code and Knowledge use native local search. Optional semantic retrieval is
 authorized by explicit global `search.embedding` in

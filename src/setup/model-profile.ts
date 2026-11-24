@@ -157,13 +157,21 @@ const SUITE_SLOTS: readonly SlotDef[] = [
 	optSlot("suite", "lookup-fallback", "Lookup fallback", "Vision", fixed("lookupFallbackModels"), { list: true, vision: true, parent: "lookup" }),
 ];
 
+const SUPERVISOR_SLOTS = ([["simple", "fast"], ["standard", "main"], ["complex", "strong"]] as const)
+	.map(([tier, role]): SlotDef => ({
+		id: `supervisor-${tier}`, label: `Supervisor worker: ${tier}`, group: "Desktop", role,
+		file: "desktop", path: fixed("supervisor", "workerModels", tier, "modelRef"),
+	}));
+
 const DESKTOP_SLOTS: readonly SlotDef[] = [
+	...SUPERVISOR_SLOTS,
 	optSlot("desktop", "knowledge-judge-desktop", "Contradiction judge (Desktop override)", "Assistant", fixed("knowledgeCheck", "modelRef"), { parent: "knowledge-judge", emptyLabel: "Use Tools Suite setting", thinkingDefaultLabel: "Use Tools Suite setting" }),
 ];
 
 const THINKING_LEVELS: readonly string[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 /** field: sibling `thinking` key next to modelRef; suffix: `provider/model:level`. */
 const THINKING_KIND: Readonly<Record<string, "field" | "suffix">> = {
+	...Object.fromEntries(SUPERVISOR_SLOTS.map(({ id }) => [id, "field" as const])),
 	"knowledge-judge": "field", "knowledge-judge-desktop": "field",
 	default: "field", "tier-simple": "field", "tier-standard": "field", "tier-complex": "field", "tier-expert": "field",
 	"git-review": "suffix", "git-commit": "suffix",
@@ -230,7 +238,10 @@ export function applyModelRolesToPixConfig(source: string, roles: ModelRoles, ov
 export function applyModelRolesToDesktopConfig(source: string, roles: ModelRoles, overrides: SlotOverrides = {}): string {
 	let out = applyModelRolesToPixConfig(source, roles, overrides);
 	const cfg = (parseJsonc(out) ?? {}) as Cfg;
-	for (const slot of DESKTOP_SLOTS) out = applyOptional(out, cfg, slot, overrides[slot.id], undefined, overrides[`${slot.id}:thinking`]);
+	for (const slot of DESKTOP_SLOTS) {
+		out = applyOptional(out, cfg, slot, slot.optional ? overrides[slot.id] : slotValue(slot, roles, overrides),
+			undefined, overrides[`${slot.id}:thinking`]);
+	}
 	return out;
 }
 

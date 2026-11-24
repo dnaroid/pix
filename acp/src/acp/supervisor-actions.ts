@@ -41,6 +41,7 @@ export interface SupervisorActionRuntime {
 export interface SupervisorActionDeps {
 	readonly store: SupervisorStore;
 	readonly runtime: SupervisorActionRuntime;
+	standardWorkerModel(cwd: string): Promise<string | undefined>;
 	live(sessionId: string): SupervisorLiveSession | undefined;
 	digest(cwd: string, callerSessionId: string, sessionId: string): Promise<SupervisorDigest>;
 	/** Stop reason of the session's last settled turn, when ACP saw it. */
@@ -131,6 +132,7 @@ export function createSupervisorActions(deps: SupervisorActionDeps) {
 		request: Extract<SupervisorMutation, { op: "start" }>,
 		mandate: SupervisorMandate,
 		registry: SupervisorRegistry,
+		assertCurrent: () => void,
 	) {
 		const { item } = request;
 		for (const [sessionId, entry] of Object.entries(registry.sessions)) {
@@ -138,11 +140,12 @@ export function createSupervisorActions(deps: SupervisorActionDeps) {
 				: item.kind === "plan" && entry.item.kind === "plan" && entry.item.path === item.path;
 			if (same) throw new Error(`Already registered as session ${sessionId}; use send, close or reopen instead of a duplicate start`);
 		}
+		// Desktop gives the saved task assignment precedence over this suggestion.
+		const modelRef = request.modelRef ?? await deps.standardWorkerModel(cwd);
+		assertCurrent();
 		if (runningManagedSessions(registry, deps.live) >= mandate.maxConcurrent) {
 			throw new Error(`Concurrency limit reached (${mandate.maxConcurrent} managed sessions running); wait for one to settle`);
 		}
-		// A saved task keeps its own model; the mandate default covers plans and prompts.
-		const modelRef = request.modelRef ?? (item.kind === "task" ? undefined : mandate.workerModelRef);
 		// Held under the project lock: concurrent starts cannot both pass the limit.
 		const { sessionId } = await runtime.launch(cwd, callerSessionId, item, modelRef);
 		const registered = item.kind === "task" ? { kind: "task" as const, taskId: item.taskId }
@@ -153,7 +156,7 @@ export function createSupervisorActions(deps: SupervisorActionDeps) {
 				?? { item: registered, mode: "managed", registeredAt: Date.now(), reworkRounds: 0, briefed: true, origin: "started" as const } },
 		}));
 		runtime.registered?.(cwd, callerSessionId);
-		await journal(cwd, "started", sessionId, { item: registered, ...(modelRef ? { modelRef } : {}),
+		await journal(cwd, "started", sessionId, { item: registered, ...(modelRef ? { suggestedModelRef: modelRef } : {}),
 			...(item.kind === "prompt" ? { text: clip(item.text) } : {}) });
 		return { started: true, sessionId, item: registered,
 			note: "The session is running with the worker rules; you get a digest when it settles." };
@@ -345,7 +348,7 @@ export function createSupervisorActions(deps: SupervisorActionDeps) {
 				if (request.op === "escalate") return escalate(cwd, request, assertCurrent);
 				assertActive(mandate);
 				switch (request.op) {
-					case "start": return start(cwd, callerSessionId, request, mandate, registry);
+					case "start": return start(cwd, callerSessionId, request, mandate, registry, assertCurrent);
 					case "send": return send(cwd, request, mandate, registry);
 					case "answer": return answer(cwd, callerSessionId, request, registry);
 					case "cancel": return cancel(cwd, request, registry);

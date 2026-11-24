@@ -92,6 +92,7 @@ import { SUPERVISOR_SETUP_CONFIRMATION_CANCELLED, SUPERVISOR_SETUP_SAVED, SUPERV
 import { createSupervisorService, readSessionBranchMessages, type SupervisorPendingQuestion, type SupervisorService } from "./supervisor-service.js";
 import { createSupervisorBudget, createSupervisorBudgetUsage } from "./supervisor-budget.js";
 import { createSupervisorActions, type SupervisorActions } from "./supervisor-actions.js";
+import { loadSupervisorWorkerModels } from "./supervisor-worker-models.js";
 import { writeTaskStatus } from "./supervisor-tasks.js";
 import { reconcileSupervisor } from "./supervisor-reconcile.js";
 import type { SessionEvent as SupervisorSessionEvent } from "./session-events.js";
@@ -907,6 +908,8 @@ export class PixAcpAgent {
 		});
 		this.supervisorActions = createSupervisorActions({
 			store: this.supervisorStore,
+			standardWorkerModel: async (cwd) => (await loadSupervisorWorkerModels(cwd,
+				(message) => this.options.logger.warn(message, { module: "supervisor" }))).standard,
 			live: (sessionId) => {
 				const session = this.sessions.get(sessionId);
 				if (!session) return undefined;
@@ -3045,7 +3048,6 @@ export class PixAcpAgent {
 			const response: SupervisorMandateResponse = {
 				enabled: mandate.enabled, paused: mandate.paused, maxConcurrent: mandate.maxConcurrent,
 				maxReworkRounds: mandate.maxReworkRounds, stalledAfterMinutes: mandate.stalledAfterMinutes,
-				...(mandate.workerModelRef === undefined ? {} : { workerModelRef: mandate.workerModelRef }),
 				policy: mandate.policy, managed, manual, running, reworkRounds, ...snapshot,
 			};
 			return { response, retry, supervisorId: registry.supervisorSessionId };

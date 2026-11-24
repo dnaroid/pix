@@ -189,7 +189,7 @@ export function createDesktopProjectActionServices(options: DesktopProjectAction
     if (!task) throw new Error(`Unknown project task id: ${item.taskId}`);
     // A linked task would only reopen its old session, which the supervisor never briefed.
     if (task.sessionId) throw new Error(`Task ${task.id} already has session ${task.sessionId}; reopen it or ask the user to hand it over`);
-    const result = await actions.runTaskFromAgent(task, signal, modelRef, prefix);
+    const result = await actions.runTaskFromAgent(task, signal, task.modelRef ? undefined : modelRef, prefix);
     return returnFocus(result.sessionId);
   }
 

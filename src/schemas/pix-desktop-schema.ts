@@ -15,6 +15,11 @@ const ThinkingLevel = Type.Union(
 	{ description: "Model thinking budget level." },
 );
 
+const SupervisorWorkerModel = Type.Object({
+	modelRef: Type.String({ description: "Provider/model identifier." }),
+	thinking: Type.Optional(ThinkingLevel),
+});
+
 const DefaultModelConfig = Type.Object(
 	{
 		modelRef: Type.Optional(Type.String({ description: "Provider/model identifier used for new Desktop sessions." })),
@@ -207,6 +212,13 @@ export const PixDesktopConfigSchema = Type.Object(
 			{ description: "Desktop universal search: centralized semantic provider status and independent RAG generation preferences." },
 		)),
 		dictation: Type.Optional(DictationConfig),
+		supervisor: Type.Optional(Type.Object({
+			workerModels: Type.Optional(Type.Object({
+				simple: Type.Optional(SupervisorWorkerModel),
+				standard: Type.Optional(SupervisorWorkerModel),
+				complex: Type.Optional(SupervisorWorkerModel),
+			}, { description: "Models for worker sessions launched by the project supervisor. No model router is used." })),
+		})),
 		headsUp: Type.Optional(HeadsUpConfig),
 		desktop: Type.Optional(DesktopAppConfig),
 	},

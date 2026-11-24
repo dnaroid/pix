@@ -6749,7 +6749,7 @@ test("project supervisor: answers the live Pi questionnaire once and relays a qu
 	}
 });
 
-test("project supervisor: mandate saves, reads and clears the default worker model", async (t) => {
+test("project supervisor: mandate ignores legacy worker model and keeps token budget editing", async (t) => {
 	const agentDir = mkdtempSync(join(tmpdir(), "pix-acp-worker-model-agent-"));
 	const cwd = mkdtempSync(join(tmpdir(), "pix-acp-worker-model-"));
 	t.after(() => Promise.all([rm(agentDir, { recursive: true, force: true }), rm(cwd, { recursive: true, force: true })]).then(() => undefined));
@@ -6761,21 +6761,13 @@ test("project supervisor: mandate saves, reads and clears the default worker mod
 			const readSaved = async () => JSON.parse(await readFile(join(cwd, ".pi/supervisor/mandate.json"), "utf8"));
 			assert.equal(Object.hasOwn(parseSupervisorMandateResponse(await cx.request(method, { cwd })), "workerModelRef"), false);
 
-			const workerModelRef = "provider/model:high";
-			const saved = await cx.request(method, { cwd, patch: { workerModelRef: ` ${workerModelRef} ` } });
-			assert.equal(parseSupervisorMandateResponse(saved).workerModelRef, workerModelRef);
-			assert.equal((await readSaved()).workerModelRef, workerModelRef);
+			const mandatePath = join(cwd, ".pi/supervisor/mandate.json");
 			await cx.request(method, { cwd, patch: { maxConcurrent: 3 } });
-			for (const invalid of [42, "", "model", "provider/", `p/${"x".repeat(511)}`]) {
-				await assert.rejects(cx.request(method, { cwd, patch: { workerModelRef: invalid } }), /Invalid supervisor mandate workerModelRef/);
-			}
-			assert.equal(parseSupervisorMandateResponse(await cx.request(method, { cwd })).workerModelRef, workerModelRef);
-
-			const cleared = await cx.request(method, { cwd, patch: { workerModelRef: null } });
-			assert.equal(Object.hasOwn(parseSupervisorMandateResponse(cleared), "workerModelRef"), false);
-			assert.equal(Object.hasOwn(await readSaved(), "workerModelRef"), false);
+			await writeFile(mandatePath, JSON.stringify({ ...await readSaved(), workerModelRef: "provider/legacy:high" }));
 			const reread = parseSupervisorMandateResponse(await cx.request(method, { cwd }));
 			assert.equal(Object.hasOwn(reread, "workerModelRef"), false);
+			await cx.request(method, { cwd, patch: { policy: "legacy migration" } });
+			assert.equal(Object.hasOwn(await readSaved(), "workerModelRef"), false);
 			assert.equal(reread.maxConcurrent, 3);
 			assert.equal(reread.budgetTokens, undefined);
 			for (const invalid of [0, -1, 1.5, "100"]) {

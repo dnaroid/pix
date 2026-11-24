@@ -7,6 +7,8 @@ import {
 	SUPERVISOR_TOOL,
 } from "../acp/supervisor-contract.js";
 import { SUPERVISOR_SETUP_OPS } from "../acp/supervisor-setup-contract.js";
+import { loadSupervisorWorkerModels, supervisorWorkerModelGuidance } from "../acp/supervisor-worker-models.js";
+import { createLogger } from "../logging.js";
 
 /**
  * `supervisor` agent tool (decision 0077, phases 1-2). ACP loads this
@@ -15,10 +17,26 @@ import { SUPERVISOR_SETUP_OPS } from "../acp/supervisor-setup-contract.js";
  * correlated bridge installed by `pi/supervisor-host.js`.
  */
 const HOST = Symbol.for("pix.supervisor.request");
+const WORKER_MODELS_SECTION = "supervisor_worker_models";
 
 type SupervisorHost = (input: { ownerSessionId: string } & Record<string, unknown>, signal?: AbortSignal) => Promise<unknown>;
 
 export default function supervisorExtension(pi: ExtensionAPI): void {
+	const logger = createLogger();
+	pi.on("before_agent_start", async (event) => {
+		const options = event.systemPromptOptions;
+		const models = await loadSupervisorWorkerModels(options.cwd,
+			(message) => logger.warn(message, { module: "supervisor" }));
+		const guidance = supervisorWorkerModelGuidance(models);
+		if (options.forceSystemPrompt !== undefined) {
+			if (guidance && !event.systemPrompt.includes(guidance)) {
+				return { systemPrompt: `${event.systemPrompt}\n\n<${WORKER_MODELS_SECTION}>\n${guidance}\n</${WORKER_MODELS_SECTION}>` };
+			}
+			return;
+		}
+		if (guidance) options.sections[WORKER_MODELS_SECTION] = guidance;
+		else delete options.sections[WORKER_MODELS_SECTION];
+	});
 	pi.registerTool({
 		name: SUPERVISOR_TOOL,
 		label: "Supervisor",
@@ -70,7 +88,7 @@ export default function supervisorExtension(pi: ExtensionAPI): void {
 				text: { type: "string", maxLength: MAX_SUPERVISOR_TEXT, description: "start: prompt for a new session; send: message for the session; escalate: the decision you need from the user." },
 				taskId: { type: "string", maxLength: 128, description: "start: saved task id to run." },
 				planPath: { type: "string", maxLength: 4096, description: "start: saved plan path under .pi/plans/ to run." },
-				modelRef: { type: "string", maxLength: 512, description: "start: provider/model[:thinking]; default is the task's model, the mandate's worker model or the Desktop default." },
+				modelRef: { type: "string", maxLength: 512, description: "start: suggested provider/model[:thinking]. A saved task's model wins; otherwise omitted uses the standard worker model or the Desktop default." },
 				kind: { type: "string", enum: SUPERVISOR_SEND_KINDS.filter((kind) => kind !== "answer"), description: "send: rework (counts against the rework limit) or note (default)." },
 				outcome: { type: "string", enum: ["done", "failed"], description: "close: done (guarded) or failed." },
 				summary: { type: "string", maxLength: MAX_SUPERVISOR_SUMMARY, description: "close: what was done or why it failed." },

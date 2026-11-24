@@ -22,6 +22,19 @@ test("acp and root suite config writers agree", () => {
 	for (const s of sources) assert.equal(applyRolesToSuiteConfig(s, roles), applyModelRolesToSuiteConfig(s, roles));
 });
 
+test("supervisor complexity assignments and thinking are saved only to Desktop", () => {
+	const overrides = { "supervisor-simple:thinking": "", "supervisor-standard": "p/selected", "supervisor-standard:thinking": "off" };
+	const source = '{"supervisor":{"workerModels":{"simple":{"modelRef":"p/old","thinking":"high"}}}}';
+	const output = applyRolesToDesktopConfig(source, roles, overrides);
+	assert.equal(output, applyModelRolesToDesktopConfig(source, roles, overrides));
+	assert.deepEqual(JSON.parse(output).supervisor.workerModels, {
+		simple: { modelRef: roles.fast },
+		standard: { modelRef: "p/selected", thinking: "off" },
+		complex: { modelRef: roles.strong },
+	});
+	assert.equal(JSON.parse(applyRolesToPixConfig("", roles, overrides)).supervisor, undefined);
+});
+
 test("acp and root role suggestions agree", () => {
 	assert.deepEqual(suggestRoles(models), suggestModelRoles(models));
 });

@@ -35,7 +35,6 @@ export interface SupervisorMandate {
 	/** Token ceiling over a rolling 24 hours; absent = no budget check. */
 	readonly budgetTokens?: number;
 	readonly stalledAfterMinutes: number;
-	readonly workerModelRef?: string;
 	readonly policy: string;
 	readonly updatedAt: number;
 }
@@ -102,7 +101,6 @@ function text(value: unknown, max: number): string | undefined {
 export function parseMandate(value: unknown): SupervisorMandate {
 	if (!isRecord(value)) return DEFAULT_MANDATE;
 	const budget = value["budgetTokens"];
-	const model = text(value["workerModelRef"], MAX_ID);
 	return {
 		version: 1,
 		enabled: value["enabled"] === true,
@@ -112,7 +110,6 @@ export function parseMandate(value: unknown): SupervisorMandate {
 		maxReworkRounds: intIn(value["maxReworkRounds"], LIMITS.maxReworkRounds.min, LIMITS.maxReworkRounds.max, DEFAULT_MANDATE.maxReworkRounds),
 		...(typeof budget === "number" && Number.isInteger(budget) && budget > 0 ? { budgetTokens: Math.min(budget, LIMITS.budgetTokens.max) } : {}),
 		stalledAfterMinutes: intIn(value["stalledAfterMinutes"], MIN_STALLED_AFTER_MINUTES, MAX_STALLED_AFTER_MINUTES, DEFAULT_STALLED_AFTER_MINUTES),
-		...(model ? { workerModelRef: model } : {}),
 		policy: typeof value["policy"] === "string" ? value["policy"].slice(0, MAX_POLICY) : "",
 		updatedAt: typeof value["updatedAt"] === "number" ? value["updatedAt"] : 0,
 	};
@@ -181,8 +178,7 @@ export interface SupervisorStore {
 	readBudgetHold(cwd: string): Promise<string | undefined>;
 	writeBudgetHold(cwd: string, supervisorId: string | undefined): Promise<void>;
 	/** Merge a patch into the saved mandate; returns the normalized result. */
-	updateMandate(cwd: string, patch: Partial<Omit<SupervisorMandate, "version" | "updatedAt" | "workerModelRef" | "budgetTokens">> & {
-		workerModelRef?: string | null;
+	updateMandate(cwd: string, patch: Partial<Omit<SupervisorMandate, "version" | "updatedAt" | "budgetTokens">> & {
 		budgetTokens?: number | null;
 	}): Promise<SupervisorMandate>;
 	readRegistry(cwd: string): Promise<SupervisorRegistry>;

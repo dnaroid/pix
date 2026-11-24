@@ -1210,10 +1210,6 @@
 <DeleteConfirmationHost />
 {#if supervisorMandate.editor && supervisorMandate.mandate}
   <SupervisorMandateDialog mandate={supervisorMandate.mandate} enable={supervisorMandate.editor.enable}
-    {workspace} configOptions={configOptions.length ? configOptions : draftConfigOptions}
-    visibleModelRefs={modelServices.preferences.visibleModelRefs}
-    rememberedThinkingByModel={modelServices.preferences.rememberedThinkingByModel}
-    onVisibleModelsChange={modelServices.preferences.saveVisibleModelRefs}
     saving={supervisorMandate.saving} onsave={(draft) => void supervisorMandate.save(draft)}
     oncancel={supervisorMandate.closeEditor} {reportError} />
 {/if}
