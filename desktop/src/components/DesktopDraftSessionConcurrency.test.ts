@@ -24,7 +24,7 @@ describe("draft-session concurrency guards", () => {
   });
 
   it("invalidates stale runtime-load completions when a session is forgotten", () => {
-    expect(runtimeLoadingSource).toContain("const loadsBySessionId = new Map<string, {");
+    expect(runtimeLoadingSource).toContain("const loadsBySessionId = new SvelteMap<string, {");
     expect(runtimeLoadingSource).toContain("loadsBySessionId.get(sessionId)?.promise !== pending");
     expect(runtimeLoadingSource).toContain("loadsBySessionId.delete(sessionId)");
   });
