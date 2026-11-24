@@ -168,7 +168,9 @@ export default function draftProvider(pi) {
 				true,
 			);
 		} finally {
-			await rm(root, { recursive: true, force: true });
+			// Pi schedules an un-awaited model refresh after every extension provider
+			// registration; it can still write models-store.json into agentDir.
+			await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 		}
 	});
 });

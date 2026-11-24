@@ -522,6 +522,8 @@ async function withTempPiDirs<T>(callback: (cwd: string, agentDir: string) => Pr
 		await mkdir(agentDir, { recursive: true });
 		return await callback(cwd, agentDir);
 	} finally {
-		await rm(root, { recursive: true, force: true });
+		// Pi schedules an un-awaited model refresh after extension provider
+		// registration; it can still write models-store.json into agentDir.
+		await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 	}
 }
