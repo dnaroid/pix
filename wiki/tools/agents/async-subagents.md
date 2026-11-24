@@ -876,7 +876,10 @@ returns `FAILED:98`, never `CLEAN:98`, and an omitted receipt is also rejected.
 The adapter consumes receipt/errors immediately with a 64-byte buffer limit,
 checks stream/control/child close errors and requires an exact `CLEAN:<exit>`
 receipt. The separate staged adapter test covers early stream error, oversized
-input, control EPIPE and close without end. Harness waits and finalization are
+input, control EPIPE and close without end. Early cancellation waits for the
+child's `spawn` event before closing private control; a spawn error fails
+closed without closing control. Receipt and close remain mandatory within the
+same 5-second cleanup deadline. Harness waits and finalization are
 bounded by wall-clock deadlines; incomplete cleanup preserves its workdir.
 
 `provider-native-owner-loss.test.ts` separately starts installed Pi RPC with the

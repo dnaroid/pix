@@ -954,7 +954,7 @@ describe.serial("todo extension lifecycle", () => {
 		}
 	});
 
-	test.serial("forces the configured GLM-5.3 todo thinking override to max", async () => {
+	test.serial("forces the default GLM-5.4 todo thinking override to max", async () => {
 		const previousEnv = process.env.PI_TOOLS_SUITE_TODO_THINKING;
 		process.env.PI_TOOLS_SUITE_TODO_THINKING = "1";
 		const extension = (await import("../src/todo/index.js")).default;
@@ -962,13 +962,13 @@ describe.serial("todo extension lifecycle", () => {
 		const pi = new FakePi();
 		pi.thinkingLevel = "high";
 		const ctx = {
-			cwd: mkdtempSync(join(tmpdir(), "todo-thinking-glm53-")),
+			cwd: mkdtempSync(join(tmpdir(), "todo-thinking-glm54-")),
 			hasUI: false,
 			model: {
 				provider: "zai",
-				id: "glm-5.3",
+				id: "glm-5.4",
 				reasoning: true,
-				compat: { thinkingFormat: "zai" },
+				thinkingLevelMap: { off: null, minimal: null, medium: null, xhigh: null, max: "max" },
 			},
 			sessionManager: { getBranch: () => [] },
 			isIdle: () => true,

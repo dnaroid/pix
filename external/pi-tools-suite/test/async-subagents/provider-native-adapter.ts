@@ -1,5 +1,6 @@
 // Copied into a verified, isolated provider snapshot only; never installed.
 import { spawn, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
 import type { ProcessSupervisorOptions, ProcessSupervisor } from "./process-utils.ts";
 import { ProcessTerminationError, type superviseProcess } from "./process-utils.ts";
 
@@ -13,6 +14,10 @@ export function nativeSpawn(binary: string, command: string, args: readonly stri
 export function nativeSupervisor(child: ChildProcess, options: ProcessSupervisorOptions, supervise: typeof superviseProcess): ProcessSupervisor {
 	const control = child.stdio[3] as NodeJS.WritableStream;
 	const report = child.stdio[4] as NodeJS.ReadableStream;
+	const spawnObservation = new AbortController();
+	const spawnError = once(child, "spawn", { signal: spawnObservation.signal }).then(
+		() => undefined, (error: Error) => error,
+	);
 	let text = "";
 	// Resolve to an outcome immediately: an early stream failure must never be
 	// an unobserved rejection while the provider is still reading stdout.
@@ -38,7 +43,11 @@ export function nativeSupervisor(child: ChildProcess, options: ProcessSupervisor
 		child.once("error", (error: Error) => resolve(error));
 	});
 	// The provider's normal stdin.close must NOT cancel this separate liveness pipe.
-	const terminate = async (): Promise<void> => {
+	const closeControl = async (): Promise<Error | undefined> => {
+		// An abort can arrive synchronously during spawnClaudeProcess setup. Do
+		// not close Bun's control socket before child_process publishes spawn.
+		const launchError = await spawnError;
+		if (launchError) throw launchError;
 		let endError: Error | undefined;
 		const socket = control as NodeJS.WritableStream & { writableEnded?: boolean; destroyed?: boolean; destroy?: () => void };
 		if (!socket.writableEnded && !socket.destroyed) {
@@ -52,15 +61,24 @@ export function nativeSupervisor(child: ChildProcess, options: ProcessSupervisor
 			try { socket.destroy(); }
 			catch (error) { endError = error as Error; }
 		}
+		return endError;
+	};
+	const terminate = async (): Promise<void> => {
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		let observed: Outcome;
 		let closeError: Error | undefined;
+		let endError: Error | undefined;
 		try {
-			[observed, closeError] = await Promise.race([
-				Promise.all([receipt, close]).then(([value, error]) => [value, error] as const),
-				new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Native cleanup receipt/close timed out")), 5_000); }),
+			[observed, closeError, endError] = await Promise.race([
+				Promise.all([receipt, close, closeControl()]),
+				new Promise<never>((_, reject) => {
+					timer = setTimeout(() => reject(new Error(`Native cleanup receipt/close timed out (exit=${child.exitCode}, signal=${child.signalCode})`)), 5_000);
+				}),
 			]);
-		} finally { if (timer) clearTimeout(timer); }
+		} finally {
+			clearTimeout(timer);
+			spawnObservation.abort();
+		}
 		if (controlError || endError || closeError || observed.error) throw controlError ?? endError ?? closeError ?? observed.error;
 		const expected = child.exitCode;
 		if (expected === null || observed.value !== `CLEAN:${expected}\n`) throw new Error(`Invalid native cleanup receipt: ${JSON.stringify(observed.value)}; exit=${String(expected)}`);

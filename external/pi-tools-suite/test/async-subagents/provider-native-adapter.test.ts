@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { EventEmitter } from "node:events";
+import { EventEmitter, once } from "node:events";
 import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,7 +15,7 @@ test("staged native adapter observes early receipt/error, bounds input, and reje
 		copyFileSync(fileURLToPath(new URL("./provider-native-adapter.ts", import.meta.url)), join(dir, "provider-native-adapter.ts"));
 		writeFileSync(join(dir, "process-utils.ts"), `export class ProcessTerminationError extends Error { constructor(cause) { super(String(cause)); this.name = "ProcessTerminationError"; this.livenessUnknown = true; } }`);
 		const { nativeSupervisor } = await import(pathToFileURL(join(dir, "provider-native-adapter.ts")).href);
-		const make = () => {
+		const make = (spawned = true) => {
 			const child = new EventEmitter() as ChildProcess;
 			const control = new PassThrough();
 			const report = new PassThrough();
@@ -25,8 +25,29 @@ test("staged native adapter observes early receipt/error, bounds input, and reje
 				terminate = options.terminate;
 				return {} as ReturnType<typeof nativeSupervisor>;
 			});
+			if (spawned) child.emit("spawn");
 			return { child, control, report, terminate };
 		};
+		{
+			const { child, control, report, terminate } = make(false);
+			const termination = terminate();
+			const closedBeforeSpawn = control.writableEnded || control.destroyed;
+			child.emit("spawn");
+			const receiptEnded = once(report, "end");
+			report.end("CLEAN:0\n");
+			await receiptEnded;
+			child.emit("close");
+			await termination;
+			expect(closedBeforeSpawn).toBe(false);
+			expect(control.destroyed).toBe(true);
+		}
+		{
+			const { child, control, terminate } = make(false);
+			const termination = terminate();
+			child.emit("error", new Error("relay did not spawn"));
+			await expect(termination).rejects.toThrow("relay did not spawn");
+			expect(control.writableEnded).toBe(false);
+		}
 		{
 			const { child, report, terminate } = make();
 			report.emit("error", new Error("receipt stream error")); // before terminate
