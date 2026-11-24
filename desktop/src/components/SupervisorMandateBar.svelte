@@ -4,16 +4,26 @@
   import Radar from "@lucide/svelte/icons/radar";
   import type { SupervisorMandateResponse } from "../../../acp/src/acp/supervisor-contract";
 
-  let { mandate, saving, onSetUp, onEdit, onPause }: {
+  let { mandate, runtimeReady, runtimeLoading, saving, onSetUp, onEdit, onPause }: {
     /** Null while the first read is in flight or failed. */
     mandate: SupervisorMandateResponse | null;
+    runtimeReady: boolean;
+    runtimeLoading: boolean;
     saving: boolean;
     onSetUp: () => void;
     onEdit: () => void;
     onPause: (paused: boolean) => void;
   } = $props();
 
-  const state = $derived(!mandate ? "Loading…" : !mandate.enabled ? "Off" : mandate.paused ? "Paused" : "Active");
+  const runtimeState = $derived.by(() => {
+    if (runtimeReady) return "Ready";
+    return runtimeLoading ? "Starting…" : "Not ready";
+  });
+  const mandateState = $derived.by(() => {
+    if (!mandate) return "Loading mandate…";
+    if (!mandate.enabled) return "Off";
+    return mandate.paused ? "Paused" : "Enabled";
+  });
   const budget = $derived(mandate?.budgetTokens === undefined ? "no limit"
     : `${mandate.budgetUsedTokens?.toLocaleString() ?? "unavailable"} / ${mandate.budgetTokens.toLocaleString()} tokens`);
   const actionClass = "inline-flex h-6 items-center gap-1 rounded-sm px-2 text-foreground transition-colors hover:bg-panel-hover disabled:opacity-40";
@@ -23,7 +33,8 @@
   role="region" aria-label="Project supervisor mandate" data-supervisor-mandate-bar>
   <Radar class="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
   <span class="shrink-0 text-foreground">Supervisor</span>
-  <span class="shrink-0" role="status" data-supervisor-state>{state}</span>
+  <span class="shrink-0" role="status" data-supervisor-runtime-state>{runtimeState}</span>
+  <span class="shrink-0" role="status" data-supervisor-state title="Supervisor mandate">{mandateState}</span>
   {#if mandate}
     <span class="min-w-0 flex-1 truncate font-mono tabular-nums" data-supervisor-counters
       title="Running managed sessions out of the parallel limit; managed and taken-back sessions; rework rounds used">

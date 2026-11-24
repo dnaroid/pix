@@ -1,11 +1,12 @@
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
+import { SvelteMap } from "svelte/reactivity";
 import type { AcpClient } from "../lib/acp-client";
 import { subagentSessionLink } from "../lib/session-subagent-link";
 import type { SessionRuntimeStoreOptions } from "./session-runtime-options";
 
 export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions) {
   const readySessionIds = new Set<string>();
-  const loadsBySessionId = new Map<string, {
+  const loadsBySessionId = new SvelteMap<string, {
     client: AcpClient;
     workspace: string;
     promise: Promise<void>;
@@ -19,7 +20,8 @@ export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions)
   }
 
   function isLoading(sessionId: string): boolean {
-    return loadsBySessionId.has(sessionId);
+    const load = loadsBySessionId.get(sessionId);
+    return !!load && load.client === options.client() && load.workspace === options.workspace();
   }
 
   function getConfigOptions(sessionId: string): SessionConfigOption[] | undefined {

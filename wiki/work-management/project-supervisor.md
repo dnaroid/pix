@@ -102,8 +102,13 @@ decision outside its mandate.
 
 ## Mandate UI
 
-- A compact block in the supervisor session header shows state (active or
-  paused), a one-click **Pause**/**Resume**, running sessions, rework rounds
+- A compact block in the supervisor session header shows session readiness
+  separately from the saved mandate. **Starting…** means the session runtime
+  is loading, **Ready** means it has loaded, and **Not ready** means it is
+  unavailable and not currently loading. No message or worker event is needed
+  to reach **Ready**. The mandate state (**Enabled**, **Paused** or **Off**)
+  controls supervisor actions, not whether the conversation has loaded. The
+  block also shows a one-click **Pause**/**Resume**, running sessions, rework rounds
   used, and rolling token usage against the ceiling (or "no limit" without
   one). **Edit mandate** opens the mandate form. The mandate is stored in
   `.pi/supervisor/`.
@@ -474,7 +479,7 @@ rationale.
   `mandate_changed`. Desktop shows a compact block above the supervisor
   transcript (`SupervisorMandateBar.svelte`, store
   `desktop/src/app/supervisor-mandate.svelte.ts`, polled every 5 s while
-  visible): state Off/Active/Paused, counters, **Set up** when disabled,
+  visible): runtime readiness, mandate state, counters, **Set up** when disabled,
   **Pause**/**Resume** and **Edit mandate** (`SupervisorMandateDialog.svelte`:
   enable, parallel sessions 1–20, rework rounds 0–50, stalled 5–60 min,
   token budget, policy). The mandate no longer has a worker model field; worker

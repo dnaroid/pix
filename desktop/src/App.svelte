@@ -1083,6 +1083,8 @@
   onDestroy(supervisorMandate.closeEditor);
   const supervisorMandateBar = $derived(supervisorSessionVisible ? {
     mandate: supervisorMandate.mandate,
+    runtimeReady: activeSessionRuntimeReady,
+    runtimeLoading: !!activeSessionId && sessionServices.runtime.isLoading(activeSessionId),
     saving: supervisorMandate.saving,
     onSetUp: () => supervisorMandate.openEditor(true),
     onEdit: () => supervisorMandate.openEditor(),
