@@ -405,6 +405,24 @@ describe("anthropic response-header usage", () => {
 		assert.equal(harness.emitted.length, 2, "a response without a matching request must not reuse stale identity");
 	});
 
+	it("keeps the request identity across HTTP retry responses for the same payload", async () => {
+		const harness = extensionHarness();
+		const ctx = {
+			model: { provider: "anthropic", id: "claude-sonnet-4-6" },
+			sessionManager: { getSessionId: () => "session-42" },
+		};
+		const headers = { "anthropic-ratelimit-requests-limit": "10" };
+		await harness.beforeRequest({ model: "claude-sonnet-4-6" }, ctx);
+		await harness.afterResponse({ status: 429, headers }, ctx);
+		await harness.afterResponse({ status: 503, headers }, ctx);
+		assert.equal(harness.emitted.length, 0);
+		await harness.afterResponse({ status: 200, headers }, {
+			...ctx, model: { ...ctx.model, id: "claude-opus-4-6" },
+		});
+		assert.equal(harness.emitted.length, 1);
+		assert.equal((harness.emitted[0].data as { modelRef: string }).modelRef, "anthropic/claude-sonnet-4-6");
+	});
+
 	it("fails closed if overlapping requests use different models", async () => {
 		const harness = extensionHarness();
 		const ctx = (id: string) => ({

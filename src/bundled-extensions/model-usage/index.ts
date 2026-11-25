@@ -60,6 +60,8 @@ function requestIdentityFromPayload(
  * unchanged. Responses without an attributable request — including requests
  * that started before this extension loaded, non-string payload models, and
  * non-Anthropic providers — are dropped. No identity is ever synthesized.
+ * HTTP errors can be followed by a retry of the same payload without another
+ * request event, so only a successful response consumes an identity.
  *
  * The payload carries its own session/model identity so the host can discard
  * samples from stale or background sessions; nothing is attributed globally.
@@ -69,8 +71,8 @@ export default function modelUsageTelemetry(pi: ExtensionAPI): void {
 	let outstandingRequests = 0;
 	let ambiguousRequests = false;
 	pi.on("agent_end", () => {
-		// A provider failure may have no HTTP response callback. Discard the
-		// unmatched identity before another user turn can begin.
+		// A provider failure may end without a successful response. Discard
+		// the unmatched identity before another user turn can begin.
 		pendingRequest = undefined;
 		outstandingRequests = 0;
 		ambiguousRequests = false;
@@ -91,6 +93,7 @@ export default function modelUsageTelemetry(pi: ExtensionAPI): void {
 	});
 
 	pi.on("after_provider_response", async (event, ctx) => {
+		if (event.status < 200 || event.status >= 300) return;
 		if (outstandingRequests === 0) return;
 		outstandingRequests--;
 		const request = pendingRequest;
