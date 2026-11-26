@@ -9,6 +9,7 @@ import { loadRuntimeConfig } from "./config.js";
 import { promises as fs } from "node:fs";
 import { assertOtherProjectsAbsent, samePublication, selectPublicationRuntime } from "./publication-location.js";
 import { acpFileLogger } from "../logging.js";
+import { DIVERGED_GUIDANCE } from "./merge.js";
 
 export async function installResourceWithRuntime(
 	executor: RegistryExecutor,
@@ -117,7 +118,7 @@ export async function updateResourceWithRuntime(
 				await recordProvenance(ctx, runtime, type, name, remoteRevision, localHash);
 				return "current";
 			}
-			throw new Error(`${type} "${name}" has local changes. Push them or resolve the divergence before updating.`);
+			throw new Error(`${type} "${name}" has local changes and the registry copy also changed. ${DIVERGED_GUIDANCE}`);
 		}
 	}
 	if (remoteRevision === tracked.revision && await pathExists(destination)) return "current";
@@ -158,7 +159,8 @@ export async function pushResourceWithRuntime(
 	// a registry change; refuse only when the published bytes left the baseline.
 	if (tracked && samePublication(tracked, runtime) && remoteRevision && remoteRevision !== tracked.revision
 		&& await hashResource(type, destination) !== tracked.hash) {
-		throw new Error(`${type} "${name}" changed in the registry since revision ${tracked.revision.slice(0, 8)}. Check Registry and update/resolve before pushing.`);
+		const localChangedSinceBaseline = await hashResource(type, source) !== tracked.hash;
+		throw new Error(`${type} "${name}" changed in the registry since revision ${tracked.revision.slice(0, 8)}. ${localChangedSinceBaseline ? DIVERGED_GUIDANCE : "Update it before pushing."}`);
 	}
 
 	const localHash = await hashResource(type, source);

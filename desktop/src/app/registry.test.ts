@@ -336,7 +336,7 @@ describe("Registry resource diff", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
 
-  function diffFixture(registryDiffImpl?: (cwd: string, type: string, name: string) => Promise<unknown>) {
+  function diffFixture(registryDiffImpl?: (cwd: string, target: any) => Promise<unknown>) {
     let workspace = "/project";
     const registryDiff = vi.fn(registryDiffImpl ?? (async () => ({ files: [] })));
     const client = { registryDiff } as any;
@@ -381,7 +381,7 @@ describe("Registry resource diff", () => {
 
     expect(store.diff).toMatchObject({ phase: "loading", target: { type: "agent", name: "researcher" } });
     await vi.waitFor(() => expect(store.diff?.phase).toBe("ready"));
-    expect(registryDiff).toHaveBeenCalledWith("/project", "agent", "researcher");
+    expect(registryDiff).toHaveBeenCalledWith("/project", { type: "agent", name: "researcher" });
     expect(store.diff).toMatchObject({ phase: "ready", files });
     expect(store.actionId).toBeNull();
   });
@@ -414,7 +414,8 @@ describe("Registry resource diff", () => {
 
   it("replaces the view when another resource diff is opened before the first resolves", async () => {
     let finishFirst!: (value: { files: unknown[] }) => void;
-    const { store, registryDiff } = diffFixture((_cwd: string, _type: string, name: string) => {
+    const { store, registryDiff } = diffFixture((_cwd: string, target: any) => {
+      const name = target.name;
       if (name === "researcher") {
         return new Promise((resolve) => {
           finishFirst = resolve;
@@ -462,5 +463,37 @@ describe("Registry resource diff", () => {
     await settle();
 
     expect(store.diff).toBeUndefined();
+  });
+  it("opens a merge review for a diverged copy and runs the reviewed action only on confirm", async () => {
+    const files = [{ path: "skills/demo/notes.md", oldText: "v1\n", newText: "v2\n" }];
+    const registryDiff = vi.fn(async () => ({ files }));
+    const snapshot = { configured: true, items: [], checkedAt: "now" };
+    const registryAction = vi.fn(async () => snapshot);
+    const client = { registryDiff, registryAction } as any;
+    const store = createRegistryStore({
+      client: () => client,
+      operationRunning: () => false,
+      workspace: () => "/project",
+      sessionWorkspace: () => undefined,
+      setErrorMessage: vi.fn(),
+      loadProjectTasks: vi.fn(),
+      loadProjectDocuments: vi.fn(),
+      reportError: vi.fn(),
+    });
+    const diverged = agentItem({ id: "skill:demo", type: "skill", name: "demo", actions: ["merge", "mark-merged"] });
+
+    store.openDiff(agentItem({ status: "local-changes", actions: ["push"] }), "merge");
+    expect(store.diff).toBeUndefined();
+
+    store.openDiff(diverged, "merge");
+    await vi.waitFor(() => expect(store.diff?.phase).toBe("ready"));
+    expect(registryDiff).toHaveBeenCalledWith("/project", { type: "skill", name: "demo", intent: "merge" });
+    expect(registryAction).not.toHaveBeenCalled();
+
+    store.confirmReview(true);
+    expect(store.diff).toBeUndefined();
+    await vi.waitFor(() => expect(registryAction).toHaveBeenCalledWith("/project", {
+      action: "merge", type: "skill", name: "demo", writeConflictMarkers: true,
+    }));
   });
 });

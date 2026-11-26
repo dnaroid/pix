@@ -2,6 +2,10 @@ import type { AcpClient } from "../lib/acp-client";
 import {
   registryDiffAvailable,
   registryPublicationScope,
+  registryReviewRequest,
+  registryReviewTarget,
+  type RegistryDiffIntent,
+  type RegistryDiffTarget,
   registrySnapshotFromSessionState,
   type RegistryActionRequest,
   type RegistryDiffState,
@@ -159,6 +163,10 @@ export function createRegistryStore(options: RegistryStoreOptions) {
   }
 
   function queuedActionAvailable(request: RegistryActionRequest): boolean {
+    if (request.action === "merge-project" || request.action === "mark-merged-project") {
+      const intent = request.action === "merge-project" ? "merge" : "mark-merged";
+      return Boolean(snapshot?.items.some((item) => item.type === "project" && item.artifact === request.scope && item.actions.includes(intent)));
+    }
     if (!("name" in request)) return true;
     const item = snapshot?.items.find((item) => item.type === request.type && item.name === request.name);
     if (!item) return false;
@@ -236,9 +244,17 @@ export function createRegistryStore(options: RegistryStoreOptions) {
    * copies. Diff is independent of mutating registry actions, but a late
    * response must never replace a newer selection, workspace or closed view.
    */
-  function openDiff(item: RegistryItem): void {
-    if (item.type === "project" || !registryDiffAvailable(item)) return;
-    const target = { type: item.type, name: item.name };
+  /**
+   * Opens a read-only diff. With an `intent`, the view is the review step of
+   * Merge / Mark as merged on a diverged copy; nothing is written until
+   * `confirmReview` runs the reviewed action.
+   */
+  function openDiff(item: RegistryItem, intent?: RegistryDiffIntent): void {
+    let target: RegistryDiffTarget | undefined;
+    if (intent) target = registryReviewTarget(item, intent);
+    else if (item.type !== "project" && registryDiffAvailable(item)) target = { type: item.type, name: item.name };
+    if (!target) return;
+    const requestTarget = target;
     const requestClient = options.client();
     const workspace = options.workspace();
     const requestDiffGeneration = ++diffGeneration;
@@ -254,14 +270,14 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     diff = { phase: "loading", target };
     void (async () => {
       try {
-        const result = await requestClient.registryDiff(workspace, target.type, target.name);
+        const result = await requestClient.registryDiff(workspace, requestTarget);
         if (!current()) return;
-        diff = { phase: "ready", target, files: result.files };
+        diff = { phase: "ready", target: requestTarget, files: result.files };
       } catch (error) {
         if (!current()) return;
         diff = {
           phase: "error",
-          target,
+          target: requestTarget,
           error: error instanceof Error ? error.message : String(error),
         };
       }
@@ -271,6 +287,17 @@ export function createRegistryStore(options: RegistryStoreOptions) {
   function closeDiff(): void {
     diffGeneration += 1;
     diff = undefined;
+  }
+
+  /** Runs the reviewed Merge / Mark as merged action and closes the review view. */
+  function confirmReview(writeConflictMarkers = false): void {
+    if (diff?.phase !== "ready") return;
+    const target = diff.target;
+    const request = registryReviewRequest(target, writeConflictMarkers);
+    if (!request) return;
+    const id = target.type === "project" ? `project:${target.artifact}` : `${target.type}:${target.name}`;
+    closeDiff();
+    void runAction(request, `${id}:${target.intent}`);
   }
 
   function refresh(refreshOptions: { background?: boolean } = {}): void {
@@ -369,6 +396,7 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     runAction,
     openDiff,
     closeDiff,
+    confirmReview,
     refresh,
     observeProjectChange,
     scheduleProjectSync,

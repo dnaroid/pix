@@ -20,6 +20,37 @@ import { togglePublicationScope } from "./publication-scope.js";
 import { pushProjectResourceChanges, syncInstalledResources, syncProjectResources } from "./project-resource-sync.js";
 import { setAgentModelOverride } from "./agent-models.js";
 import { confirmRegistryResource, type ConfirmedResourceRequest } from "./confirmed-resource.js";
+import { markResourceMerged, mergeResource, previewResourceMerge } from "./resource-merge.js";
+import { compareProjectArtifact, markProjectArtifactMerged, mergeProjectArtifact, previewProjectMerge } from "./project-merge.js";
+import type { RegistryDiffPayload } from "./diff.js";
+
+/** Read-only diff requests have no dialogs; merge previews only need the project cwd. */
+function headlessContext(cwd: string): RegistryContext {
+	return {
+		cwd,
+		hasUI: false,
+		ui: {
+			confirm: async () => false,
+			input: async () => undefined,
+			editor: async () => undefined,
+			notify: () => undefined,
+		},
+	};
+}
+
+async function registryDiffPayload(executor: RegistryExecutor, request: DesktopRegistryDiffRequest): Promise<RegistryDiffPayload> {
+	const ctx = headlessContext(request.cwd);
+	if (request.type === "project") {
+		const files = request.mode === "merge"
+			? await previewProjectMerge(executor, ctx, request.artifact)
+			: await compareProjectArtifact(executor, ctx, request.artifact);
+		return { version: 1, type: "project", name: request.artifact, files };
+	}
+	if (request.mode === "merge") {
+		return { version: 1, type: request.type, name: request.name, files: await previewResourceMerge(executor, ctx, request.type, request.name) };
+	}
+	return collectRegistryDiff(executor, request.cwd, request.type, request.name);
+}
 
 async function configure(ctx: RegistryContext): Promise<void> {
 	const current = loadRegistryConfig(ctx.cwd);
@@ -123,7 +154,7 @@ export class DesktopRegistryService {
 
 	diff(request: DesktopRegistryDiffRequest, signal?: AbortSignal) {
 		return this.track(signal, (operationSignal, executor) => withRegistryCache(
-			() => collectRegistryDiff(executor, request.cwd, request.type, request.name), operationSignal));
+			() => registryDiffPayload(executor, request), operationSignal));
 	}
 
 	private async runAction(
@@ -157,6 +188,10 @@ export class DesktopRegistryService {
 					case "remove": await removeResource(executor, ctx, request.type, request.name); break;
 					case "make-local": await makeResourceLocal(executor, ctx, request.type, request.name); break;
 					case "toggle-scope": await togglePublicationScope(executor, ctx, request.type, request.name); break;
+					case "merge": await mergeResource(executor, ctx, request.type, request.name, { writeConflictMarkers: request.writeConflictMarkers === true }); break;
+					case "mark-merged": await markResourceMerged(executor, ctx, request.type, request.name); break;
+					case "merge-project": await mergeProjectArtifact(executor, ctx, request.scope, { writeConflictMarkers: request.writeConflictMarkers === true }); break;
+					case "mark-merged-project": await markProjectArtifactMerged(executor, ctx, request.scope); break;
 					case "push-project": await pushProjectState(executor, ctx, request.scope); break;
 					case "pull-project": await pullProjectState(executor, ctx, request.scope); break;
 					case "sync-project":

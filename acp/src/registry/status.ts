@@ -205,8 +205,10 @@ export function reusableUiActions(status: RegistryStatus, remoteConfigured = tru
 			case "removed-remote":
 				actions.push("push");
 				break;
-			case "up-to-date":
 			case "diverged":
+				actions.push("merge", "mark-merged");
+				break;
+			case "up-to-date":
 			case "registry-changed":
 				break;
 		}
@@ -228,8 +230,10 @@ export function projectUiActions(status: ProjectArtifactStatus): RegistryUiActio
 			return ["push"];
 		case "untracked-local":
 			return status.remoteExists ? ["push", "pull"] : ["push"];
-		case "up-to-date":
 		case "diverged":
+			// The tasks database has no file-level merge; it can only adopt the registry baseline.
+			return status.artifact === "tasks" ? ["mark-merged"] : ["merge", "mark-merged"];
+		case "up-to-date":
 		case "registry-changed":
 			return [];
 	}

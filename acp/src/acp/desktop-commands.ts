@@ -525,7 +525,8 @@ export interface DesktopQueueConsumedNotification {
 }
 
 export type DesktopRegistryResourceType = "skill" | "agent";
-export type DesktopRegistryProjectScope = "tasks" | "plans" | "workspace" | "project";
+export type DesktopRegistryProjectArtifact = "tasks" | "plans" | "workspace";
+export type DesktopRegistryProjectScope = DesktopRegistryProjectArtifact | "project";
 
 export type DesktopRegistryActionRequest = { readonly cwd: string } & (
 	| { readonly action: "set-agent-model"; readonly type: "agent"; readonly name: string; readonly model: string }
@@ -533,13 +534,25 @@ export type DesktopRegistryActionRequest = { readonly cwd: string } & (
 	| { readonly action: "refresh" | "configure" | "project-key" | "push-project-resources" | "keep-project-key" | "migrate-project-key" }
 	| { readonly action: "pull-resources" | "push-resources" }
 	| {
-		readonly action: "install" | "install-global" | "update" | "push" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope";
+		readonly action: "install" | "install-global" | "update" | "push" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope" | "mark-merged";
 		readonly type: DesktopRegistryResourceType;
 		readonly name: string;
 	}
 	| {
+		readonly action: "merge";
+		readonly type: DesktopRegistryResourceType;
+		readonly name: string;
+		/** Explicit user confirmation to write conflict markers for manual resolution. */
+		readonly writeConflictMarkers?: boolean;
+	}
+	| {
 		readonly action: "push-project" | "pull-project" | "sync-project";
 		readonly scope: DesktopRegistryProjectScope;
+	}
+	| {
+		readonly action: "merge-project" | "mark-merged-project";
+		readonly scope: DesktopRegistryProjectArtifact;
+		readonly writeConflictMarkers?: boolean;
 	}
 );
 
@@ -549,11 +562,16 @@ export interface DesktopRegistryActionResponse {
 
 export type DesktopRegistryDiffResourceType = "skill" | "agent";
 
-export interface DesktopRegistryDiffRequest {
-	readonly cwd: string;
-	readonly type: DesktopRegistryDiffResourceType;
-	readonly name: string;
-}
+/**
+ * `compare` (default) is Registry → Local; `merge` previews a three-way merge
+ * as Local → merge result. Project artifacts use `type: "project"`.
+ */
+export type DesktopRegistryDiffMode = "compare" | "merge";
+
+export type DesktopRegistryDiffRequest = { readonly cwd: string; readonly mode: DesktopRegistryDiffMode } & (
+	| { readonly type: DesktopRegistryDiffResourceType; readonly name: string }
+	| { readonly type: "project"; readonly artifact: DesktopRegistryProjectArtifact }
+);
 
 /**
  * One changed file of a read-only Registry resource diff. `oldText` is the
@@ -566,6 +584,8 @@ export interface DesktopRegistryDiffFile {
 	readonly oldText: string | null;
 	readonly newText: string | null;
 	readonly notice?: string;
+	/** Merge preview only: both sides changed the file and it needs manual resolution. */
+	readonly conflict?: boolean;
 }
 
 export interface DesktopRegistryDiffResponse {
@@ -907,7 +927,8 @@ export function parseDesktopRegistryActionRequest(value: unknown): DesktopRegist
 		return { ...workspace, action: value.action };
 	}
 	if (value.action === "install" || value.action === "install-global" || value.action === "update" || value.action === "push"
-		|| value.action === "uninstall" || value.action === "remove" || value.action === "make-local" || value.action === "tags" || value.action === "toggle-scope") {
+		|| value.action === "uninstall" || value.action === "remove" || value.action === "make-local" || value.action === "tags" || value.action === "toggle-scope"
+		|| value.action === "merge" || value.action === "mark-merged") {
 		if (
 			(value.type !== "skill" && value.type !== "agent")
 			|| typeof value.name !== "string"
@@ -916,11 +937,29 @@ export function parseDesktopRegistryActionRequest(value: unknown): DesktopRegist
 		) {
 			throw new RequestError(ERROR_INVALID_PARAMS, "invalid registry resource action request");
 		}
+		if (value.action === "merge") {
+			if (value.writeConflictMarkers !== undefined && typeof value.writeConflictMarkers !== "boolean") {
+				throw new RequestError(ERROR_INVALID_PARAMS, "invalid registry merge request");
+			}
+			return { ...workspace, action: value.action, type: value.type, name: value.name, ...(value.writeConflictMarkers ? { writeConflictMarkers: true } : {}) };
+		}
 		return {
 			...workspace,
 			action: value.action,
 			type: value.type,
 			name: value.name,
+		};
+	}
+	if (value.action === "merge-project" || value.action === "mark-merged-project") {
+		if (!["tasks", "plans", "workspace"].includes(String(value.scope))
+			|| (value.writeConflictMarkers !== undefined && typeof value.writeConflictMarkers !== "boolean")) {
+			throw new RequestError(ERROR_INVALID_PARAMS, "invalid registry project merge request");
+		}
+		return {
+			...workspace,
+			action: value.action,
+			scope: value.scope as DesktopRegistryProjectArtifact,
+			...(value.action === "merge-project" && value.writeConflictMarkers ? { writeConflictMarkers: true } : {}),
 		};
 	}
 	if (value.action === "push-project" || value.action === "pull-project" || value.action === "sync-project") {
@@ -937,21 +976,26 @@ export function parseDesktopRegistryActionRequest(value: unknown): DesktopRegist
 }
 
 export function parseDesktopRegistryDiffRequest(value: unknown): DesktopRegistryDiffRequest {
+	const invalid = (): never => {
+		throw new RequestError(
+			ERROR_INVALID_PARAMS,
+			"registry diff request requires cwd, type skill|agent with a valid resource name or type project with an artifact, and mode compare|merge",
+		);
+	};
+	if (!isRecord(value) || typeof value.cwd !== "string" || value.cwd.trim().length === 0) return invalid();
+	if (value.mode !== undefined && value.mode !== "compare" && value.mode !== "merge") return invalid();
+	const mode: DesktopRegistryDiffMode = value.mode === "merge" ? "merge" : "compare";
+	if (value.type === "project") {
+		if (!["tasks", "plans", "workspace"].includes(String(value.artifact))) return invalid();
+		return { cwd: value.cwd, mode, type: "project", artifact: value.artifact as DesktopRegistryProjectArtifact };
+	}
 	if (
-		!isRecord(value)
-		|| typeof value.cwd !== "string"
-		|| value.cwd.trim().length === 0
-		|| (value.type !== "skill" && value.type !== "agent")
+		(value.type !== "skill" && value.type !== "agent")
 		|| typeof value.name !== "string"
 		|| !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value.name)
 		|| value.name.includes("..")
-	) {
-		throw new RequestError(
-			ERROR_INVALID_PARAMS,
-			"registry diff request requires cwd, type skill|agent, and a valid resource name",
-		);
-	}
-	return { cwd: value.cwd, type: value.type, name: value.name };
+	) return invalid();
+	return { cwd: value.cwd, mode, type: value.type, name: value.name };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

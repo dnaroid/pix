@@ -949,16 +949,16 @@ describe("ACP JSON-RPC client", () => {
       { path: "agents/researcher/logo.png", oldText: null, newText: null, notice: "Binary file not shown" },
     ];
 
-    const reading = client.registryDiff("/project", "agent", "researcher");
+    const reading = client.registryDiff("/project", { type: "agent", name: "researcher" });
     await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
     expect(requestAt(transport, 1)).toMatchObject({
       method: "pix/registry/diff",
-      params: { cwd: "/project", type: "agent", name: "researcher" },
+      params: { cwd: "/project", mode: "compare", type: "agent", name: "researcher" },
     });
     transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result: { files } });
     await expect(reading).resolves.toEqual({ files });
 
-    const invalid = client.registryDiff("/project", "skill", "demo");
+    const invalid = client.registryDiff("/project", { type: "skill", name: "demo" });
     await vi.waitFor(() => expect(transport.sent).toHaveLength(3));
     transport.message({ jsonrpc: "2.0", id: requestAt(transport, 2).id, result: { files: "nope" } });
     await expect(invalid).rejects.toThrow("pix/registry/diff returned an invalid registry diff");

@@ -30,6 +30,16 @@ comparisons. Binary or oversized changed files remain visible
 with a notice rather than disappearing or dumping their contents. A successful
 comparison never pushes, pulls, installs or overwrites resources.
 
+The same read-only request serves the diverged-resolution review. Its `mode` is
+`compare` (Registry → Local, the default above) or `merge` (Local → Merged
+preview of the three-way merge result; see the publication/tags spec). It also
+accepts `type: "project"` with an `artifact` (`plans` or `workspace`). `tasks`
+has no file comparison and resolves only through Mark as merged. Files may carry
+`conflict: true`. Desktop opens Merge… and Mark as merged… as review views: the
+merge view offers Apply merge and Write conflict markers, the mark-merged view
+offers Mark as merged. Only the confirm button runs the action; previewing never
+writes.
+
 ## Constraints and failure cases
 
 Diff requests identify one validated resource type and name within a workspace;

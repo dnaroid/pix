@@ -1,6 +1,8 @@
 <script lang="ts">
   import { iconButtonClass } from "../lib/icon-button";
   import { confirmDesktopDeletion } from "../lib/confirm-deletion";
+  import { confirmDesktopAction } from "../lib/confirm-action";
+  import GitMerge from "@lucide/svelte/icons/git-merge";
   import CircleArrowDown from "@lucide/svelte/icons/circle-arrow-down";
   import CircleArrowUp from "@lucide/svelte/icons/circle-arrow-up";
   import EllipsisVertical from "@lucide/svelte/icons/ellipsis-vertical";
@@ -15,7 +17,9 @@
     registryFriendlyStatusDescription,
     registryPrimaryAction,
     registryStatusTone,
+    registryReviewTarget,
     type RegistryActionRequest,
+    type RegistryDiffIntent,
     type RegistryItem,
     type RegistryItemAction,
     type RegistryProjectArtifact,
@@ -42,6 +46,7 @@
     onCleanProject,
     onAction,
     onOpenProjectArtifact,
+    onReview,
   }: {
     snapshot: RegistrySnapshot | undefined;
     backgroundSync: RegistryBackgroundSyncState;
@@ -58,6 +63,7 @@
     onCleanProject: () => void;
     onAction: (request: RegistryActionRequest, actionId: string) => void;
     onOpenProjectArtifact: (artifact: RegistryProjectArtifact) => void;
+    onReview: (item: RegistryItem, intent: RegistryDiffIntent) => void;
   } = $props();
 
   let menuOpen = $state(false);
@@ -85,7 +91,19 @@
     return { action: action === "push" ? "push-project" : "pull-project", scope: item.artifact };
   }
 
-  function runItemAction(item: RegistryItem, action: RegistryItemAction): void {
+  async function runItemAction(item: RegistryItem, action: RegistryItemAction): Promise<void> {
+    if (action === "merge" || action === "mark-merged") {
+      if (registryReviewTarget(item, action)) { onReview(item, action); return; }
+      // Tasks live in a database without a file diff: confirm explicitly instead.
+      if (action !== "mark-merged" || !item.artifact) return;
+      const requestSnapshot = snapshot;
+      const confirmed = await confirmDesktopAction(
+        "Keep the local project tasks and adopt the current registry revision as the new baseline? Registry-only task changes are replaced on the next Push.",
+        { title: "Mark tasks as merged?", okLabel: "Mark as merged" },
+      );
+      if (confirmed && snapshot === requestSnapshot) onAction({ action: "mark-merged-project", scope: item.artifact }, `${item.id}:${action}`);
+      return;
+    }
     const request = requestFor(item, action);
     if (!request) return;
     onAction(request, `${item.id}:${action}`);
@@ -278,9 +296,11 @@
                 disabled={remoteBusy}
                 title={registryFriendlyActionLabel(item, projectPrimary)}
                 aria-label={registryFriendlyActionLabel(item, projectPrimary)}
-                onclick={() => runItemAction(item, projectPrimary)}
+                onclick={() => void runItemAction(item, projectPrimary)}
               >
-                {#if projectPrimary === "pull" || projectPrimary === "update"}
+                {#if projectPrimary === "merge" || projectPrimary === "mark-merged"}
+                  <GitMerge class="h-3.5 w-3.5" aria-hidden="true" />
+                {:else if projectPrimary === "pull" || projectPrimary === "update"}
                   <CircleArrowDown class="h-3.5 w-3.5" aria-hidden="true" />
                 {:else}
                   <CircleArrowUp class="h-3.5 w-3.5" aria-hidden="true" />

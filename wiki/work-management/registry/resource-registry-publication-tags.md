@@ -108,6 +108,29 @@ status: active
   (recording the current remote revision and hash) without copying files and
   reports current. Real conflicts (published bytes changed and local bytes
   changed differently) remain `diverged`; overwrite protection is unchanged.
+  Diverged skills/agents and project plans/workspace offer **Merge…** and
+  **Mark as merged…**; project tasks offer only **Mark as merged…**. Push,
+  Update and Pull refusals for diverged state name both choices.
+- **Merge** is a three-way merge per file. The base is the registry content at
+  the tracked provenance revision, materialized with `git restore --source` into
+  a temporary directory (outside the checkout); ours is the project copy and
+  theirs is the current registry cache. One-sided edits, additions and deletions
+  apply automatically. Two-sided text edits use `git merge-file`. Overlapping
+  hunks, binary or oversized files (`MAX_FILE_BYTES`, 1,000,000 bytes) and
+  edit/delete collisions are conflicts. A clean merge writes the files and records
+  provenance with the current remote revision and hash, so status becomes
+  local changes and Push is available. With any conflict nothing is written and
+  the error lists the conflicting files. An explicit `writeConflictMarkers: true`
+  (skills/agents and plans only) writes the clean changes plus
+  `<<<<<<< local` / `>>>>>>> registry` markers into conflicting files without
+  moving the baseline. `workspace.jsonc` never receives markers: its conflicts
+  are resolved by editing the file, then Mark as merged. A baseline revision that
+  is missing or does not reproduce the tracked hash refuses the merge and points
+  to Mark as merged.
+- **Mark as merged** keeps the local files and records provenance with the current
+  remote revision and hash. It is refused while conflict markers remain. Tasks
+  have no file-level merge, so this is their only resolution; it is a Desktop
+  native confirmation.
 - Global/Project name collisions are refused rather than shadowed or overwritten.
   Global promotion and a new Global publication also refuse a same-named
   definition in another project. Scoped install/update/push, diff, tags and
@@ -156,7 +179,13 @@ status: active
   the lock and queue; crashed owners expire after two minutes. Lock acquisition
   retries for up to ten minutes and never falls back to unlocked access.
   Cancelling one `pix/registry/action` or diff request aborts only that
-  operation's lock wait and Git children. On a graceful ACP shutdown (connection closed) the Registry service aborts lock
+  operation's lock wait and Git children. Diverged resolution uses
+  `pix/registry/action` with `merge` / `mark-merged` (type + name; `merge` takes
+  an optional `writeConflictMarkers` boolean) and `merge-project` /
+  `mark-merged-project` (scope `tasks|plans|workspace`). `pix/registry/diff`
+  takes `mode: compare|merge` and `type: "project"` with `artifact`; its file
+  entries may carry `conflict: true`.
+- On a graceful ACP shutdown (connection closed) the Registry service aborts lock
   waits, kills running Registry Git children and awaits the aborted operations,
   so the lock is released before exit and new requests are rejected. An ACP
   killed before that completes still leaves the lock until it goes stale.

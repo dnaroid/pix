@@ -21,7 +21,7 @@ import {
   PIX_SESSION_STATE_METHOD,
   parseSessionStateNotification,
 } from "./session-state";
-import type { RegistryActionRequest, RegistryDiff, RegistryResourceType, RegistrySnapshot } from "./registry";
+import type { RegistryActionRequest, RegistryDiff, RegistryDiffTarget, RegistryResourceType, RegistrySnapshot } from "./registry";
 import type { PlanLaunches, PlanLaunchesRequest } from "../../../acp/src/acp/plan-launches-contract";
 import {
   PIX_SUPERVISOR_START_METHOD,
@@ -350,8 +350,8 @@ export class AcpClient {
     return this.pix.registryAction(cwd, action, signal);
   }
 
-  registryDiff(cwd: string, type: Exclude<RegistryResourceType, "project">, name: string): Promise<RegistryDiff> {
-    return this.pix.registryDiff(cwd, type, name);
+  registryDiff(cwd: string, target: RegistryDiffTarget): Promise<RegistryDiff> {
+    return this.pix.registryDiff(cwd, target);
   }
 
   planLaunches(request: PlanLaunchesRequest): Promise<PlanLaunches> {

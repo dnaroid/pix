@@ -10,6 +10,7 @@ import { promises as fs } from "node:fs";
 import { replaceLocalPlans, replaceResource } from "./resource-files.js";
 import { localTasksExist } from "./task-database.js";
 import { replaceLocalWorkspace } from "./workspace-file.js";
+import { DIVERGED_GUIDANCE } from "./merge.js";
 
 export async function pushProjectState(executor: RegistryExecutor, ctx: RegistryContext, scope: ProjectScope, silent = false): Promise<void> {
 	const runtime = loadRuntimeConfig(ctx.cwd);
@@ -66,7 +67,9 @@ export async function pushProjectState(executor: RegistryExecutor, ctx: Registry
 			? await projectArtifactRevision(executor, runtime, projectKey, artifact)
 			: undefined;
 		if (tracked && remoteRevision && remoteRevision !== tracked.revision) {
-			throw new Error(`${artifact} state changed in the registry since revision ${tracked.revision.slice(0, 8)}. Pull or resolve it before pushing.`);
+			throw new Error(`${artifact} state changed in the registry since revision ${tracked.revision.slice(0, 8)}. ${artifact === "tasks"
+				? "Pull it, or choose Mark as merged to keep the local tasks."
+				: DIVERGED_GUIDANCE}`);
 		}
 		const localHash = await hashProjectArtifactLocal(ctx.cwd, artifact);
 		if (!tracked && remoteExists && (deleteRemote || await hashProjectArtifactRemote(runtime, projectKey, artifact) !== localHash)) {
@@ -152,7 +155,9 @@ export async function pullProjectState(executor: RegistryExecutor, ctx: Registry
 			const localHash = await hashProjectArtifactLocal(ctx.cwd, artifact);
 			observedLocalHashes.set(artifact, localHash);
 			if (tracked && localHash !== tracked.hash) {
-				throw new Error(`Project ${artifact} state has local changes. Push or resolve them before pulling.`);
+				throw new Error(`Project ${artifact} state has local changes. ${remoteRevision === tracked.revision
+					? "Push them before pulling."
+					: artifact === "tasks" ? "Choose Mark as merged to keep the local tasks, then Push." : DIVERGED_GUIDANCE}`);
 			}
 			if (!tracked && localHash !== remoteHash) overwriteConflicts.push(artifact);
 		}

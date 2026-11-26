@@ -154,7 +154,7 @@ export type ProjectStatusBundle = {
 	issue?: string;
 };
 
-export type RegistryUiAction = "install" | "update" | "push" | "pull" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope";
+export type RegistryUiAction = "install" | "update" | "push" | "pull" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope" | "merge" | "mark-merged";
 
 export interface RegistryUiItem {
 	agentModel?: { original: string; override?: string; parentAware: boolean };

@@ -8,12 +8,12 @@ import { canonicalRegistryEntryName } from "./model.js";
 
 
 /** Per-file ceiling; larger files are reported as a notice instead of text. */
-const MAX_FILE_BYTES = 1_000_000;
+export const MAX_FILE_BYTES = 1_000_000;
 /** Whole-response ceiling across every changed file's old/new texts. */
 const MAX_TOTAL_BYTES = 2_000_000;
 /** Bound synchronous sidebar diff construction and DOM rows, not just transport bytes. */
-const MAX_RENDER_FILE_BYTES = 128_000;
-const MAX_RENDER_LINES = 2_000;
+export const MAX_RENDER_FILE_BYTES = 128_000;
+export const MAX_RENDER_LINES = 2_000;
 const MAX_TOTAL_RENDER_LINES = 5_000;
 
 function lineCountThrough(text: string, limit: number): number {
@@ -31,6 +31,8 @@ export interface RegistryDiffFile {
 	readonly oldText: string | null;
 	readonly newText: string | null;
 	readonly notice?: string;
+	/** Merge preview only: both sides changed this file and it needs manual resolution. */
+	readonly conflict?: boolean;
 }
 
 /** Payload published on {@link REGISTRY_DIFF_EVENT}; `error` marks a failed diff. */
@@ -44,7 +46,7 @@ export interface RegistryDiffPayload {
 
 type FileRead = { kind: "absent" } | { kind: "text"; text: string } | { kind: "notice"; notice: string; digest: string };
 
-async function digestFile(path: string): Promise<string> {
+export async function digestFile(path: string): Promise<string> {
 	const handle = await fs.open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
 	try {
 		if (!(await handle.stat()).isFile()) throw new Error(`Registry diff entry is not a regular file: ${path}`);
@@ -72,8 +74,8 @@ async function lstatIfExists(path: string): Promise<import("node:fs").Stats | un
 	}
 }
 
-/** Recursively collect regular-file paths (relative to `base`) under `rel`. */
-async function collectFilePaths(base: string, rel: string, out: Set<string>): Promise<void> {
+/** Recursively collect regular-file paths (relative to `base`) under `rel`; `acceptFile` filters nested file names. */
+export async function collectFilePaths(base: string, rel: string, out: Set<string>, acceptFile?: (name: string) => boolean): Promise<void> {
 	const stat = await lstatIfExists(join(base, rel));
 	if (!stat) return;
 	if (stat.isSymbolicLink()) throw new Error(`Registry diff cannot traverse symbolic links: ${rel}`);
@@ -86,7 +88,8 @@ async function collectFilePaths(base: string, rel: string, out: Set<string>): Pr
 		.sort((left, right) => left.name.localeCompare(right.name));
 	for (const entry of entries) {
 		if (!canonicalRegistryEntryName(entry.name)) continue;
-		await collectFilePaths(base, rel === "" ? entry.name : `${rel}/${entry.name}`, out);
+		if (acceptFile && !entry.isDirectory() && !acceptFile(entry.name)) continue;
+		await collectFilePaths(base, rel === "" ? entry.name : `${rel}/${entry.name}`, out, acceptFile);
 	}
 }
 
@@ -126,12 +129,13 @@ export async function collectRegistryFileDiff(
 	oldBase: string,
 	newBase: string,
 	roots: readonly string[],
+	acceptFile?: (name: string) => boolean,
 ): Promise<RegistryDiffFile[]> {
 	const oldFiles = new Set<string>();
 	const newFiles = new Set<string>();
 	for (const root of roots) {
-		await collectFilePaths(oldBase, root, oldFiles);
-		await collectFilePaths(newBase, root, newFiles);
+		await collectFilePaths(oldBase, root, oldFiles, acceptFile);
+		await collectFilePaths(newBase, root, newFiles, acceptFile);
 	}
 
 	const files: RegistryDiffFile[] = [];

@@ -131,7 +131,9 @@ JSONC/task overlay import or fallback.
    promotes a resource to Global (see publication/tags spec).
    Untracked remote collisions and changed tracked content (published bytes
    differing from the baseline) return actionable errors without overwrite;
-   explicit foreground push retains confirmation.
+   explicit foreground push retains confirmation. Diverged project artifacts are
+   never merged automatically; they are resolved only by the explicit Merge or
+   Mark as merged actions (see publication/tags spec).
    Initial/refresh snapshots seed safe local-only/local-changes project artifacts
    and Local-only project resources.
    Persistent poll observations neither restart debounce nor clear terminal
@@ -185,7 +187,9 @@ JSONC/task overlay import or fallback.
     participate in Registry project-state sync.
 16. `.pi/workspace.jsonc` is a project artifact with the same project-key,
     provenance, status, conflict confirmation, and push/pull semantics as tasks
-    and plans; its remote path is `projects/<key>/workspace.jsonc`.
+    and plans; its remote path is `projects/<key>/workspace.jsonc`. A diverged
+    workspace merge never writes conflict markers into it; conflicting edits are
+    made manually in `.pi/workspace.jsonc`, then Mark as merged.
     Pulling it refreshes Desktop project settings; switching back to the scripts panel loads the
     pulled launch commands. The whole file is synchronized without redaction:
     do not put credentials or private shell arguments in it unless the private

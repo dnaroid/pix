@@ -259,7 +259,8 @@ after the session was linked or started. See the
   bytes, not the physical DB file or temporary WAL/SHM bytes.
 - Registry imports into the existing local database **inside a transaction**,
   with provenance/expected-hash conflict checks and without replacing its
-  inode. Pull is a deliberate bulk action outside the restricted task API.
+  inode. A diverged task state has no file-level merge; its only resolution is
+  Mark as merged (keeps local rows, then Push). Pull is a deliberate bulk action outside the restricted task API.
 - Cleanup preserves `tasks.sqlite`, `tasks.sqlite-wal`,
   `tasks.sqlite-shm`, `task-attachments/`, and durable project state.
   It does not clear live journal sidecars or follow symlinks.

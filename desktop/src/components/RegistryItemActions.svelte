@@ -13,6 +13,8 @@
   import PackagePlus from "@lucide/svelte/icons/package-plus";
   import Download from "@lucide/svelte/icons/download";
   import Upload from "@lucide/svelte/icons/upload";
+  import GitMerge from "@lucide/svelte/icons/git-merge";
+  import CheckCheck from "@lucide/svelte/icons/check-check";
   import { registryDiffAvailable, registryFriendlyActionLabel, registryScopeToggleDestination,
     type RegistryItem, type RegistryItemAction } from "../lib/registry";
   import { registryCardActions, registryMenuPosition } from "../lib/registry-card-actions";
@@ -38,6 +40,8 @@
     "make-local": CloudOff,
     uninstall: PackageMinus,
     remove: Trash2,
+    merge: GitMerge,
+    "mark-merged": CheckCheck,
   } satisfies Record<RegistryItemAction, typeof Upload>;
   const busy = $derived(remoteDisabled || actionId !== null);
   const menuIdentity = $derived(JSON.stringify([item.id, item.name, item.publicationScope,
@@ -159,6 +163,8 @@
       {#if actionId === `${item.id}:${action}`}<RefreshCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
       {:else if action === "install"}<PackagePlus class="h-3.5 w-3.5" aria-hidden="true" />
       {:else if action === "update" || action === "pull"}<Download class="h-3.5 w-3.5" aria-hidden="true" />
+      {:else if action === "merge"}<GitMerge class="h-3.5 w-3.5" aria-hidden="true" />
+      {:else if action === "mark-merged"}<CheckCheck class="h-3.5 w-3.5" aria-hidden="true" />
       {:else}<Upload class="h-3.5 w-3.5" aria-hidden="true" />{/if}
     </button>
   {/if}

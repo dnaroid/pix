@@ -46,6 +46,7 @@
   import type { ProjectDocumentsSnapshot } from "../lib/project-documents";
   import {
     type RegistryActionRequest,
+    type RegistryDiffIntent,
     type RegistryDiffState,
     type RegistryItem,
     type RegistryProjectArtifact,
@@ -242,6 +243,7 @@
     onRegistryAction,
     onRegistryDiff,
     onRegistryCloseDiff,
+    onRegistryConfirmReview,
     onRegistryProjectChange,
     onWorkspaceSettingsSave,
     onGitRefresh,
@@ -369,8 +371,9 @@
     onRegistryInitializeProject: () => void;
     onRegistryCleanProject: () => void;
     onRegistryAction: (request: RegistryActionRequest, actionId: string) => void;
-    onRegistryDiff: (item: RegistryItem) => void;
+    onRegistryDiff: (item: RegistryItem, intent?: RegistryDiffIntent) => void;
     onRegistryCloseDiff: () => void;
+    onRegistryConfirmReview: (writeConflictMarkers?: boolean) => void;
     onRegistryProjectChange: (artifact: RegistryProjectArtifact, reload: boolean) => void;
     onWorkspaceSettingsSave: (workspace: string) => void;
     onGitRefresh: () => void;
@@ -1323,6 +1326,7 @@
             onOpenProjectArtifact={openRegistryProjectArtifact}
             onDiff={onRegistryDiff}
             onCloseDiff={onRegistryCloseDiff}
+            onConfirmReview={onRegistryConfirmReview}
           />
           {/key}
         </div>

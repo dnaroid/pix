@@ -1,12 +1,14 @@
 <script lang="ts">
   import {
     type RegistryActionRequest,
+    type RegistryDiffIntent,
     type RegistryDiffState,
     type RegistryDiffTarget,
     type RegistryItem,
     type RegistryProjectArtifact,
     type RegistrySnapshot,
     registryDiffAvailable,
+    registryReviewTarget,
   } from "../lib/registry";
   import RegistryDiffPanel from "./RegistryDiffPanel.svelte";
   import RegistryProjectStatus from "./RegistryProjectStatus.svelte";
@@ -38,6 +40,7 @@
     onOpenProjectArtifact,
     onDiff,
     onCloseDiff,
+    onConfirmReview,
   }: {
     snapshot: RegistrySnapshot | undefined;
     contextCommands?: readonly AvailableCommand[];
@@ -59,8 +62,9 @@
     onCleanProject: () => void;
     onAction: (request: RegistryActionRequest, actionId: string) => void;
     onOpenProjectArtifact: (artifact: RegistryProjectArtifact) => void;
-    onDiff: (item: RegistryItem) => void;
+    onDiff: (item: RegistryItem, intent?: RegistryDiffIntent) => void;
     onCloseDiff: () => void;
+    onConfirmReview: (writeConflictMarkers?: boolean) => void;
   } = $props();
 
   let panelRoot = $state<HTMLElement | null>(null);
@@ -79,18 +83,19 @@
     }
   });
 
-  function openItemDiff(item: RegistryItem): void {
+  function openItemDiff(item: RegistryItem, intent?: RegistryDiffIntent): void {
     // Remember the trigger so closing the diff can restore keyboard focus:
     // the catalog (and this button) unmounts while the diff view is open.
+    // Review views (Merge / Mark as merged) return focus to the same card's Compare button.
     lastDiffTriggerId = item.id;
-    onDiff(item);
+    onDiff(item, intent);
   }
 
   function retryDiff(target: RegistryDiffTarget): void {
-    const item = (snapshot?.items ?? []).find(
-      (candidate) => candidate.type === target.type && candidate.name === target.name && registryDiffAvailable(candidate),
-    );
-    if (item) openItemDiff(item);
+    const item = (snapshot?.items ?? []).find((candidate) => target.intent
+      ? registryReviewTarget(candidate, target.intent)?.name === target.name && candidate.type === target.type
+      : candidate.type === target.type && candidate.name === target.name && registryDiffAvailable(candidate));
+    if (item) openItemDiff(item, target.intent);
     else onCloseDiff();
   }
 </script>
@@ -105,6 +110,8 @@
       diff={diffState}
       onClose={onCloseDiff}
       onRetry={() => retryDiff(diffState.target)}
+      onConfirm={onConfirmReview}
+      busy={remoteBusy}
     />
   {:else}
     <RegistryProjectStatus
@@ -123,6 +130,7 @@
       {onCleanProject}
       {onAction}
       {onOpenProjectArtifact}
+      onReview={openItemDiff}
     />
     <RegistryCatalog
       {snapshot}

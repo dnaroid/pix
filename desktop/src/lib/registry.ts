@@ -20,7 +20,7 @@ export type RegistryStatus =
   | "removed-remote"
   | "registry-changed";
 
-export type RegistryItemAction = "install" | "update" | "push" | "pull" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope";
+export type RegistryItemAction = "install" | "update" | "push" | "pull" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope" | "merge" | "mark-merged";
 
 export interface RegistryItem {
   readonly agentModel?: { readonly original: string; readonly override?: string; readonly parentAware: boolean };
@@ -57,15 +57,26 @@ export interface RegistryDiffFile {
   readonly oldText: string | null;
   readonly newText: string | null;
   readonly notice?: string;
+  /** Merge preview only: both sides changed the file and it needs manual resolution. */
+  readonly conflict?: boolean;
 }
 
 export interface RegistryDiff {
   readonly files: readonly RegistryDiffFile[];
 }
 
+/**
+ * Diverged-copy review step: `merge` previews the three-way merge result,
+ * `mark-merged` shows Registry → Local before adopting the registry baseline.
+ */
+export type RegistryDiffIntent = "merge" | "mark-merged";
+
 export type RegistryDiffTarget = {
-  readonly type: Exclude<RegistryResourceType, "project">;
+  readonly type: RegistryResourceType;
   readonly name: string;
+  /** Project artifact for `type: "project"` targets. */
+  readonly artifact?: RegistryProjectArtifact;
+  readonly intent?: RegistryDiffIntent;
 };
 
 export type RegistryDiffState =
@@ -79,9 +90,20 @@ export type RegistryActionRequest =
   | { readonly action: "refresh" | "configure" | "project-key" | "push-project-resources" | "keep-project-key" | "migrate-project-key" }
   | { readonly action: "pull-resources" | "push-resources" }
   | {
-      readonly action: "install" | "install-global" | "update" | "push" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope";
+      readonly action: "install" | "install-global" | "update" | "push" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope" | "mark-merged";
       readonly type: "skill" | "agent";
       readonly name: string;
+    }
+  | {
+      readonly action: "merge";
+      readonly type: "skill" | "agent";
+      readonly name: string;
+      readonly writeConflictMarkers?: boolean;
+    }
+  | {
+      readonly action: "merge-project" | "mark-merged-project";
+      readonly scope: RegistryProjectArtifact;
+      readonly writeConflictMarkers?: boolean;
     }
   | {
       readonly action: "push-project" | "pull-project" | "sync-project";
@@ -103,7 +125,7 @@ const STATUSES = new Set<RegistryStatus>([
   "removed-remote",
   "registry-changed",
 ]);
-const ACTIONS = new Set<RegistryItemAction>(["install", "update", "push", "pull", "uninstall", "remove", "make-local", "tags", "toggle-scope"]);
+const ACTIONS = new Set<RegistryItemAction>(["install", "update", "push", "pull", "uninstall", "remove", "make-local", "tags", "toggle-scope", "merge", "mark-merged"]);
 const DIFFABLE_STATUSES = new Set<RegistryStatus>([
   "local-changes",
   "update-available",
@@ -234,6 +256,29 @@ export function registryDiffAvailable(item: RegistryItem): boolean {
     && DIFFABLE_STATUSES.has(item.status);
 }
 
+/** The review target for a diverged-copy action; `undefined` when the item cannot be reviewed. */
+export function registryReviewTarget(item: RegistryItem, intent: RegistryDiffIntent): RegistryDiffTarget | undefined {
+  if (!item.local || !item.remote || item.status !== "diverged" || !item.actions.includes(intent)) return undefined;
+  if (item.type !== "project") return { type: item.type, name: item.name, intent };
+  // The tasks database has no file comparison; Mark as merged confirms without a diff.
+  if (!item.artifact || item.artifact === "tasks") return undefined;
+  return { type: "project", name: item.name, artifact: item.artifact, intent };
+}
+
+/** The mutating request a reviewed diverged-copy action finally runs. */
+export function registryReviewRequest(target: RegistryDiffTarget, writeConflictMarkers = false): RegistryActionRequest | undefined {
+  if (!target.intent) return undefined;
+  if (target.type === "project") {
+    if (!target.artifact) return undefined;
+    return target.intent === "merge"
+      ? { action: "merge-project", scope: target.artifact, ...(writeConflictMarkers ? { writeConflictMarkers: true } : {}) }
+      : { action: "mark-merged-project", scope: target.artifact };
+  }
+  return target.intent === "merge"
+    ? { action: "merge", type: target.type, name: target.name, ...(writeConflictMarkers ? { writeConflictMarkers: true } : {}) }
+    : { action: "mark-merged", type: target.type, name: target.name };
+}
+
 export function registryActionLabel(action: RegistryItemAction): string {
   switch (action) {
     case "install": return "Install";
@@ -245,6 +290,8 @@ export function registryActionLabel(action: RegistryItemAction): string {
     case "make-local": return "Make local (unpublish)";
     case "tags": return "Edit tags";
     case "toggle-scope": return "Change visibility";
+    case "merge": return "Merge…";
+    case "mark-merged": return "Mark as merged…";
   }
 }
 
@@ -380,11 +427,13 @@ export function parseRegistryDiff(value: unknown): RegistryDiff | undefined {
     if (candidate.oldText !== null && typeof candidate.oldText !== "string") return undefined;
     if (candidate.newText !== null && typeof candidate.newText !== "string") return undefined;
     if (candidate.notice !== undefined && typeof candidate.notice !== "string") return undefined;
+    if (candidate.conflict !== undefined && candidate.conflict !== true) return undefined;
     files.push({
       path: candidate.path,
       oldText: candidate.oldText,
       newText: candidate.newText,
       ...(typeof candidate.notice === "string" ? { notice: candidate.notice } : {}),
+      ...(candidate.conflict === true ? { conflict: true } : {}),
     });
   }
   return { files };

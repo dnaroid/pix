@@ -6004,6 +6004,7 @@ function desktopRegistryDiffFiles(payload: unknown): DesktopRegistryDiffFile[] {
 			|| (entry.newText !== null && typeof entry.newText !== "string")
 			|| (entry.notice !== undefined && (typeof entry.notice !== "string" || entry.notice.length === 0))
 			|| (entry.notice !== undefined && (entry.oldText !== null || entry.newText !== null))
+			|| (entry.conflict !== undefined && entry.conflict !== true)
 		) {
 			throw new RequestError(ERROR_SERVER, "resource registry published an invalid diff file entry");
 		}
@@ -6012,6 +6013,7 @@ function desktopRegistryDiffFiles(payload: unknown): DesktopRegistryDiffFile[] {
 			oldText: entry.oldText,
 			newText: entry.newText,
 			...(entry.notice === undefined ? {} : { notice: entry.notice }),
+			...(entry.conflict === true ? { conflict: true } : {}),
 		});
 	}
 	return files;

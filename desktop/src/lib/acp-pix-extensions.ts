@@ -7,6 +7,7 @@ import {
   parseRegistrySnapshot,
   type RegistryActionRequest,
   type RegistryDiff,
+  type RegistryDiffTarget,
   type RegistryResourceType,
   type RegistrySnapshot,
 } from "./registry";
@@ -550,15 +551,17 @@ export class AcpPixExtensions {
   }
 
   /**
-   * Read-only file-by-file comparison of one resource's registry copy (old
-   * side) against its local project copy (new side). Never syncs either side.
+   * Read-only file-by-file review. Compare (default): registry copy (old side)
+   * against the local project copy (new side). A `merge` intent previews the
+   * three-way merge: local copy (old side) against the merge result. Never
+   * writes either side.
    */
-  async registryDiff(
-    cwd: string,
-    type: Exclude<RegistryResourceType, "project">,
-    name: string,
-  ): Promise<RegistryDiff> {
-    const response = await this.request<unknown>("pix/registry/diff", { cwd, type, name }, null);
+  async registryDiff(cwd: string, target: RegistryDiffTarget): Promise<RegistryDiff> {
+    const mode = target.intent === "merge" ? "merge" : "compare";
+    const params = target.type === "project"
+      ? { cwd, mode, type: "project", artifact: target.artifact }
+      : { cwd, mode, type: target.type, name: target.name };
+    const response = await this.request<unknown>("pix/registry/diff", params, null);
     if (!isRecord(response)) throw new Error("pix/registry/diff returned an invalid response");
     const diff = parseRegistryDiff(response);
     if (!diff) throw new Error("pix/registry/diff returned an invalid registry diff");

@@ -24,6 +24,7 @@
     searchRegistryItems,
     type RegistryActionRequest,
     type RegistryCatalogSection,
+    type RegistryDiffIntent,
     type RegistryDiffState,
     type RegistryItem,
     type RegistryItemAction,
@@ -61,7 +62,7 @@
     actionId: string | null;
     diff: RegistryDiffState | undefined;
     onAction: (request: RegistryActionRequest, actionId: string) => void;
-    onDiff: (item: RegistryItem) => void;
+    onDiff: (item: RegistryItem, intent?: RegistryDiffIntent) => void;
   } = $props();
 
   const registryFilterOptions = [
@@ -143,6 +144,8 @@
   }
 
   function runItemAction(item: RegistryItem, action: RegistryItemAction): void {
+    // Diverged-copy actions write only after the user reviews their diff.
+    if (action === "merge" || action === "mark-merged") { onDiff(item, action); return; }
     const request = requestFor(item, action);
     if (!request) return;
     onAction(request, `${item.id}:${action}`);
@@ -151,7 +154,8 @@
   function diffLoadingFor(item: RegistryItem): boolean {
     return diff?.phase === "loading"
       && diff.target.type === item.type
-      && diff.target.name === item.name;
+      && diff.target.name === item.name
+      && !diff.target.intent;
   }
 
   function statusTitle(item: RegistryItem): string {
