@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 const SCRIPT = fileURLToPath(new URL("./chrome.jxa.js", import.meta.url));
 const FIXES = {
 	"chrome-not-running": ["runningChrome", "open Google Chrome with the intended profile and an open window"],
+	"chrome-instance-ambiguous": ["unambiguousChromeInstance", "leave only the intended Google Chrome application instance running; multiple windows or profiles in that instance are fine"],
 	"no-window": ["chromeWindow", "open a Chrome window in the intended profile"],
 	"automation-permission": ["appleEvents", "grant the launching app permission to control Google Chrome in macOS Privacy & Security → Automation"],
 	"javascript-permission": ["chromeJavaScriptAppleEvents", "enable View → Developer → Allow JavaScript from Apple Events in Chrome"],

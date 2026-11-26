@@ -126,6 +126,46 @@ test("page programs use fixed results and report a non-matching assertion", () =
 	expect(result).toBe("mismatch");
 });
 
+function chromeApp(pid: number, activationPolicy: number, started = instance.started) {
+	return { processIdentifier: pid, activationPolicy, launchDate: { timeIntervalSince1970: started } };
+}
+
+function withChromeApps(apps: ReturnType<typeof chromeApp>[], application: (pid: number) => object) {
+	const run = runInNewContext(`${jxa}\nrun;`, {
+		ObjC: { import() {}, bindFunction() {} },
+		$: {
+			NSRunningApplication: { runningApplicationsWithBundleIdentifier: () => ({ count: String(apps.length), objectAtIndex: (index: number) => apps[index] }) },
+			CGPreflightScreenCaptureAccess: () => true,
+		},
+		Application: application,
+	}) as (argv: string[]) => string;
+	return (request: Request) => JSON.parse(run([JSON.stringify(request)]));
+}
+
+test("probe ignores same-bundle background processes and targets the regular Chrome by PID", () => {
+	const targeted: number[] = [];
+	const apps = [chromeApp(999, 2), chromeApp(instance.pid, 0)];
+	const invoke = withChromeApps(apps, (pid) => {
+		targeted.push(pid);
+		return { windows: { id: () => [1] } };
+	});
+	expect(invoke({ command: "probe" })).toEqual({ code: "ok", instance, screenshot: true });
+	apps.push(chromeApp(888, 0));
+	expect(invoke({ command: "probe" })).toEqual({ code: "chrome-instance-ambiguous" });
+	apps.splice(1);
+	expect(invoke({ command: "probe" })).toEqual({ code: "chrome-not-running" });
+	expect(targeted).toEqual([instance.pid]);
+});
+
+test("a replaced Chrome process is refused before reading any tabs", () => {
+	const apps = [chromeApp(instance.pid, 0)];
+	const invoke = withChromeApps(apps, () => {
+		apps[0] = chromeApp(instance.pid, 0, instance.started + 1);
+		return { get windows() { throw new Error("must not read windows in a replaced instance"); } };
+	});
+	expect(invoke({ command: "close", instance, tabId: 23 })).toEqual({ code: "chrome-not-running" });
+});
+
 test("JXA ownership recovery only closes the blank marker in the pinned Chrome instance", () => {
 	const closed: number[] = [];
 	const marker = "about:blank#pix-ui-qa-test";
@@ -134,14 +174,10 @@ test("JXA ownership recovery only closes the blank marker in the pinned Chrome i
 		[23, { url: () => marker, close: () => closed.push(23) }],
 	]);
 	const window = { tabs: { id: () => [...tabs.keys()], byId: (id: string) => tabs.get(Number(id)) } };
-	const app = { processIdentifier: instance.pid, launchDate: { timeIntervalSince1970: instance.started } };
-	const global = {
-		ObjC: { import() {} },
-		$: { NSRunningApplication: { runningApplicationsWithBundleIdentifier: () => ({ count: 1, objectAtIndex: () => app }) } },
-		Application: () => ({ windows: { id: () => [1], byId: () => window } }),
-	};
-	const run = runInNewContext(`${jxa}\nrun;`, global) as (argv: string[]) => string;
-	const invoke = (request: Request) => JSON.parse(run([JSON.stringify(request)]));
+	const invoke = withChromeApps([chromeApp(999, 0), chromeApp(instance.pid, 0)], (pid) => {
+		expect(pid).toBe(instance.pid);
+		return { windows: { id: () => [1], byId: () => window } };
+	});
 	expect(invoke({ command: "close", instance: { ...instance, started: 399 }, tabId: 23, marker })).toEqual({ code: "chrome-not-running" });
 	expect(invoke({ command: "navigate", instance, tabId: 22, marker, url: target.url })).toEqual({ code: "no-tab" });
 	expect(invoke({ command: "close", instance, marker })).toEqual({ code: "ok" });

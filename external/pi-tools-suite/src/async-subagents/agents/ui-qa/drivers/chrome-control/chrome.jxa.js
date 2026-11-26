@@ -3,11 +3,23 @@
 ObjC.import('AppKit');
 ObjC.import('CoreGraphics');
 
-function chromeInstance() {
+function chromeInstances() {
   const running = $.NSRunningApplication.runningApplicationsWithBundleIdentifier('com.google.Chrome');
-  if (running.count !== 1) return null;
-  const app = running.objectAtIndex(0);
-  return { pid: Number(app.processIdentifier), started: Number(app.launchDate.timeIntervalSince1970) };
+  const instances = [];
+  for (let i = 0; i < Number(running.count); i++) {
+    const app = running.objectAtIndex(i);
+    const pid = Number(app.processIdentifier);
+    const started = Number(app.launchDate.timeIntervalSince1970);
+    if (Number.isSafeInteger(pid) && pid > 0 && Number.isFinite(started) && started > 0) {
+      // Same-bundle background processes (for example a silent updater) are not browser instances.
+      instances.push({ pid, started, regular: Number(app.activationPolicy) === 0 });
+    }
+  }
+  return instances;
+}
+
+function sameInstance(a, b) {
+  return a.pid === b.pid && a.started === b.started;
 }
 
 function screenAccess() {
@@ -80,16 +92,27 @@ function capture(owned, pid, file, verify) {
 }
 
 function execute(q) {
-  const instance = chromeInstance();
-  if (!instance || (q.instance && (instance.pid !== q.instance.pid || instance.started !== q.instance.started))) {
-    return { code: 'chrome-not-running' };
+  if (q.command !== 'probe' && !q.instance) return { code: 'no-tab' };
+  const running = chromeInstances();
+  const candidates = q.instance
+    ? running.filter((app) => sameInstance(app, q.instance))
+    : running.filter((app) => app.regular);
+  if (candidates.length === 0) return { code: 'chrome-not-running' };
+  if (candidates.length !== 1) return { code: 'chrome-instance-ambiguous' };
+  const { pid, started } = candidates[0];
+  const instance = { pid, started };
+  // JXA accepts a numeric PID. A bundle-ID target can route to another process.
+  let chrome;
+  try { chrome = Application(pid); }
+  catch (error) {
+    if (!chromeInstances().some((app) => sameInstance(app, instance))) return { code: 'chrome-not-running' };
+    throw error;
   }
-  const chrome = Application('com.google.Chrome');
+  if (!chromeInstances().some((app) => sameInstance(app, instance))) return { code: 'chrome-not-running' };
   if (q.command === 'probe') {
     if (!chrome.windows.id().length) return { code: 'no-window' };
     return { code: 'ok', instance, screenshot: screenAccess() };
   }
-  if (!q.instance) return { code: 'no-tab' };
   if (q.command === 'open') {
     const [windowId] = chrome.windows.id();
     if (windowId === undefined) return { code: 'no-window' };

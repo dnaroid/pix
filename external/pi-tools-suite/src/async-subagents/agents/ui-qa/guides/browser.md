@@ -6,6 +6,10 @@ It uses Apple Events on macOS. It needs Google Chrome already running with a
 window, permission for the launching app under macOS **Privacy & Security →
 Automation**, and Chrome **View → Developer → Allow JavaScript from Apple
 Events**. Screenshots additionally need **Screen Recording** permission.
+Background Chrome processes do not count as browser instances. If several
+regular Chrome instances are running, the runner returns
+`chrome-instance-ambiguous` without touching tabs. Leave only the intended
+instance running; multiple windows or profiles in it are fine.
 
 The runner opens its own tab in the front Chrome window. **The tab shares the
 current profile, cookies and session; this is not an isolated browser.** Use

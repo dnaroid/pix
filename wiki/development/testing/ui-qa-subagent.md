@@ -96,6 +96,14 @@ The base/detail guides are `android.md`/`android-adb.md`, loaded through
   launches no browser and never installs one. Missing Chrome, the Automation or
   Apple Events permissions, or Screen Recording for screenshots returns
   `BLOCKED`; there is no fallback driver.
+- Instance selection ignores same-bundle background Chrome processes (for
+  example a silent updater). Without a pinned instance, exactly one regular GUI
+  Chrome application must be running: none returns `chrome-not-running`, and
+  several return `chrome-instance-ambiguous` (`BLOCKED`) without touching any
+  tab. Each operation targets the selected PID through JXA and re-checks its
+  launch timestamp; a replaced or exited process returns `chrome-not-running`.
+  Multiple windows or profiles inside that one instance are allowed; the tab
+  still uses the front window's current profile.
 - The runner opens one owned tab in the front Chrome window. That tab shares the
   current profile's cookies and session; it is not isolated. Sign-in, MFA and
   CAPTCHA are manual in Chrome. The QA child must not automate login, embed
