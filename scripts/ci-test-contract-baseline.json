@@ -56,18 +56,6 @@
       "count": 1
     },
     {
-      "path": "external/pi-tools-suite/test/async-subagents/browser-qa-runner.test.ts",
-      "rule": "elapsed-time-assertion",
-      "expression": "expect(Date.now() - startedAt).toBeLessThan(2_500)",
-      "count": 1
-    },
-    {
-      "path": "external/pi-tools-suite/test/async-subagents/browser-qa-runner.test.ts",
-      "rule": "elapsed-time-assertion",
-      "expression": "expect(Date.now() - startedAt).toBeLessThan(7000)",
-      "count": 1
-    },
-    {
       "path": "external/pi-tools-suite/test/async-subagents/provider-native-boundaries.test.ts",
       "rule": "elapsed-time-assertion",
       "expression": "expect(Date.now() - cliAt).toBeLessThan(12_000)",

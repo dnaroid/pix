@@ -1,82 +1,57 @@
-# Browser backend router
+# Browser QA: Chrome Control
 
-Load this guide only after the common UI-QA role classified the requested
-surface as `browser`. Use only the unified `PI_UI_QA_RUNNER` for probe/run.
-Provider-specific tools are runner implementation details and must not be
-invoked directly by the QA child.
+Run `probe` and `run` through `node "$PI_UI_QA_RUNNER"`. This is the complete
+browser guide; there is no provider topic. The sole driver is `chrome-control`.
+It uses Apple Events on macOS. It needs Google Chrome already running with a
+window, permission for the launching app under macOS **Privacy & Security →
+Automation**, and Chrome **View → Developer → Allow JavaScript from Apple
+Events**. Screenshots additionally need **Screen Recording** permission.
 
-## Choose one detail route
+The runner opens its own tab in the front Chrome window. **The tab shares the
+current profile, cookies and session; this is not an isolated browser.** Use
+only the explicitly requested target. If the intended profile is wrong, ask
+the user to switch Chrome profiles first. Users sign in, handle MFA, or solve
+CAPTCHA themselves in Chrome. Never automate login, embed secrets in a flow,
+access stored credentials, or perform unrequested account/data changes. The
+runner does not read or create `.pi/qa_auth.jsonc`.
 
-Choose from the requested proof, never from a repository/app name:
-
-- ordinary repeatable browser E2E, rich semantic/form locators, deterministic
-  browser environment, downloads, frames/popups, automatic video/trace, or
-  trusted QA authentication -> `playwright`;
-- browser-runtime diagnostics such as accessibility-tree snapshots,
-  console/network assertions, Lighthouse, performance summaries, or memory
-  summaries -> `chrome-devtools`;
-- authentication setup/update work -> load `auth` first, then use the
-  `playwright` detail guide for the verification flow.
-
-Load only the needed topic:
-
-```sh
-node "$PI_UI_QA_RUNNER" guide --backend browser --topic playwright
-node "$PI_UI_QA_RUNNER" guide --backend browser --topic chrome-devtools
-node "$PI_UI_QA_RUNNER" guide --backend browser --topic auth
-```
-
-`target.browserDriver` accepts `"auto"`, `"playwright"`, or
-`"chrome-devtools"`. Use `auto` when the flow itself makes the required
-capability unambiguous. When you must load a detail guide before authoring its
-provider-specific steps, explicitly set the matching driver for preflight.
-`target.profile` is a trusted-auth input and therefore routes to Playwright.
-
-After every completed-flow `probe`, `selection.guide` is authoritative. It must
-be `{ "backend": "browser", "topic": <the detail guide you are following> }`
-before `run`. If it differs, load that returned topic, fix the flow if needed,
-and probe again. Never weaken the requested proof merely to fit another
-provider.
-
-## Common browser flow
-
-The unified flow is declarative JSONC under
-`$PI_SUBAGENT_AGENT_DIR/ui-qa/flows/`:
-
-```jsonc
+```json
 {
   "version": 1,
-  "target": {
-    "url": "https://example.test/",
-    "browserDriver": "auto"
-  },
-  "steps": []
+  "target": { "url": "http://localhost:3000/" },
+  "steps": [
+    { "action": "assertVisible", "locator": { "testId": "search" } },
+    { "action": "fill", "locator": { "testId": "search" }, "value": "example" },
+    { "action": "click", "locator": { "testId": "submit-search" } },
+    { "action": "assertText", "locator": { "css": "main h1" }, "includes": "Results" },
+    { "action": "screenshot", "name": "search-results" }
+  ]
 }
 ```
 
-The target may use `url`/`baseUrl`, exact `allowedOrigins`, the selected
-`browserDriver`, and provider-specific fields documented by the loaded detail
-guide. Never put credentials, tokens, raw executable JavaScript, wildcard
-origins, or inferred sibling domains in a flow. A profile id and target URL are
-non-secret; credential values remain runner-owned.
+- `target.url` or `target.baseUrl`: one HTTP(S) URL without embedded
+  credentials. The runner loads it before the first step. `goto` takes an
+  absolute or relative `url` on that origin; `reload` takes no options.
+- `click`, `fill`, `waitFor`, `assertVisible`, `assertHidden`, `assertText`,
+  `assertValue`, `assertCount`: use one locator, `testId` or `css`. `fill` takes a
+  non-sensitive string `value`. Password/file inputs are not supported.
+  `waitFor` accepts `visible` (default), `hidden`, `attached`, or `detached`.
+  `assertCount` takes integer `count`. `assertText`, `assertValue`, `assertURL`
+  take exactly one string matcher, `equals` or `includes`. `assertURL` uses
+  the full URL and takes no locator. State checks retry briefly, within the
+  runner deadline and optional top-level `timeoutMs`.
+- `screenshot`: optional short `name`. This is a **Chrome window** PNG, not a
+  page-only capture. The driver may briefly select the QA tab; it attempts to
+  restore the previous tab without overriding a user switch. Capture requires
+  a uniquely identified on-screen Chrome window; minimize or close an unrelated
+  matching window only with the user's involvement. Do not switch tabs or Spaces
+  during capture. Evidence can include browser UI and tab titles; do not capture
+  sensitive pages or windows.
 
-Treat discovery as a short preflight. Identify the real requested URL, the
-smallest user action that exercises the behavior, and a deterministic
-product-visible postcondition. A successful click/navigation is not proof.
-Verification uses one `run` per requested profile/variant; explicitly
-exploratory QA may use at most three bounded runs with one hypothesis each.
-
-Prefer state-based waits/assertions over sleeps. Preserve a product mismatch as
-a failure rather than changing the oracle. Additional origins must be exact
-`http(s)` origins explicitly justified by the requested scenario.
-
-## Evidence and reporting
-
-Report every artifact returned by the unified runner, including failed runs.
-Inspect at least one meaningful screenshot with `read` before claiming visual
-QA. Deterministic assertions determine PASS/FAIL; screenshots/video/traces
-explain the result.
-
-Let the runner own browser contexts/pages, provider processes, private evidence
-directories, and cleanup. Do not create shared/default browser sessions outside
-the runner or copy private QA evidence into a persistent shared directory.
+Clicks and fills use synthetic DOM events, not trusted native input. The runner
+checks the owned tab's page origin before acting; it cannot block redirects or
+subresource traffic. Do not claim network isolation. Headless execution,
+viewport/environment overrides, other tabs, frame/popup flows, DevTools
+diagnostics, downloads, video and traces are not supported. If a required
+capability is missing, return `BLOCKED`; don't weaken the proof or fall back
+to another driver. Keep the window open until the runner closes its own tab.

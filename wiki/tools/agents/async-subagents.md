@@ -272,13 +272,12 @@ in memory; it exposes tool + slash-command interfaces. `[confirmed by code]`
    browser, terminal/TUI, desktop-GUI, and explicitly selected Android verification. `browser-qa` is not an
    alias; a project may define that name only as an ordinary independent role.
    Like every async sub-agent, `ui-qa` runs without skills. UI QA additionally receives
-   `PI_SUBAGENT_AGENT_DIR` plus launcher-owned `PI_UI_QA_RUNNER` and
-   `PI_BROWSER_QA_RUNNER` paths, and gets private `ui-qa/flows/` plus
-   browser-backend `ui-qa/browser/flows/` workspaces.
+   `PI_SUBAGENT_AGENT_DIR` plus the launcher-owned `PI_UI_QA_RUNNER` path,
+   with one private `ui-qa/flows/` workspace for all backends.
    The start prompt is a thin common contract: the child loads exactly one
-   backend guide (`browser`/`tui`/`desktop`/`android`, plus `browser --topic auth` only
-   when authentication is required) through the read-only allowlisted
-   `PI_UI_QA_RUNNER guide` command before any UI action. The unified runner
+   backend guide (`browser`/`tui`/`desktop`/`android`) and any detail topic named
+   by the probe through the allowlisted `PI_UI_QA_RUNNER guide` command.
+   The browser base guide is complete. The unified runner
    selects browser, PTY/TUI, desktop, or Android ADB/UI Automator backends from a declarative
    target and owns bounded execution/evidence cleanup.
    `[confirmed by code,

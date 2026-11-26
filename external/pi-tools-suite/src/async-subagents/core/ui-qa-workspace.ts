@@ -25,7 +25,8 @@ export function prepareUiQaWorkspace(cwd: string, runDir: string, agentId: strin
 		} else fs.writeFileSync(file, value, { mode: 0o600, flag: "wx" });
 	}
 	const workspace = path.join(root, "ui-qa");
-	for (const dir of [workspace, path.join(workspace, "flows"), path.join(workspace, "browser"), path.join(workspace, "browser", "flows")]) ensureDirectory(dir, true);
+	ensureDirectory(workspace, true);
+	ensureDirectory(path.join(workspace, "flows"), true);
 	return root;
 }
 

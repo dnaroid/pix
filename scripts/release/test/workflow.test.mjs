@@ -47,8 +47,7 @@ test("CI and release workflows do not duplicate npm/publication work", () => {
   const steps = checkWorkflow.jobs["build-and-test"].steps;
   const desktopInstall = steps.find((step) => step.run?.includes("npm ci --prefix desktop"));
   assert.equal(desktopInstall?.if, "runner.os == 'macOS'");
-  const browserInstall = steps.find((step) => step.run?.includes("playwright install --with-deps chromium"));
-  assert.equal(browserInstall?.if, "matrix.os == 'ubuntu-latest'");
+  assert.equal(steps.some((step) => step.run?.includes("playwright install")), false);
   const gate = steps.filter((step) => step.run === "npm run check:ci");
   assert.equal(gate.length, 1);
   assert.equal(gate[0].if, undefined);

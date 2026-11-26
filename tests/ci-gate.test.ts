@@ -11,7 +11,7 @@ mkdirSync(join(repoRoot, ".pi/artifacts"), { recursive: true });
 test("CI plan covers the shared matrix without unsupported Desktop requirements", () => {
   const ids = (platform: NodeJS.Platform) => ciPlan(platform).map((s: { id: string }) => s.id);
   assert.deepEqual(ids("win32"), ["root", "acp", "tools-suite"]);
-  assert.deepEqual(ids("linux"), ["root", "acp", "tools-suite", "browser-e2e"]);
+  assert.deepEqual(ids("linux"), ["root", "acp", "tools-suite"]);
   assert.deepEqual(ids("darwin"), ["root", "acp", "desktop-check", "desktop-test", "rust-fmt", "rust-check", "rust-test", "tools-suite"]);
   assert.throws(() => ciPlan("unsupported" as NodeJS.Platform), /Unsupported CI host/);
   for (const platform of ["linux", "darwin", "win32"] as const) {

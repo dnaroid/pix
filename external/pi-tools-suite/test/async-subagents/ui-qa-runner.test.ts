@@ -4,10 +4,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { removeDirsWithRetry } from "../support/fs-retry.js";
-import { probeBrowserBackend, resolveBrowserDriver, runBrowserBackend } from "../../src/async-subagents/agents/ui-qa/backends/browser.mjs";
 import { desktopEvidenceName, desktopPlatformContract, desktopRecordText, desktopStepTimeout, desktopWindowSelector, launchedApplicationSelector, runOwnedProcess, terminateOwnedProcessTree, validateDesktopStepCapabilities } from "../../src/async-subagents/agents/ui-qa/backends/desktop.mjs";
 import { releaseWindowsPtyResources, resolveTuiPresentation, terminateOwnedPty, validateNativeTerminalSteps } from "../../src/async-subagents/agents/ui-qa/backends/tui.mjs";
-import { CHROME_DEVTOOLS_DRIVER, chromeDevtoolsStartArgs, probeChromeDevtoolsProvider } from "../../src/async-subagents/agents/ui-qa/drivers/chrome-devtools/chrome-devtools-provider.mjs";
 import { chooseNativeTerminalProvider, nativeTerminalBridgeCommandFile, nativeTerminalBridgeShellCommand, nativeTerminalProviderLaunchArgs } from "../../src/async-subagents/agents/ui-qa/drivers/native-terminal/native-terminal-host.mjs";
 
 const runner = path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/scripts/ui-qa-runner.mjs");
@@ -38,10 +36,8 @@ function createProject(type = "ui-qa") {
 	tempDirs.push(project);
 	const agentDir = path.join(project, ".pi", "artifacts", "subagents", "run-qa");
 	const uiWorkspace = path.join(agentDir, "ui-qa");
-	const browserWorkspace = path.join(uiWorkspace, "browser");
 	fs.mkdirSync(path.join(uiWorkspace, "flows"), { recursive: true, mode: 0o700 });
-	fs.mkdirSync(path.join(browserWorkspace, "flows"), { recursive: true, mode: 0o700 });
-	for (const directory of [path.join(project, ".pi"), path.join(project, ".pi", "artifacts"), path.join(project, ".pi", "artifacts", "subagents"), agentDir, uiWorkspace, path.join(uiWorkspace, "flows"), browserWorkspace, path.join(browserWorkspace, "flows")]) {
+	for (const directory of [path.join(project, ".pi"), path.join(project, ".pi", "artifacts"), path.join(project, ".pi", "artifacts", "subagents"), agentDir, uiWorkspace, path.join(uiWorkspace, "flows")]) {
 		if (process.platform !== "win32") fs.chmodSync(directory, 0o700);
 	}
 	fs.writeFileSync(path.join(agentDir, "project_cwd"), `${project}\n`, { mode: 0o600 });
@@ -147,32 +143,8 @@ describe("ui-qa guide routing", () => {
 		}
 	});
 
-	test("serves the browser auth guide only through the explicit auth topic", () => {
-		const authGuide = fs.readFileSync(guidePath("browser-auth.md"), "utf8");
-		const browserGuide = invokeGuide(["--backend", "browser"], process.cwd());
-		expect(browserGuide.status).toBe(0);
-		expect(browserGuide.stdout).toBe(fs.readFileSync(guidePath("browser.md"), "utf8"));
-		// Backend isolation: the plain browser guide points to the auth guide but
-		// must not embed the scaffold/update workflow, and browser runs get no
-		// TUI/desktop instructions.
-		expect(browserGuide.stdout).not.toContain("QA_AUTH_UPDATE_REQUIRED");
-		expect(browserGuide.stdout).not.toContain("--success-selector");
-		expect(browserGuide.stdout).not.toContain("target.application");
-		expect(browserGuide.stdout).not.toContain("waitForStable");
-		const auth = invokeGuide(["--backend", "browser", "--topic", "auth"]);
-		expect(auth.status).toBe(0);
-		expect(auth.stdout).toBe(authGuide);
-		expect(auth.stdout).toContain("auth scaffold");
-		// TUI and desktop runs never receive browser/auth instructions.
-		expect(invokeGuide(["--backend", "tui"]).stdout).not.toContain("Playwright");
-		expect(invokeGuide(["--backend", "desktop"]).stdout).not.toContain("Playwright");
-		expect(invokeGuide(["--backend", "tui"]).stdout).not.toContain("qa_auth.jsonc");
-	});
-
 	test("serves provider and platform detail guides only through backend-scoped topics", () => {
 		for (const [backend, topic, file] of [
-			["browser", "playwright", "browser-playwright.md"],
-			["browser", "chrome-devtools", "browser-chrome-devtools.md"],
 			["tui", "pty", "tui-pty.md"],
 			["tui", "native-terminal", "tui-native-terminal.md"],
 			["desktop", "macos-accessibility", "desktop-macos.md"],
@@ -208,7 +180,8 @@ describe("ui-qa guide routing", () => {
 		const rejections: Array<[string[], RegExp]> = [
 			[["--backend", "web"], /unknown guide backend/],
 			[["--backend", "../ui-qa/guides/browser"], /unknown guide backend/],
-			[["--backend", "browser", "--topic", "locators"], /unknown guide topic for browser/],
+			...["auth", "playwright", "chrome-devtools"].map((topic): [string[], RegExp] =>
+				[["--backend", "browser", "--topic", topic], /unknown guide topic for browser/]),
 			[["--backend", "browser", "--topic", "../../../etc/passwd"], /unknown guide topic for browser/],
 			[["--backend", "tui", "--topic", "auth"], /unknown guide topic for tui/],
 			[["--backend", "browser", "--topic", "native-terminal"], /unknown guide topic for browser/],
@@ -241,7 +214,7 @@ describe("ui-qa guide routing", () => {
 
 	test("keeps every bundled guide within the bounded guide size", () => {
 		for (const file of [
-			"browser.md", "browser-auth.md", "browser-playwright.md", "browser-chrome-devtools.md",
+			"browser.md",
 			"tui.md", "tui-pty.md", "tui-native-terminal.md",
 			"desktop.md", "desktop-macos.md", "desktop-windows.md", "desktop-linux.md",
 		]) {
@@ -251,6 +224,19 @@ describe("ui-qa guide routing", () => {
 });
 
 describe("capability-first UI QA runner", () => {
+	test("routes a URL to Chrome Control without falling back when an isolated driver is requested", () => {
+		const { project, agentDir, uiWorkspace } = createProject();
+		writeFlow(uiWorkspace, "isolated.jsonc", { target: { url: "https://example.test/", browserDriver: "playwright" } });
+		const result = invoke(project, agentDir, ["probe", "--flow", "isolated.jsonc"]);
+		expectRunnerStatus(result, 2);
+		expect(result.payload).toMatchObject({
+			status: "BLOCKED",
+			selection: { detectedTargetKind: "browser", selectedBackend: "browser", platformDriver: "chrome-control" },
+			blockedHandoff: { backend: "browser", missingCapabilities: ["chromeControlFlow"] },
+		});
+		expectUnifiedArtifacts(result.payload);
+	});
+
 	test("rejects the removed browser-qa owner type", () => {
 		const { project, agentDir, uiWorkspace } = createProject("browser-qa");
 		writeFlow(uiWorkspace, "browser.jsonc", { version: 1, target: { url: "https://example.test/path" } });
@@ -292,298 +278,6 @@ describe("capability-first UI QA runner", () => {
 		expect(limited).toBeGreaterThan(0);
 		expect(limited).toBeLessThanOrEqual(2000);
 		expect(() => desktopStepTimeout({ action: "waitForWindow" }, { ...context, deadline: Date.now() - 1 })).toThrow("deadline expired");
-	});
-
-	test("selects the browser backend for a URL without launching Playwright", () => {
-		const { project, agentDir, uiWorkspace } = createProject();
-		writeFlow(uiWorkspace, "browser.jsonc", { version: 1, target: { url: "https://example.test/path" } });
-		const result = invoke(project, agentDir, ["probe", "--flow", "browser.jsonc"]);
-		expectRunnerStatus(result, 0);
-		expect(result.payload.status).toBe("AVAILABLE");
-		expect(result.payload.selection.detectedTargetKind).toBe("browser");
-		expect(result.payload.selection.selectedBackend).toBe("browser");
-		expect(result.payload.selection.guide).toEqual({ backend: "browser", topic: "playwright" });
-		expect(result.payload.selection.whySelected).toContain("browser");
-		expectUnifiedArtifacts(result.payload);
-	});
-
-	test("selects Playwright or Chrome DevTools by browser capability rather than project identity", async () => {
-		const ordinary = {
-			target: { url: "https://example.test/" },
-			steps: [{ action: "assertVisible", locator: { role: "heading", name: "Example" } }],
-		};
-		const devtools = {
-			target: { url: "https://example.test/" },
-			steps: [{ action: "assertNoConsoleErrors" }],
-		};
-		const authenticated = {
-			target: { profile: "staging-admin" },
-			steps: [{ action: "assertVisible", locator: { testId: "account" } }],
-		};
-		expect(resolveBrowserDriver(ordinary)).toBe("playwright");
-		expect(resolveBrowserDriver(devtools)).toBe("chrome-devtools");
-		expect(resolveBrowserDriver(authenticated)).toBe("playwright");
-		expect(resolveBrowserDriver({ ...ordinary, target: { ...ordinary.target, devtools: { headless: false } } })).toBe("chrome-devtools");
-		expect(resolveBrowserDriver({ ...ordinary, target: { ...ordinary.target, browserDriver: "chrome-devtools" } })).toBe("chrome-devtools");
-		expect(resolveBrowserDriver({ ...devtools, target: { ...devtools.target, browserDriver: "playwright" } })).toBe("playwright");
-
-		const explicitPlaywright = await probeBrowserBackend({
-			flow: { ...devtools, target: { ...devtools.target, browserDriver: "playwright" } },
-			browserRunnerPath: path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/browser/scripts/browser-qa-runner.mjs"),
-		});
-		expect(explicitPlaywright.available).toBe(false);
-		expect(explicitPlaywright.platformDriver).toBe("playwright-trusted-runner");
-		expect(explicitPlaywright.missingCapabilities).toContain("action:assertNoConsoleErrors");
-
-		const authWithDevtools = await probeBrowserBackend({
-			flow: { ...authenticated, target: { ...authenticated.target, devtools: { headless: false } } },
-			browserRunnerPath: path.resolve(import.meta.dir, "../../src/async-subagents/agents/ui-qa/browser/scripts/browser-qa-runner.mjs"),
-		});
-		expect(authWithDevtools.available).toBe(false);
-		expect(authWithDevtools.missingCapabilities).toContain("chromeDevtoolsOptions");
-	});
-
-	test("starts Chrome DevTools with a per-run fail-closed security policy", () => {
-		const args = chromeDevtoolsStartArgs({
-			sessionId: "deadbeef",
-			evidenceDir: "/tmp/ui qa evidence",
-			allowedOrigins: ["https://example.test", "http://127.0.0.1:4312"],
-			devtools: {},
-		});
-		expect(args).toContain("--sessionId");
-		expect(args).toContain("deadbeef");
-		expect(args).toContain("--redactNetworkHeaders=true");
-		expect(args).toContain("--usageStatistics=false");
-		expect(args).toContain("--performanceCrux=false");
-		expect(args).toContain("--pageIdRouting=true");
-		expect(args).toContain("--javascriptEvaluation=false");
-		expect(args).toContain("--categoryExtensions=false");
-		expect(args.some((arg) => /category-?pwa/i.test(arg))).toBe(false);
-		expect(args).toContain("--experimentalVision=false");
-		expect(args).toContain("--autoConnect=true");
-		expect(args.some((arg) => /^--(browserUrl|headless|isolated)=/.test(arg))).toBe(false);
-		expect(args).toContain("--workspace=/tmp/ui qa evidence");
-		expect(args).toContain("--allowedUrlPattern=https://example.test/*");
-		expect(args).toContain("--allowedUrlPattern=http://127.0.0.1:4312/*");
-		expect(args.join(" ")).not.toContain("Cookie");
-		expect(args.join(" ")).not.toContain("Authorization");
-	});
-
-	test("preserves explicit DevTools endpoints and isolated launch options without autoConnect", () => {
-		const options = { sessionId: "deadbeef", evidenceDir: "/tmp/ui qa evidence", allowedOrigins: ["https://example.test"] };
-		const attached = chromeDevtoolsStartArgs({ ...options, devtools: { browserUrl: "http://127.0.0.1:4312" } });
-		expect(attached).toContain("--browserUrl=http://127.0.0.1:4312");
-		expect(attached).not.toContain("--autoConnect=true");
-		expect(attached.some((arg) => /category-?pwa/i.test(arg))).toBe(false);
-		const endpointOverridesLaunch = chromeDevtoolsStartArgs({ ...options, devtools: { browserUrl: "http://127.0.0.1:4312", headless: true } });
-		expect(endpointOverridesLaunch).toEqual(attached);
-		for (const headless of [true, false]) {
-			const launched = chromeDevtoolsStartArgs({ ...options, devtools: { headless } });
-			expect(launched).toContain("--isolated=true");
-			expect(launched).toContain(`--headless=${headless}`);
-			expect(launched).not.toContain("--autoConnect=true");
-			expect(launched).toContain("--categoryPwa=false");
-		}
-	});
-
-	test("rejects non-loopback Chrome DevTools attach endpoints", async () => {
-		const { project, agentDir } = createProject();
-		await expect(runBrowserBackend({
-			flow: {
-				target: {
-					url: "https://example.test/",
-					browserDriver: "chrome-devtools",
-					devtools: { browserUrl: "http://example.test:9222" },
-				},
-				steps: [{ action: "assertNoConsoleErrors" }],
-			},
-			projectRoot: project,
-			agentDir,
-			runId: "remote-attach-rejected",
-			deadline: Date.now() + 10_000,
-			progress() {},
-		})).rejects.toThrow(/loopback/);
-	});
-
-	test("runs Chrome DevTools through an isolated owned daemon and stops only that session", async () => {
-		if (process.platform === "win32") return;
-		const { project, agentDir } = createProject();
-		const evidenceDir = path.join(project, "devtools-evidence");
-		fs.mkdirSync(evidenceDir, { mode: 0o700 });
-		const fakeCli = writeProjectFile(project, "fake-chrome-devtools.mjs", `#!/usr/bin/env node
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-const here = path.dirname(fileURLToPath(import.meta.url));
-const log = path.join(here, "fake-chrome-devtools.log");
-const argv = process.argv.slice(2);
-fs.appendFileSync(log, JSON.stringify(argv) + "\\n");
-if (argv[0] === "--version") { console.log("1.9.0"); process.exit(0); }
-const command = argv[0];
-const page = { id: 7, url: "https://example.test/", title: "Example", selected: true, isolatedContext: "owned" };
-const snapshot = {
-  id: "1_0", role: "RootWebArea", name: "Example",
-  children: [
-    { id: "1_1", role: "heading", name: "Example Domain" },
-    { id: "1_2", role: "button", name: "Continue" }
-  ]
-};
-if (command === "start" || command === "stop" || command === "close_page") process.exit(0);
-if (command === "new_page" || command === "list_pages") console.log(JSON.stringify({ pages: [page] }));
-else if (command === "take_snapshot") console.log(JSON.stringify({ snapshot }));
-else if (command === "list_console_messages") console.log(JSON.stringify({ consoleMessages: [] }));
-else if (command === "performance_start_trace") {
-  const outputIndex = argv.indexOf("--filePath");
-  if (outputIndex < 0) process.exit(2);
-  fs.writeFileSync(argv[outputIndex + 1], "raw trace with https://example.test/?token=secret");
-  console.log(JSON.stringify({
-    traceSummary: "URL: https://example.test/?token=secret\\nCPU throttling: 1x\\n  - LCP: 217 ms\\n  - CLS: 0.03\\n",
-    traceInsights: [{ insightName: "LCPBreakdown" }, { insightName: "RenderBlocking" }]
-  }));
-}
-else { console.error("unsupported fake command: " + command); process.exit(1); }
-`);
-		const probe = await probeChromeDevtoolsProvider({
-			chromeDevtoolsPath: fakeCli,
-			flow: { target: { url: "https://example.test/" }, steps: [{ action: "assertNoConsoleErrors" }] },
-		});
-		expect(probe.available).toBe(true);
-		expect(probe.platformDriver).toBe(CHROME_DEVTOOLS_DRIVER);
-
-		const result = await runBrowserBackend({
-			flow: {
-				target: { url: "https://example.test/", browserDriver: "chrome-devtools" },
-				steps: [
-					{ action: "assertText", locator: { role: "heading", name: "Example Domain", exact: true }, includes: "Example Domain" },
-					{ action: "assertNoConsoleErrors" },
-					{ action: "snapshotAccessibility", name: "owned-page" },
-					{ action: "performanceTrace", name: "owned-performance" },
-				],
-			},
-			projectRoot: project,
-			agentDir,
-			runId: "devtools-owned",
-			evidenceDir,
-			deadline: Date.now() + 20_000,
-			chromeDevtoolsPath: fakeCli,
-			artifact(value: string) {
-				const file = path.resolve(evidenceDir, value);
-				return { path: file, uri: `file://${file}` };
-			},
-			progress() {},
-		});
-		expect(result.status).toBe("PASSED");
-		expect(result.assertions).toHaveLength(2);
-		expect(result.artifacts.accessibilitySnapshots.some((entry: any) => entry.path.endsWith("owned-page.accessibility.json"))).toBe(true);
-		const performance = result.artifacts.traces.find((entry: any) => entry.path.endsWith("owned-performance.json"));
-		expect(performance).toBeDefined();
-		if (!performance) throw new Error("expected sanitized performance evidence");
-		expect(fs.existsSync(path.join(evidenceDir, "owned-performance.raw.json"))).toBe(false);
-		const performanceSummary = fs.readFileSync(performance.path, "utf8");
-		expect(performanceSummary).not.toContain("token=secret");
-		expect(performanceSummary).toContain('"lcpMs": 217');
-		expect(performanceSummary).toContain('"cls": 0.03');
-		expect(performanceSummary).toContain("LCPBreakdown");
-		const calls = fs.readFileSync(path.join(project, "fake-chrome-devtools.log"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
-		const start = calls.find((entry) => entry[0] === "start");
-		const stop = calls.find((entry) => entry[0] === "stop");
-		expect(start).toBeDefined();
-		expect(stop).toBeDefined();
-		const sessionFlag = start.indexOf("--sessionId");
-		expect(sessionFlag).toBeGreaterThanOrEqual(0);
-		const sessionId = start[sessionFlag + 1];
-		expect(sessionId).toMatch(/^[a-f0-9]{32}$/);
-		expect(stop).toContain(sessionId);
-		expect(start).toContain("--javascriptEvaluation=false");
-		expect(start).toContain("--redactNetworkHeaders=true");
-		expect(start).toContain("--autoConnect=true");
-		const newPage = calls.find((entry) => entry[0] === "new_page");
-		expect(newPage).toContain("--isolatedContext");
-		expect(newPage).toContain(sessionId);
-		expect(result.observations).toContainEqual(expect.objectContaining({ action: "browserProvider", attachExistingChromeRequested: true, daemonReady: true, reuseExistingBrowserSession: false }));
-		expect(calls.filter((entry) => entry[0] === "close_page")).toHaveLength(1);
-		expect(calls.find((entry) => entry[0] === "close_page")).toContain("7");
-	});
-
-	test("preserves the browser backend's bounded in-memory upload flow size", () => {
-		const { project, agentDir, uiWorkspace } = createProject();
-		writeFlow(uiWorkspace, "browser-upload.jsonc", {
-			version: 1,
-			target: { url: "https://example.test/upload" },
-			steps: [{
-				action: "uploadFiles",
-				locator: { testId: "file" },
-				files: [{ name: "fixture.bin", mimeType: "application/octet-stream", base64: "A".repeat(1_100_000) }],
-			}],
-		});
-		const result = invoke(project, agentDir, ["probe", "--flow", "browser-upload.jsonc"], 30_000);
-		expectRunnerStatus(result, 0);
-		expect(result.payload.status).toBe("AVAILABLE");
-		expect(result.payload.selection.selectedBackend).toBe("browser");
-	});
-
-	test("preserves redacted browser credential update metadata", async () => {
-		const { project, agentDir } = createProject();
-		const fakeRunner = writeProjectFile(project, "fake-browser-runner.mjs", `
-console.log(JSON.stringify({
-  status: "QA_AUTH_UPDATE_REQUIRED",
-  profile: "staging-admin",
-  file: ".pi/qa_auth.jsonc",
-  reason: "credentials are required",
-  action: "fill_credentials",
-  templateCreated: false,
-  placeholderCount: 2
-}));
-process.exitCode = 2;
-`);
-		const result = await runBrowserBackend({
-			flow: {
-				target: { profile: "staging-admin" },
-				steps: [{ action: "assertVisible", locator: { testId: "account" } }],
-			},
-			projectRoot: project,
-			agentDir,
-			runId: "auth-update",
-			deadline: Date.now() + 10_000,
-			browserRunnerPath: fakeRunner,
-			progress() {},
-		});
-		expect(result.status).toBe("BLOCKED");
-		expect(result.profile).toBe("staging-admin");
-		expect(result.file).toBe(".pi/qa_auth.jsonc");
-		expect(result.action).toBe("fill_credentials");
-		expect(result.templateCreated).toBe(false);
-		expect(result.placeholderCount).toBe(2);
-	});
-
-	test("maps an unavailable browser executable to a BLOCKED handoff", async () => {
-		const { project, agentDir } = createProject();
-		const fakeRunner = writeProjectFile(project, "fake-missing-browser-runner.mjs", `
-console.log(JSON.stringify({
-  status: "QA_BROWSER_UNAVAILABLE",
-  profile: "public",
-  reason: "no launchable Chromium found",
-  remediation: "install a Chromium build",
-  missingCapabilities: ["chromiumExecutable"]
-}));
-process.exitCode = 43;
-`);
-		const result = await runBrowserBackend({
-			flow: {
-				target: { url: "https://example.test/" },
-				steps: [{ action: "assertVisible", locator: { testId: "ready" } }],
-			},
-			projectRoot: project,
-			agentDir,
-			runId: "missing-browser",
-			deadline: Date.now() + 10_000,
-			browserRunnerPath: fakeRunner,
-			progress() {},
-		});
-		expect(result.status).toBe("BLOCKED");
-		expect(result.reason).toBe("no launchable Chromium found");
-		expect(result.remediation).toBe("install a Chromium build");
-		expect(result.missingCapabilities).toEqual(["chromiumExecutable"]);
 	});
 
 	test("drives a real alternate-screen TUI through PTY input and screen assertions", () => {

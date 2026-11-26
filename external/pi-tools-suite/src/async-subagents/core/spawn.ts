@@ -2,7 +2,7 @@ import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "n
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { BROWSER_QA_RUNNER_ENV, getBrowserQaRunnerPath, getUiQaRunnerPath, isUiQaType, UI_QA_RUNNER_ENV } from "./ui-qa.js";
+import { getUiQaRunnerPath, isUiQaType, UI_QA_RUNNER_ENV } from "./ui-qa.js";
 import { ownedAgentDir, parseRunKey, scopeDir, validateBasename } from "./paths.js";
 import { getPiInvocation } from "./pi-invocation.js";
 import { generatePrompt } from "./prompt.js";
@@ -1038,11 +1038,10 @@ function subagentEnvironment(env: NodeJS.ProcessEnv, agentDir?: string): NodeJS.
 		]),
 	};
 	delete result[SUBAGENT_AGENT_DIR_ENV];
-	delete result[BROWSER_QA_RUNNER_ENV];
+	delete result.PI_BROWSER_QA_RUNNER; // Never propagate the retired browser runner path.
 	delete result[UI_QA_RUNNER_ENV];
 	if (agentDir) {
 		result[SUBAGENT_AGENT_DIR_ENV] = fs.realpathSync(agentDir);
-		result[BROWSER_QA_RUNNER_ENV] = getBrowserQaRunnerPath();
 		result[UI_QA_RUNNER_ENV] = getUiQaRunnerPath();
 	}
 	return result;

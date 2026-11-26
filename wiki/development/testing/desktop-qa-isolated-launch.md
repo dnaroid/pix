@@ -206,7 +206,7 @@ private files. OAuth, session/CLI credential stores, command expressions and
 environment-variable references are not shared or resolved; no secrets are
 printed. These seeds are not a complete authentication migration. Missing model
 availability/authentication must be reported, not repaired by attaching to the
-working app. Parent agents must not inspect or populate `.pi/qa_auth.jsonc`.
+working app. Parent agents must not inspect or populate credential files.
 
 Permanent mode never seeds working-user credentials: reuse QA authorization or
 let `ui-qa` import an explicitly user-authorized QA credential handoff.

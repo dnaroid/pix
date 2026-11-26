@@ -91,7 +91,6 @@
     "dev:desktop": "npm --prefix desktop run dev",
     "build:desktop": "npm --prefix desktop run build",
     "check:desktop": "npm --prefix desktop run check",
-    "test:browser-qa-e2e": "npm --prefix external/pi-tools-suite run test:browser-qa-e2e",
     "sync:pi-tools-suite": "node scripts/sync-pi-tools-suite.mjs",
     "sync:pi-tools-suite:check": "node scripts/sync-pi-tools-suite.mjs --check",
     "migrate:claude-provider": "node scripts/migrate-claude-provider.mjs",

@@ -117,8 +117,7 @@ are required; follow the [development guide](wiki/development/guide.md).
   The full local `npm run check:ci` is reserved for release preparation or an
   explicit push-everything request; see [verification policy](wiki/development/guide.md#verification-before-pushing).
 - **CI:** [Check](.github/workflows/check.yml) runs root/ACP/tools-suite checks
-  on Linux, macOS and Windows. Desktop frontend/Rust checks are macOS-only;
-  the Ubuntu Playwright job tests a mocked browser workspace, not native Desktop.
+  on Linux, macOS and Windows. Desktop frontend/Rust checks are macOS-only.
   Consult [live Actions results](https://github.com/dnaroid/pix/actions/workflows/check.yml)
   for current status—a local pass does not establish matrix health.
 - **Releases:** [Publish](.github/workflows/publish.yml) builds native TUI packages

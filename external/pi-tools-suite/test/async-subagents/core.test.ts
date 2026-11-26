@@ -18,7 +18,6 @@ import {
 	generatePrompt,
 	getAgentState,
 	getBuiltinSubagentDefinitionsDir,
-	getBrowserQaRunnerPath,
 	getUiQaRunnerPath,
 	getPiInvocation,
 	getRunRoot,
@@ -450,7 +449,6 @@ Research only this project.
 		const cwd = tempDir();
 		const config = loadSubagentConfig(cwd, {});
 		const resolved = resolveAgentTaskConfig({ id: "qa", task: "verify the browser bug", subagentType: "ui-qa" }, config);
-		const runner = getBrowserQaRunnerPath();
 		const uiRunner = getUiQaRunnerPath();
 
 		expect(config.routing).toMatchObject({
@@ -478,9 +476,6 @@ Research only this project.
 		expect(resolved.fallbackModels).toEqual(["pi-claude-code-provider/haiku", "zai/glm-5.3-flash"]);
 		expect(resolved.task.tools).toEqual(["read", "grep", "bash"]);
 		expect(resolved.timeoutMs).toBe(600_000);
-		expect(fs.existsSync(runner)).toBe(true);
-		expect(path.isAbsolute(runner)).toBe(true);
-		expect(runner).toContain(path.join("agents", "ui-qa", "browser"));
 		expect(fs.existsSync(uiRunner)).toBe(true);
 		expect(path.isAbsolute(uiRunner)).toBe(true);
 		const instructions = config.types["ui-qa"].promptAppend!;
@@ -560,7 +555,7 @@ Research only this project.
 		const definitionsDir = getBuiltinSubagentDefinitionsDir();
 		const guidesDir = path.join(definitionsDir, "ui-qa", "guides");
 		const guides = [
-			"browser.md", "browser-auth.md", "browser-playwright.md", "browser-chrome-devtools.md",
+			"browser.md",
 			"tui.md", "tui-pty.md", "tui-native-terminal.md",
 			"desktop.md", "desktop-macos.md", "desktop-windows.md", "desktop-linux.md",
 			"android.md", "android-adb.md",
@@ -1277,21 +1272,17 @@ describe.serial("spawning agents", () => {
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `
 const fs = require("node:fs");
-const { spawnSync } = require("node:child_process");
 const lines = require("node:readline").createInterface({ input: process.stdin });
 lines.on("line", (line) => {
   const request = JSON.parse(line);
   if (request.type !== "prompt") return;
   const runner = process.env.PI_BROWSER_QA_RUNNER;
   const uiRunner = process.env.PI_UI_QA_RUNNER;
-  const probe = runner ? spawnSync(process.execPath, [runner, "profiles"], { encoding: "utf8" }) : undefined;
   fs.writeFileSync(${JSON.stringify(captured)}, JSON.stringify({
     message: request.message,
     runner: runner ?? null,
     uiRunner: uiRunner ?? null,
     agentDir: process.env.PI_SUBAGENT_AGENT_DIR ?? null,
-    probeExit: probe?.status,
-    probeOutput: probe?.stdout,
   }));
   console.log(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "done" }] }] }));
   console.log(JSON.stringify({ type: "agent_settled" }));
@@ -1338,11 +1329,9 @@ setTimeout(() => {}, 2000);
 					expect(payload.message).not.toContain("PI_BROWSER_QA_RUNNER");
 					expect(payload.message).not.toContain('node "$PI_BROWSER_QA_RUNNER"');
 					expect(payload.message).not.toContain("## Detailed scenario-design guidance");
-					 expect(payload.runner).toBe(getBrowserQaRunnerPath());
+					expect(payload.runner).toBeNull();
 					expect(payload.uiRunner).toBe(getUiQaRunnerPath());
 					expect(payload.agentDir).toBe(fs.realpathSync(path.join(cwd, ".pi", "artifacts", "subagents", `${parseRunKey(runDir)!.batch}-${id}`)));
-					expect(payload.probeExit).toBe(0);
-					expect(JSON.parse(payload.probeOutput).profiles).toEqual([]);
 				} else {
 					expect(payload.runner).toBeNull();
 					expect(payload.uiRunner).toBeNull();
@@ -1392,12 +1381,9 @@ setTimeout(() => {}, 1000);
 		expect(fs.readFileSync(staleNativeEvidence, "utf8")).toBe("stale");
 		expect(fs.statSync(path.join(agentDir, "ui-qa")).isDirectory()).toBe(true);
 		expect(fs.statSync(path.join(agentDir, "ui-qa", "flows")).isDirectory()).toBe(true);
-		expect(fs.statSync(path.join(agentDir, "ui-qa", "browser", "flows")).isDirectory()).toBe(true);
 		if (process.platform !== "win32") {
 			expect(fs.statSync(path.join(agentDir, "ui-qa")).mode & 0o777).toBe(0o700);
 			expect(fs.statSync(path.join(agentDir, "ui-qa", "flows")).mode & 0o777).toBe(0o700);
-			expect(fs.statSync(path.join(agentDir, "ui-qa", "browser")).mode & 0o777).toBe(0o700);
-			expect(fs.statSync(path.join(agentDir, "ui-qa", "browser", "flows")).mode & 0o777).toBe(0o700);
 		}
 	});
 

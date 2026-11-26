@@ -23,11 +23,6 @@ const GUIDE_FILES = {
 	android: "android.md",
 };
 const GUIDE_TOPIC_FILES = {
-	browser: {
-		auth: "browser-auth.md",
-		playwright: "browser-playwright.md",
-		"chrome-devtools": "browser-chrome-devtools.md",
-	},
 	tui: {
 		pty: "tui-pty.md",
 		"native-terminal": "tui-native-terminal.md",
@@ -42,9 +37,6 @@ const GUIDE_TOPIC_FILES = {
 const MAX_GUIDE_BYTES = 256 * 1024;
 const FLOW_RELATIVE = "flows";
 const EVIDENCE_RELATIVE = "evidence";
-// Preserve the trusted browser runner's bounded in-memory upload contract.
-// Native/TUI schemas remain small, while browser flows may contain base64 file
-// payloads up to the legacy runner's 16 MiB flow limit.
 const MAX_FLOW_BYTES = 16 * 1024 * 1024;
 const MAX_STEPS = 100;
 const DEFAULT_BLOCKED_REMEDIATION = "report this blocker to the parent agent; no safe automatic remediation is defined";
@@ -52,7 +44,7 @@ const DEFAULT_RUNNER_TIMEOUT_MS = 90_000;
 const MAX_RUNNER_TIMEOUT_MS = 100_000;
 // Backends may spend up to five seconds escalating owned children from SIGTERM
 // to SIGKILL. The process-level hard exit must be strictly later or it can win
-// that cleanup race and orphan an app, PTY, or trusted browser runner.
+// that cleanup race and orphan an app, PTY, or owned Chrome tab.
 const HARD_EXIT_GRACE_MS = 10_000;
 const PROGRESS_MAX_BYTES = 1024 * 1024;
 const SAFE_NAME = /^[A-Za-z0-9._-]+$/;
@@ -159,7 +151,6 @@ async function main() {
 			// gate producer-dependent steps (screenshot/video) honestly instead
 			// of assuming capabilities the host never granted.
 			selection: publicSelection(selection),
-			browserRunnerPath: fileURLToPath(new URL("../browser/scripts/browser-qa-runner.mjs", import.meta.url)),
 		};
 		const backendResult = await runSelectedBackend(selection.selectedBackend, context);
 		const deadlineExpired = Date.now() >= deadline;
@@ -220,7 +211,8 @@ function parseGuideArgs(values) {
 		throw new UiQaError("FAILED", `unknown guide backend: ${options.backend}`);
 	}
 	if (options.topic !== undefined) {
-		if (!Object.hasOwn(GUIDE_TOPIC_FILES[options.backend], options.topic)) {
+		const topics = GUIDE_TOPIC_FILES[options.backend];
+		if (!topics || !Object.hasOwn(topics, options.topic)) {
 			throw new UiQaError("FAILED", `unknown guide topic for ${options.backend}: ${options.topic}`);
 		}
 	}

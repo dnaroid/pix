@@ -50,9 +50,6 @@ jobs:
         run: npm ci --prefix desktop --ignore-scripts
       - name: Run cross-platform CI preflight
         run: npm run check:ci:preflight
-      - name: Install Chromium for browser QA E2E
-        if: matrix.os == 'ubuntu-latest'
-        run: npx playwright install --with-deps chromium
       - name: Run shared native CI gate
         run: npm run check:ci
       - name: Upload CI gate logs

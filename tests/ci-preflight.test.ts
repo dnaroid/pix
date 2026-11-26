@@ -32,11 +32,8 @@ test("preflight checks dependency parity early and selects platform regressions,
 test("workflow runs the short preflight before, not instead of, the shared native gate", () => {
   const workflow = readFileSync(join(repoRoot, ".github/workflows/check.yml"), "utf8");
   const preflight = workflow.indexOf("run: npm run check:ci:preflight");
-  const browserInstall = workflow.indexOf("run: npx playwright install --with-deps chromium");
   const full = workflow.indexOf("run: npm run check:ci\n");
   assert.ok(preflight !== -1 && full > preflight);
-  assert.ok(browserInstall > preflight && full > browserInstall,
-    "Linux installs browser dependencies only after fast preflight succeeds");
   assert.match(workflow, /ci-preflight-runs\/check-ci-\*\/summary\.json/);
   const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
   assert.equal(pkg.scripts["check:ci:preflight"], "node scripts/ci-preflight.mjs");

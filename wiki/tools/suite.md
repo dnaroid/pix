@@ -896,16 +896,15 @@ child's task prompt; the parent and LLM router receive only the short
 `description`. There is no additional QA skill to discover or read.
 
 Backend specifics use progressive disclosure through bundled guides under
-`src/async-subagents/agents/ui-qa/guides/`. `browser.md`, `tui.md`,
-`desktop.md`, and `android.md` are compact routers; backend-scoped detail topics cover the actual
-browser provider, TUI presentation, desktop platform driver, Android ADB/UI Automator, and explicit
-browser-auth workflow. The child loads the matching base guide, then only the
+`src/async-subagents/agents/ui-qa/guides/`. `browser.md` is the complete Chrome Control guide; `tui.md`, `desktop.md`, and
+`android.md` are compact routers. Backend-scoped detail topics cover TUI presentation, the
+desktop platform driver, and Android ADB/UI Automator. The child loads the matching base guide, then only the
 routed detail topic read-only via the runner:
 
 ```sh
 node "$PI_UI_QA_RUNNER" guide --backend browser   # or: tui | desktop | android
-node "$PI_UI_QA_RUNNER" guide --backend browser --topic playwright
-# other examples: chrome-devtools, tui/native-terminal, desktop/windows-uia, android/adb
+node "$PI_UI_QA_RUNNER" guide --backend tui --topic native-terminal
+# other examples: tui/pty, desktop/windows-uia, android/adb
 ```
 
 The command resolves the guide from a backend-scoped fixed allowlist bundled
@@ -918,8 +917,7 @@ requested document. `probe` returns authoritative
 `ui-qa` authors one private declarative flow and invokes the capability-first
 runner supplied in `PI_UI_QA_RUNNER`. The runner selects exactly one backend
 from the target descriptor and reports candidate capabilities plus its selection
-rationale. Browser routing selects the trusted Playwright backend or the
-capability-probed Chrome DevTools provider. TUI routing selects PTY semantics or
+rationale. Browser routing selects the Chrome Control driver. TUI routing selects PTY semantics or
 the native-terminal mirror. Desktop routing selects the capability-probed macOS
 Accessibility, Windows UI Automation, or Linux AT-SPI implementation. Android is a
 separate backend, used only for an explicitly selected Android target, via ADB/UI
@@ -942,95 +940,26 @@ accessibility/app-driver state, window/dialog state, or visible control values;
 screenshots are supporting evidence, not the sole oracle. Cleanup is scoped to
 the PTY/session/app process created by the QA run.
 
-#### Browser backend and project auth
+#### Browser backend (Chrome Control)
 
-The capability-first runner and all backend resources live under
-`src/async-subagents/agents/ui-qa/`; the trusted browser runner, vendor code,
-license, and examples are grouped under its `browser/` directory. The launcher
-supplies absolute paths in `PI_UI_QA_RUNNER` and `PI_BROWSER_QA_RUNNER`. Normal
-probe/run uses the former;
-the latter is invoked directly only for browser auth profile discovery and
-form-auth scaffolding. These non-secret paths are set only for QA children.
-Every async sub-agent launches with `--no-skills`, and skill flags in
-`extraArgs` are stripped rather than forwarded. Agent roles are self-contained;
-there is no profile field for injecting skills and no built-in QA `--skill`.
+The browser backend is the Chrome Control driver under
+`src/async-subagents/agents/ui-qa/drivers/chrome-control/`, reached through
+`backends/browser.mjs`. It runs on macOS only: it drives the running Google Chrome
+through Apple Events and opens one owned tab in the front window's current
+profile. That tab shares cookies and sessions; it is not isolated. Sign-in is
+manual. The runner does not read or create `.pi/qa_auth.jsonc`, does not run
+headless, and uses neither Playwright nor Chrome DevTools. Missing Chrome,
+Automation/Apple Events permission, or Screen Recording (for screenshots) returns
+`BLOCKED`; there is no fallback driver. The full schema is
+`src/async-subagents/agents/ui-qa/guides/browser.md`.
 
-A project `ui-qa.md` completely replaces the bundled UI-QA profile, like every
-other same-named project role. It does not inherit bundled models, tools,
-thinking, visibility fields, or Markdown instructions. Projects that replace
-`ui-qa` must explicitly carry forward every bundled field/instruction they
-still require. Runtime runner/workspace isolation and credential handling remain
-enforced in code.
-
-Public browser QA does not require an auth profile or `.pi/qa_auth.jsonc`: run it
-with an explicit base URL, whose exact origin becomes the fail-closed allowlist.
-The runner neither creates nor requests a credential file for that path.
-
-For targets that actually require login, keep named dev/staging auth profiles in
-project `.pi/qa_auth.jsonc` (there is no `/qa-auth` command). The private runner
-supports `form`, `cookie`, `localStorage`,
-`sessionStorage`, `bearer`, and existing Playwright `storageState` auth. Every
-profile must declare exact `allowedOrigins`; select the profile id explicitly only
-for authenticated QA. On POSIX, keep the config at mode `0600`. During a run
-those origins also form the fail-closed HTTP(S)/WebSocket allowlist and service
-workers are blocked. Example:
-
-```jsonc
-{
-  "profiles": {
-    "staging-admin": {
-      "description": "Staging administrator",
-      "traits": ["role:admin", "plan:enterprise"],
-      "baseUrl": "https://staging.example.test",
-      "allowedOrigins": ["https://staging.example.test"],
-      "auth": {
-        "type": "form",
-        "loginUrl": "https://staging.example.test/login",
-        "fields": [
-          { "selector": "input[name=email]", "value": "admin@example.test" },
-          { "selector": "input[name=password]", "value": "replace-me" }
-        ],
-        "submitSelector": "button[type=submit]",
-        "success": { "selector": "[data-testid=user-menu]" }
-      }
-    }
-  }
-}
-```
-
-Do not place credential values in prompts, QA flows, shell arguments, or reports.
-The helper reads JSONC internally and emits only redacted statuses. For form auth,
-video recording begins on the login page and captures the field-filling and submit
-sequence; password inputs remain browser-masked, but the private video may show
-other visible login identifiers and must be treated as sensitive evidence. Tracing
-starts only after login succeeds and is sanitized before retention. The launcher
-provides each UI QA process with its general `ui-qa/` workspace plus the browser
-backend's `.pi/subagents/<run>/<agent-id>/browser-qa/` workspace. Unified flows
-stay under `ui-qa/flows/`; browser adapter flows, screenshots, video, sanitized
-traces, and result manifests stay under the backend workspace. Normal session
-shutdown preserves them; explicit `subagents cleanup` removes them with the run
-directory when lifecycle ownership has safely retired. Desktop's separate
-background TTL/manual Clean policy also applies; export durable evidence.
+`PI_UI_QA_RUNNER` is the only browser entry point; `PI_BROWSER_QA_RUNNER` is retired.
 The runner validates the owning agent metadata and refuses flows outside that
-workspace; reusing an agent id clears stale browser QA files first. Trace archives
-have network records and non-image resources removed, then known
-configured/runtime credential values are redacted and verified before retention.
-Listing profiles when the auth file is absent returns an empty list without
-creating a template. Only an explicit authenticated request may create the
-private template. Missing, rejected, or expired selected auth returns
-`QA_AUTH_UPDATE_REQUIRED`, naming only the profile/file/reason needed for the
-parent to ask the user for an update and rerun. See
-`src/async-subagents/agents/ui-qa/browser/examples/qa-auth.example.jsonc`
-for complete profile shapes and `examples/qa-flow.example.jsonc` beside it for
-the declarative, non-executable QA action/assertion format.
+workspace. Screenshot evidence stays in the owning agent's private workspace under
+`.pi/artifacts/subagents/`.
 
-Browser QA videos automatically visualize pointer interactions. Clicks and
-double-clicks show a transient cursor and pulse. Native drag/drop is replayed
-for 450 ms with a large orange cursor, progressively drawn high-contrast path,
-and green drop marker. The isolated, pointer-transparent layer is installed for
-the whole browser context, including same-origin frames, declared popups, and
-form-auth submission, and clears during the normal post-action stable interval
-so screenshots and assertions remain state-focused.
+Browser QA produces no video or trace evidence. Clicks and fills use synthetic DOM
+events, and the origin check does not block redirects or subresource traffic.
 
 Async-subagents also injects a lightweight oh-my-openagent-style system-prompt strategy by model: non-GPT parents get `parallel-first`, an orchestration-first hint that favors ultrawork/subagents for broad work, while GPT-like parents get `deep-work`, a direct deep-worker hint that uses subagents only when clearly useful. Explicit custom system prompts (`--system-prompt`, `SYSTEM.md`, custom templates) are respected and skip this injection by default. Disable it with `PI_AGENT_STRATEGY=off`; force a strategy with `PI_AGENT_STRATEGY=parallel-first` or `PI_AGENT_STRATEGY=deep-work`; set `PI_AGENT_STRATEGY_WITH_CUSTOM_PROMPT=1` to append it even when a custom prompt is present.
 

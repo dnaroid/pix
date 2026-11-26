@@ -19,7 +19,6 @@ remain true when CI or UI-QA tests change.
   native ARM64 coverage and does not guarantee runner availability. Each job uses
   the `node` and `npm` already selected in the runner's system PATH. Release tags
   do not repeat this matrix.
-- Browser QA E2E runs once on the Ubuntu job.
 - A native-host preflight runs before the full gate on each matrix leg. It
   checks tools-suite dependency parity, install repair, and deterministic
   test contracts on all hosts before platform-specific lifecycle/portability
@@ -88,8 +87,9 @@ remain true when CI or UI-QA tests change.
   focused local preflight can run on its own.
 - Every supported host runs root checks, ACP checks (including stdio smoke),
   and tools-suite tests. macOS additionally runs Desktop frontend checks/tests
-  and Rust fmt/check/locked backend-runtime tests. Linux additionally runs
-  browser mock-page E2E. Windows/Linux Desktop is not a delivery requirement.
+  and Rust fmt/check/locked backend-runtime tests. Chrome Control has
+  deterministic tests in tools-suite; CI does not drive the live Chrome UI.
+  Windows/Linux Desktop is not a delivery requirement.
 - The gate uses installed dependencies and PATH tools; it does not install
   prerequisites, enable live-model evals, run release packaging/smoke, install
   Git hooks, change GitHub protection settings, or prove other OS matrix legs.

@@ -38,10 +38,8 @@ export {
 } from "./core/config.js";
 export { routeSubagentTasks, SubagentRoutingError } from "./core/routing.js";
 export {
-	BROWSER_QA_RUNNER_ENV,
 	UI_QA_RUNNER_ENV,
 	UI_QA_TYPE,
-	getBrowserQaRunnerPath,
 	getUiQaRunnerPath,
 	isUiQaType,
 } from "./core/ui-qa.js";

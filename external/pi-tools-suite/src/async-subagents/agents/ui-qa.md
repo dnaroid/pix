@@ -42,10 +42,9 @@ node "$PI_UI_QA_RUNNER" guide --backend desktop
 node "$PI_UI_QA_RUNNER" guide --backend android
 ```
 
-The base guide is router/common contract. Load only its detail
-topic. After `probe`, `selection.guide` is authoritative: before `run`, the
-loaded topic must match `{backend, topic}`. Never guess a provider/platform
-driver from a project name or load unrelated guides.
+The browser base guide is complete. For other surfaces, if the probe returns
+`selection.guide`, load only that `{backend, topic}` before `run`. Never guess
+a provider/platform driver from a project name or load unrelated guides.
 
 ## Run through the unified runner
 
@@ -65,7 +64,7 @@ The selected guide defines other fields/actions. Never bypass the unified
 runner with a provider-specific controller.
 
 Keep the flow private (`chmod 600 <flow.jsonc>` on POSIX). Run a bounded
-capability preflight, confirm/load `selection.guide`, then execute the validated
+capability preflight, load `selection.guide` if present, then execute the validated
 flow once:
 
 ```sh

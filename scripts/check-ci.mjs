@@ -23,7 +23,6 @@ export function ciPlan(platform = process.platform) {
       cargo("rust-test", ["test", "--locked", "--lib", "backend_runtime"]),
     ] : []),
     npm("tools-suite", ["run", "test:tools-suite"], { isolatedHome: true }),
-    ...(platform === "linux" ? [npm("browser-e2e", ["run", "test:browser-qa-e2e"])] : []),
   ];
 }
 

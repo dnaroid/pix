@@ -103,8 +103,7 @@ Install the root and ACP dependencies first (`npm ci --ignore-scripts`,
 pinned across the GitHub CI matrix: earlier Bun builds such as 1.3.14 cannot
 resolve the `node:sqlite` import in the suite's native-storage tests. Bun must
 be on PATH, along with
-Rust/Tauri prerequisites on macOS. Linux browser E2E requires
-`npx playwright install --with-deps chromium` beforehand. These checks do not
+Rust/Tauri prerequisites on macOS. These checks do not
 enable paid/live-model evals; leave their opt-in environment flags unset.
 
 The gate stops on the first failure and preserves its exit code. All checks

@@ -12,10 +12,9 @@ Active implemented contract.
 
 Provide a cheap, fast `ui-qa` async-subagent that reproduces user-visible bugs
 and proves fixes across browser/web UI, terminal/TUI applications, and native
-desktop GUIs and explicitly selected Android apps/devices. Browser QA selects between the existing trusted Playwright runner
-for ordinary isolated E2E/auth/video/trace work and a capability-probed Chrome
-DevTools CLI provider for DevTools-specific AX, console, network, performance,
-Lighthouse, and memory diagnostics. Native/TUI QA uses a real PTY or
+desktop GUIs and explicitly selected Android apps/devices. Browser QA uses one Chrome Control driver: macOS Apple Events against the
+running Google Chrome, opening one owned tab in the current profile with manual
+sign-in, and no headless, isolated-browser, DevTools, video, or trace evidence. Native/TUI QA uses a real PTY or
 deterministic app/platform UI driver and retains inspectable captures plus
 automatic bounded video evidence when the backend supports it.
 Its ranked `models` list prefers `zai/glm-5.3-flash`, then
@@ -33,9 +32,8 @@ current-session model availability.
   QA child's `promptAppend` through the shared agent loader. Parent and router
   catalogs include only its short `description`.
 - Backend-specific instructions live in the canonical resource tree under
-  `src/async-subagents/agents/ui-qa/guides/`. `browser.md`, `tui.md`, and
-  `desktop.md` are compact base routers. Detail topics are browser
-  `playwright`/`chrome-devtools`/`auth`, TUI `pty`/`native-terminal`, and desktop
+  `src/async-subagents/agents/ui-qa/guides/`. `browser.md` is the complete browser guide, and `tui.md` and
+  `desktop.md` are compact base routers. Detail topics are TUI `pty`/`native-terminal`, and desktop
   `macos-accessibility`/`windows-uia`/`linux-at-spi`. The child first loads only
   its matching base guide through
   `node "$PI_UI_QA_RUNNER" guide --backend browser|tui|desktop`, then only the
@@ -45,12 +43,9 @@ current-session model availability.
   the requested document; the model never composes or reads source paths.
 - The capability-first runner lives under
   `src/async-subagents/agents/ui-qa/`, with browser, PTY/TUI, and platform
-  desktop accessibility backends for macOS, Windows, and Linux. The trusted
-  Playwright browser runner, vendor dependencies/licenses, and optional legacy
-  JSONC examples are colocated under `agents/ui-qa/browser/`. The Chrome
-  DevTools provider is a bundled adapter under `agents/ui-qa/drivers/` and
-  capability-probes an external `chrome-devtools` CLI rather than loading a
-  project skill. None of these assets, including the guides, is a discoverable
+  desktop accessibility backends for macOS, Windows, and Linux. The browser backend is the
+  Chrome Control driver under `agents/ui-qa/drivers/chrome-control/` (macOS
+  Apple Events; no vendored browser runtime and no DevTools adapter). None of these assets, including the guides, is a discoverable
   skill or agent role (`agents/*.md` discovery stays non-recursive and
   top-level only).
 - Sub-agent processes disable normal extension discovery, then always load the
@@ -64,14 +59,9 @@ current-session model availability.
   guides are the complete role instruction source.
 - `ui-qa` is the only built-in UI-QA role name. `browser-qa` is not an alias;
   a project-local `browser-qa.md` is an ordinary independent project role and
-  receives no UI-QA special treatment. Installed browser resources remain part
-  of the canonical `ui-qa` tree. The browser backend uses the private
-  `ui-qa/browser/` subdirectory of the same canonical workspace.
-- The launcher sets `PI_UI_QA_RUNNER` to the absolute capability-first runner
-  and `PI_BROWSER_QA_RUNNER` to its trusted browser backend, replacing inherited
-  values and stripping both from ordinary children. QA uses the unified runner
-  for backend probe/run and the browser runner directly only for credential
-  profile discovery or form-auth scaffolding.
+  receives no UI-QA special treatment. The Chrome Control driver is bundled
+  with `ui-qa`; it does not load the `chrome-control` skill.
+- The launcher sets `PI_UI_QA_RUNNER` to the absolute capability-first runner, replacing inherited values and stripping it from ordinary children. QA uses the unified runner for guide, probe, and run; no browser runner is exposed to the child.
 - A project `ui-qa.md` completely replaces the bundled role profile. It does
   not inherit bundled model/tool/thinking fields or Markdown instructions, so
   projects must explicitly carry forward every bundled field/instruction they
@@ -99,48 +89,21 @@ data clear, permission/settings changes, root, reboot or starting an ADB daemon.
 The base/detail guides are `android.md`/`android-adb.md`, loaded through
 `guide --backend android` and `guide --backend android --topic adb`.
 
-## Browser launch contract
+## Browser launch and authentication contract
 
-- Playwright-backed runs launch Playwright's pinned Chromium first. If that
-  build is missing, the runner tries only already-installed executables: the
-  newest Playwright-cache builds (`PLAYWRIGHT_BROWSERS_PATH` or the platform
-  default), then system Google Chrome/Chromium. It never installs a browser.
-- When nothing launches, or Playwright cannot be loaded, the runner reports
-  `QA_BROWSER_UNAVAILABLE` (exit 43) with remediation and
-  `missingCapabilities`; the unified runner returns `BLOCKED` with a
-  `blockedHandoff` instead of a product `FAILED`.
-
-## Browser authentication contract
-
-- Public browser QA requires no auth profile and does not create or require
-  `.pi/qa_auth.jsonc`. Its explicit base URL supplies the one exact allowed
-  origin, and the runner still blocks every other HTTP(S)/WebSocket origin.
-- Auth profiles live in project-local `.pi/qa_auth.jsonc` and are selected by
-  explicit id. The file must be a real project-local file with mode `0600` on
-  POSIX. Profile listings expose only `id`, description, and traits.
-- Listing profiles when the file is absent returns an empty list without side
-  effects. When authenticated QA explicitly requests credentials and that file
-  is absent, the runner creates a private empty template and returns
-  `provide_credentials`.
-  The sub-agent must explicitly ask the user to fill the reported file and
-  rerun QA; it must not read or edit the credential values itself.
-- Every profile requires one or more exact `allowedOrigins`. Secret-bearing auth
-  is applied only to those origins; all other HTTP(S)/WebSocket traffic and
-  service workers are blocked during QA.
-- Supported auth types are `form`, `cookie`, `localStorage`, `sessionStorage`,
-  `bearer`, and existing Playwright `storageState`.
-- The bundled runner reads secrets internally. Credentials must never be copied
-  into prompts, generated QA flows, shell arguments, transcripts, reports,
-  or QA evidence.
-- Generated browser state is private cache under `.pi/qa-auth-state`. Ephemeral
-  flows, evidence, and result manifests are written under the owning agent's
-  `.pi/subagents/<run>/<agent-id>/ui-qa/browser/` workspace. Multiple profiles use
-  separate browser contexts/evidence directories, and normal sub-agent shutdown
-  or cleanup removes the whole workspace with its run.
-- Missing, rejected, or expired explicitly selected auth returns a
-  machine-readable update-required status naming only the profile id, config
-  file, and redacted reason. The parent asks the user to update the file and
-  reruns; there is no `/qa-auth` command.
+- The browser backend is Chrome Control only (`drivers/chrome-control/`). It
+  drives the already-running Google Chrome through macOS Apple Events; the runner
+  launches no browser and never installs one. Missing Chrome, the Automation or
+  Apple Events permissions, or Screen Recording for screenshots returns
+  `BLOCKED`; there is no fallback driver.
+- The runner opens one owned tab in the front Chrome window. That tab shares the
+  current profile's cookies and session; it is not isolated. Sign-in, MFA and
+  CAPTCHA are manual in Chrome. The QA child must not automate login, embed
+  credentials, or access stored credentials.
+- The runner does not read or create `.pi/qa_auth.jsonc`. Browser QA has no auth
+  profile and no update-required auth status.
+- The origin is checked before acting on the owned tab. Redirects and subresource
+  traffic are not blocked, so network isolation is not claimed.
 
 ## Native/TUI execution contract
 
@@ -302,12 +265,9 @@ The base/detail guides are `android.md`/`android-adb.md`, loaded through
   must load/reconcile that exact topic before `run`, which then executes the
   bounded flow. The child keeps the flow at mode `0600` on POSIX before either
   command, matching the runner's private-path checks.
-- Browser execution adapts the unified target and steps to the existing trusted
-  Playwright runner for ordinary E2E or to the Chrome DevTools provider for
-  DevTools-only capabilities. `target.browserDriver` is `auto`, `playwright`,
-  or `chrome-devtools`; `auto` keeps ordinary flows and every trusted auth
-  profile on Playwright, and selects DevTools only when the flow requests a
-  DevTools-only action or explicit `target.devtools` attach/start options.
+- Browser execution uses only the Chrome Control driver. `target.browserDriver`,
+  `target.devtools`, and top-level `environment` are not supported; the runner
+  returns `BLOCKED` rather than selecting another driver.
 - TUI execution launches only a bounded project-local/package-runtime contract
   through a real PTY, models ANSI/VT alternate-screen state with a headless
   terminal, and supports text, cursor, process, resize, stability, and capture
@@ -334,88 +294,21 @@ The base/detail guides are `android.md`/`android-adb.md`, loaded through
 ## Browser backend execution contract
 
 - A model-authored QA flow is declarative JSONC, not executable JavaScript. The
-  selected provider implements a bounded set of navigation, interaction,
-  assertion, and evidence actions. The flow never receives a Playwright context,
-  DevTools protocol object, arbitrary JavaScript evaluator, or credential
-  values.
-- Browser provider selection is capability-based and project-agnostic. The
-  Playwright provider remains the default for ordinary repeatable E2E, trusted
-  authentication, downloads, frames/popups, rich locators, deterministic
-  locale/timezone/motion settings, automatic video, and sanitized Playwright
-  trace evidence. Chrome DevTools is selected for structured accessibility-tree
-  snapshots, console/network assertions, Lighthouse summaries, sanitized
-  summaries from Chrome performance traces, and sanitized heap summaries.
-  Explicitly forcing a
-  provider that cannot implement the requested action returns `BLOCKED` rather
-  than weakening the scenario.
-- Chrome DevTools requires `chrome-devtools-mcp >= 1.9.0` on `PATH`. Probe only
-  checks the CLI/version; run creates a random per-run daemon `sessionId` so its
-  socket/PID lifecycle does not collide with a user's existing DevTools daemon.
-  The runner disables JavaScript evaluation, extension/PWA/experimental tool
-  categories, usage statistics, and CrUX lookups; enables network-header
-  redaction and page-id routing; restricts filesystem writes to the run evidence
-  directory; and passes every exact allowed origin to the DevTools network
-  allowlist. Raw network headers/response bodies are not retained or surfaced.
-- Chrome DevTools starts an isolated browser/profile by default. Optional
-  `target.devtools.browserUrl` accepts only a credential-free local loopback
-  HTTP origin. Attached Chrome still gets a task-owned isolated page/context by
-  default. `reuseExistingBrowserSession: true` is allowed only with that
-  loopback endpoint and is reserved for an explicitly requested reuse of the
-  user's already-authenticated Chrome session. Cleanup closes the task-created
-  page and stops only the private daemon; it never stops the external Chrome or
-  closes unrelated tabs.
-- Trusted `.pi/qa_auth.jsonc` profiles remain Playwright-only. Chrome DevTools
-  cannot consume a QA auth profile, and credentials may not be moved into a
-  DevTools browser profile, command arguments, environment, or generated flow.
-  A missing/old CLI produces the standard parent-ready `blockedHandoff`; the QA
-  child does not install or upgrade it.
-- Chrome DevTools supports the common `goto`, `reload`, `click`, `doubleClick`,
-  `hover`, `fill`, `press`, `waitFor`, `waitForTimeout`, `assertVisible`,
-  `assertText`, `assertURL`, and `screenshot` subset plus
-  `snapshotAccessibility`, `assertNoConsoleErrors`, `assertConsole`,
-  `assertNetworkRequest`, `lighthouse`, `performanceTrace`, and `heapSummary`.
-  Its locators are intentionally limited to AX `{role,name?,exact?}` or
-  `{text,exact?}` and must resolve to one UID from the latest snapshot. Raw heap
-  snapshots and raw performance traces are temporary and deleted after bounded
-  sanitized summaries are retained. Top-level `environment` remains a
-  Playwright-only deterministic
-  contract; DevTools blocks it rather than silently approximating
-  locale/timezone/reduced-motion behavior.
-- Target discovery is a bounded preflight, not an open-ended research task. The
-  sub-agent invokes the runner within 45 seconds or returns `BLOCKED`; it does
-  not spend the full launcher budget reading source or probing prerequisites.
-- The launcher injects `PI_SUBAGENT_AGENT_DIR`, pre-creates private
-  `ui-qa/flows/` and `ui-qa/browser/flows/` workspaces, and clears stale
-  UI/browser QA files when an
-  agent id is reused. The runner validates the directory's project/type
-  metadata and refuses flows outside it; the model cannot select a shared
-  evidence root.
-- The runner owns browser lifecycle, origin checks, auth application, tracing,
-  screenshots, video finalization, and redacted result output. Before retaining
-  a trace it removes network/non-image resource entries, redacts configured and
-  runtime storage credentials, and verifies those values are absent.
-- After every navigation or visible interaction, the runner waits for DOM
-  readiness, completion of requests started by the action, and disappearance of
-  common visible busy/spinner/skeleton markers. It requires a 500 ms stable
-  interval before the next action so recordings remain readable; a page that
-  stays busy through the flow timeout fails closed instead of being tested as a
-  loading shell. App-specific readiness still requires an explicit declarative
-  wait/assertion in the authored flow.
-- Before any page is created, the runner installs a context-wide, isolated
-  interaction visualizer. Recorded clicks/double-clicks show a transient cursor
-  and pulse. Native drag/drop is replayed for 450 ms with a large orange cursor,
-  progressively drawn high-contrast path, and green drop marker. It also covers
-  same-origin frames, declared popups, and form-auth submission. The layer is
-  accessibility-hidden, pointer-transparent, never cancels application events,
-  and its bounded animations clear within the post-action stable interval.
-- Success and post-launch failure results include typed artifact groups. Every
-  item has an absolute filesystem path and a `file:` URI; the sub-agent must
-  present each item as a clickable Markdown link instead of reporting only the
-  evidence directory.
-- Success requires deterministic assertions. Visual inspection supplements,
-  but never replaces, explicit expected-state checks.
-- Auth rejection discovered by a QA flow is reported through the
-  `authRejectedIf` action so the parent gets an update-required status.
+  flow never receives a browser handle, protocol object, arbitrary JavaScript
+  evaluator, or credential values.
+- The `chrome-control` driver implements `goto`, `reload`, `click`, `fill`,
+  `waitFor`, `assertVisible`, `assertHidden`, `assertText`, `assertValue`,
+  `assertCount`, `assertURL`, and `screenshot`. Locators are `testId` or `css`
+  only. `fill` takes a non-sensitive string; password and file inputs are not
+  supported. Clicks and fills use synthetic DOM events, not trusted native input.
+- Not supported: headless execution, viewport or environment overrides, other
+  tabs, frame/popup flows, downloads, DevTools diagnostics, video, traces,
+  `target.browserDriver`, and `target.devtools`. A request for one returns
+  `BLOCKED`; it is never weakened or delegated to another driver.
+- State checks retry briefly within the runner deadline and the optional
+  top-level `timeoutMs`. `screenshot` is a Chrome window PNG; the driver may
+  briefly select the QA tab and attempts to restore the previous tab.
+- Success requires deterministic assertions. Screenshots are supporting evidence.
 
 ## Reliability and shutdown contract
 
@@ -426,8 +319,6 @@ The base/detail guides are `android.md`/`android-adb.md`, loaded through
   setup, auth, flow execution, evidence finalization, and browser shutdown must
   not wait forever; a timeout reports the last started stage without exposing
   flow contents or credentials.
-- Trace sanitization runs in a memory-limited worker that can be terminated at
-  the cleanup deadline; synchronous archive work cannot defeat the watchdog.
 - The launcher always writes a small sanitized `progress.jsonl` journal in the
   agent directory. It records lifecycle/RPC event types and tool names, but not
   prompts, tool arguments, tool results, model text, or secrets. The browser
@@ -439,12 +330,6 @@ The base/detail guides are `android.md`/`android-adb.md`, loaded through
 - Process-tree cleanup is scoped to a launcher-created process-group marker so
   an old or externally-created PID is never treated as an owned process group.
   User browser sessions outside that group must not be signalled.
-- Playwright can launch Chromium in its own POSIX process group. On runner
-  failure the runner snapshots and kills only its own descendants before it
-  exits, covering that detached browser tree without touching a user's browser.
-  A launch that fails before any process is spawned (missing executable) cannot
-  leave a descendant, so those exits skip the process-tree walk; a launch still
-  in flight or failed for an unknown reason keeps the walk enabled.
 
 ## Acceptance criteria
 
@@ -455,29 +340,25 @@ The base/detail guides are `android.md`/`android-adb.md`, loaded through
    receives the thin common contract plus guide-routing workflow in its initial
    prompt, loads exactly one base backend guide and only its routed detail topic
    through `PI_UI_QA_RUNNER guide`, treats `selection.guide` as authoritative
-   before `run`, and can reach the credential-owning browser backend through
-   `PI_BROWSER_QA_RUNNER` when the explicit auth topic requires it, from an
-   unrelated project directory.
+   before `run`, and runs from an unrelated project directory.
    Ordinary profiles are equally skill-free and do not receive QA-only
    environment paths.
-3. Auth profile listing and all error output are redacted; model-authored input
-   cannot execute code in the credential-bearing process.
-4. Runner tests cover public execution without an auth file, explicit profile
-   selection, all auth modes, fail-closed origins, path/mode hardening, private
-   empty-template creation only on an explicit auth request, non-executable
-   flows, and successful redacted evidence creation.
+3. Runner error output is redacted, and model-authored input cannot execute code
+   in the runner process.
+4. Chrome Control tests cover the owned-tab lifecycle: a redirected page is refused
+   while the owned tab still closes, a lost interaction result is not repeated,
+   cleanup failure is not reported as success, page programs use fixed results,
+   and blank-marker recovery is limited to the pinned instance
+   (`test/async-subagents/chrome-control.test.ts`).
 5. Native/TUI evidence, including bounded PTY replay, native-terminal real-
    window screenshots/video when requested and available, and exact-window
    desktop video when available, lives under the owning agent's `ui-qa/`
-   workspace; browser flows/evidence live under `ui-qa/browser/`. Deleting the
-   run removes both while persistent auth config/state remains.
-6. Runner tests prove that network activity and visible loading indicators are
-   awaited, persistent loading fails the flow, visible actions retain a stable
-   500 ms video interval, and context-wide click/drag video visualization is
-   installed with bounded click pacing.
-7. Completed test runs report clickable screenshot, video, and trace links
-   whenever those artifacts exist.
-8. Timeout tests identify the last browser stage, launcher progress remains
+   workspace. Browser flows and verified screenshots use the same private
+   `ui-qa/flows/` and `ui-qa/evidence/` layout.
+6. The browser backend produces no video or trace evidence; the synthetic-DOM and origin-check limits are in `guides/browser.md`.
+7. Completed test runs report clickable screenshot links whenever screenshots exist;
+   browser runs produce no video or trace links.
+8. Timeout tests identify the last runner stage, launcher progress remains
    available when full RPC logging is disabled, and process-tree tests prove a
    descendant is terminated without signalling unrelated processes.
 9. TUI/native instructions require a real PTY/app driver, deterministic
@@ -500,22 +381,10 @@ The base/detail guides are `android.md`/`android-adb.md`, loaded through
     creates its GUI descendant, then verifies the returned PID belongs to the
     wrapper's group without requiring Screen Recording permission.
 
-## Real-browser regression test
+## Browser regression coverage
 
-The repository includes a local mock-page E2E that launches real Chromium and
-asserts PNG screenshots, WebM video, sanitized trace output, and absolute
-path/`file:` URI metadata:
-
-```bash
-npx playwright install chromium
-npm run test:browser-qa-e2e
-```
-
-Normal suite tests keep this case skipped; the Publish workflow runs it on
-Linux after installing Chromium. The runner writes into a temporary simulated
-sub-agent directory. For manual inspection only, explicit E2E runs copy the
-latest artifacts to `.pi/qa-runs/browser-qa-e2e/latest/` and print clickable
-links; this test-only published copy is not the runtime storage contract. Set
-`BROWSER_QA_KEEP_EVIDENCE=0` to skip that copy.
+Browser behavior is covered by the deterministic Chrome Control tests in
+`test/async-subagents/chrome-control.test.ts` and by the unified runner tests.
+The repository has no real-browser E2E or `test:browser-qa-e2e` script.
 
 <!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"25d9cfbd253e4d8c3c06a1698e104cf8c0800a950756ea20fca65c94649ef643","checkedAt":"2026-10-31T00:28:06.493Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":46,"reportLanguage":"ru"} -->

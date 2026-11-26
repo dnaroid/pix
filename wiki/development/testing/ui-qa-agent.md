@@ -13,7 +13,7 @@ Active implemented contract.
 Use the same one-agent/one-Markdown definition for real UI QA as for other
 built-in and project-local roles. The canonical `ui-qa` role covers browser,
   terminal/TUI, native desktop, and explicitly selected Android verification while preserving the browser
-providers' credential, isolation, evidence, and cleanup protections.
+Chrome Control owned-tab, evidence, and cleanup protections.
 
 ## Definition and resources
 
@@ -27,7 +27,7 @@ providers' credential, isolation, evidence, and cleanup protections.
 - Backend-specific instructions are progressive-disclosure guides under
   `external/pi-tools-suite/src/async-subagents/agents/ui-qa/guides/`
   (`browser.md`, `tui.md`, `desktop.md`, `android.md`) plus backend-scoped detail topics:
-  browser `playwright`, `chrome-devtools`, and `auth`; TUI `pty` and
+  TUI `pty` and
   `native-terminal`; desktop `macos-accessibility`, `windows-uia`, and
   `linux-at-spi`; Android `adb` (alias `adb-uiautomator`). Android is used only
   for an explicitly selected Android target. The child loads exactly one base guide through the
@@ -42,13 +42,10 @@ providers' credential, isolation, evidence, and cleanup protections.
   is required. Project-specific setup may explicitly route to a local document
   or skill file for manual reading; this does not enable skill auto-loading.
 - The capability-first runner and its browser/TUI/desktop backends live under
-  `agents/ui-qa/`. The trusted Playwright browser runner, vendor
-  dependency/license, and browser JSONC assets are grouped under
-  `agents/ui-qa/browser/`; the Chrome DevTools adapter lives under
-  `agents/ui-qa/drivers/` and probes the external `chrome-devtools` CLI rather
-  than loading a project skill. Vendor bytes stay unchanged; both runners accept
-  only the canonical `ui-qa` owner type. JSONC examples are optional reference
-  assets, not additional instructions.
+  `agents/ui-qa/`. The browser backend is the
+  Chrome Control driver under `agents/ui-qa/drivers/chrome-control/` (macOS
+  Apple Events; no vendored browser runtime). The runner accepts only the
+  canonical `ui-qa` owner type.
 - The old skill and former standalone design/scaffold companion files are removed;
   this refers to their pre-Wiki locations, not the canonical Wiki pages. The
   separate active [UI QA sub-agent specification](ui-qa-subagent.md) defines the
@@ -90,15 +87,10 @@ isolated child.
 migration path; a project-local `browser-qa.md` is an ordinary independent
 project role and receives no UI-QA runner/workspace treatment.
 
-The launcher sets non-secret `PI_UI_QA_RUNNER` and `PI_BROWSER_QA_RUNNER` paths
-resolved relative to the installed package. QA instructions invoke the unified
-runner for the read-only `guide` loader, capability probe, and browser/TUI/desktop
-execution; they invoke the trusted browser runner directly only for auth profile
-discovery/scaffolding as the browser-auth guide instructs.
+The launcher sets the non-secret `PI_UI_QA_RUNNER` path resolved relative to the installed package. QA instructions invoke the unified runner for the read-only `guide` loader, capability probe, and browser/TUI/desktop execution; no browser runner is invoked directly.
 Inherited runner/workspace paths are replaced for QA children and stripped from
-other children. Unified flows plus native/TUI evidence use the private
-agent-local `ui-qa/` workspace; the trusted browser backend uses its
-`ui-qa/browser/` subdirectory.
+other children. All backends use the private, agent-local `ui-qa/` workspace
+for flows and evidence.
 Model-authored flows are credential-free but still use mode `0600` on POSIX so
 the existing runner path/privacy validation succeeds without weakening it.
 
@@ -127,52 +119,12 @@ private
 paths, deadlines, and owned-process cleanup are enforced by the runner rather
 than by model instructions alone.
 
-Browser provider selection happens inside the browser backend and is likewise
-capability-driven. `target.browserDriver` accepts `auto`, `playwright`, or
-`chrome-devtools`. `auto` keeps ordinary E2E and every trusted auth profile on
-Playwright; DevTools-only accessibility-tree, console/network, Lighthouse,
-performance-trace, or heap-summary actions select Chrome DevTools. Explicit
-`target.devtools` startup/attach options also select Chrome DevTools in `auto`
-mode. The selection never depends on repository or application identity.
-
-Playwright-backed runs launch Playwright's pinned Chromium build first. When
-that build is missing (for example after a project Playwright upgrade without
-`playwright install`), the trusted runner falls back only to Chromium
-executables already present on the host: the newest builds in the Playwright
-browser cache (`PLAYWRIGHT_BROWSERS_PATH` or the platform default), then system
-Google Chrome/Chromium. It never downloads or installs a browser. If nothing
-launches, or Playwright itself cannot be loaded, it reports
-`QA_BROWSER_UNAVAILABLE` (exit 43) with remediation and `missingCapabilities`;
-the browser adapter normalizes that to `BLOCKED`, and the unified runner merges
-those capabilities into `blockedHandoff`.
-
-The Chrome DevTools provider requires `chrome-devtools-mcp >= 1.9.0`, creates a
-random per-run daemon session, and stops only that session. By default it uses
-`--autoConnect=true` to discover Chrome's remote-debugging endpoint; it does
-not guess or scan ports, and Chrome remote debugging must already be enabled.
-An explicit exact credential-free local loopback `browserUrl` overrides this
-default. An explicit `headless` boolean opts into launching an isolated browser
-instead. All modes create a task-owned isolated page/context unless
-`reuseExistingBrowserSession: true` is explicitly authorized by the parent/user
-alongside `browserUrl`. The runner closes only its own page and stops only its
-own daemon; it does not stop external Chrome or close unrelated tabs.
-
-DevTools execution disables JavaScript evaluation, extensions/PWA/experimental
-categories, usage statistics, and CrUX lookup; enables network-header
-redaction/page-id routing; restricts writes to the evidence directory; and
-passes exact target/allowed origins into the DevTools network allowlist. Raw
-network headers and response bodies are never published. Trusted
-`.pi/qa_auth.jsonc` profiles remain Playwright-only, and the QA child never
-installs/upgrades the CLI or moves credentials into DevTools arguments/profile
-state. Supported DevTools flow actions are the common navigation/basic
-interaction/text/URL/screenshot subset plus `snapshotAccessibility`,
-`assertNoConsoleErrors`, `assertConsole`, `assertNetworkRequest`, `lighthouse`,
-`performanceTrace`, and `heapSummary`. DevTools locators resolve one UID from
-the latest AX snapshot using `{role,name?,exact?}` or `{text,exact?}`. Raw heap
-snapshots and raw performance traces are deleted after retaining bounded
-sanitized summaries. Top-level
-deterministic `environment` remains Playwright-only; DevTools blocks it rather
-than approximating locale/timezone/reduced-motion semantics.
+The browser backend is Chrome Control only (`drivers/chrome-control/`, macOS Apple
+Events against the running Google Chrome). It opens one owned tab in the front
+window's current profile, which shares cookies and sessions; sign-in is manual. Headless
+execution, Playwright, Chrome DevTools, isolated browsers, `target.browserDriver`,
+`target.devtools`, auth profiles, video, and traces are not supported. A missing
+capability returns `BLOCKED`; the runner never falls back to another driver.
 
 For explicitly authorized synthetic diagnostics, a macOS-only
 `target.application: { fixture: "texteditBlank" }` exception launches the fixed system
@@ -320,8 +272,7 @@ origin/auth/path/evidence checks continue to be implemented by the runner.
   Multiple window owners remain ambiguous; explicit app selectors are unchanged.
 
 - Only the unified/trusted runners own browser execution and credential
-  handling; the QA child never invokes Playwright or `chrome-devtools`
-  directly for probe/run.
+  handling; the QA child never invokes a browser driver directly for probe/run.
 - Native/TUI QA exercises the actual shipping UI through a deterministic
   presentation selected by required capabilities, never by project identity.
   New role-authored flows explicitly use PTY/headless ANSI presentation for
@@ -392,8 +343,9 @@ available host E2E with automatic exact-window video; a separate opt-in macOS
 regression waits for a late GUI descendant in the wrapper's group without
 requiring Screen Recording. Windows/Linux real-host
 smokes remain platform-host verification rather than being inferred from tests
-executed on macOS. Browser runner tests continue covering the trusted
-credential-owning backend.
+executed on macOS. Browser coverage is limited to the Chrome Control driver
+contract (`test/async-subagents/chrome-control.test.ts`) and unified runner
+tests; no real-browser Playwright/DevTools E2E remains.
 
 Live QA/model behavior must be verified separately from deterministic tests;
 loading instructions through a second `guide` step changes their presentation.
