@@ -1,6 +1,6 @@
-//! Native actions for a file currently shown in Preview.
+//! Native actions for local targets in Preview and chat context menus.
 #[cfg(any(target_os = "macos", test))]
-use std::path::Path;
+use std::path::{Path, PathBuf};
 #[cfg(target_os = "macos")]
 use std::{process::Command, sync::mpsc};
 use tauri::AppHandle;
@@ -44,7 +44,7 @@ pub(crate) async fn preview_file_action(
                 let home = app.path().home_dir().map_err(|error| error.to_string())?;
                 super::resolve_home_file_path(&home, Path::new(&path))?.1
             } else {
-                super::resolve_local_file_path(Path::new(&path))?
+                resolve_local_action_target(Path::new(&path), action)?
             };
             perform_macos_action(app, path, action)
         })
@@ -54,6 +54,16 @@ pub(crate) async fn preview_file_action(
     {
         let _ = (app, path, action);
         Err("preview file actions are supported only on macOS".to_owned())
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn resolve_local_action_target(path: &Path, action: FileAction) -> Result<PathBuf, String> {
+    match action {
+        // The context menu already resolves project links against the workspace.
+        // Finder can select directories too, unlike the file-only actions.
+        FileAction::Reveal => super::resolve_local_open_path(path),
+        _ => super::resolve_local_file_path(path),
     }
 }
 
@@ -143,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn file_resolution_requires_an_existing_absolute_file() {
+    fn reveal_accepts_absolute_files_and_directories_but_other_actions_require_files() {
         let root = std::env::temp_dir().join(format!(
             "pix-preview-action-{}-{}",
             std::process::id(),
@@ -155,13 +165,30 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let file = root.join("media [1].png");
         std::fs::write(&file, b"test").unwrap();
+        let directory = root.join("docs with spaces");
+        std::fs::create_dir(&directory).unwrap();
+        let canonical_file = std::fs::canonicalize(&file).unwrap();
+        for action in [FileAction::Copy, FileAction::Open, FileAction::Browser] {
+            assert_eq!(
+                resolve_local_action_target(&file, action).unwrap(),
+                canonical_file
+            );
+            assert!(resolve_local_action_target(&directory, action).is_err());
+        }
         assert_eq!(
-            super::super::resolve_local_file_path(&file).unwrap(),
-            std::fs::canonicalize(&file).unwrap()
+            resolve_local_action_target(&file, FileAction::Reveal).unwrap(),
+            canonical_file
         );
-        assert!(super::super::resolve_local_file_path(Path::new("relative.png")).is_err());
-        assert!(super::super::resolve_local_file_path(&root.join("missing.png")).is_err());
-        assert!(super::super::resolve_local_file_path(&root).is_err());
+        assert_eq!(
+            resolve_local_action_target(&directory, FileAction::Reveal).unwrap(),
+            std::fs::canonicalize(&directory).unwrap()
+        );
+        assert!(
+            resolve_local_action_target(Path::new("docs with spaces"), FileAction::Reveal).is_err()
+        );
+        assert!(
+            resolve_local_action_target(&root.join("missing.png"), FileAction::Reveal).is_err()
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 }

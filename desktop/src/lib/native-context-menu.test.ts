@@ -4,7 +4,7 @@ import { Menu } from "@tauri-apps/api/menu";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { createNativeContextMenuFactory, nativeContextMenuItems } from "./native-context-menu";
-import type { DesktopContextTarget } from "./desktop-context-target";
+import { linkedFilePath, projectRevealPath, type DesktopContextTarget } from "./desktop-context-target";
 import { copyContextImage, openContextImage } from "./image-context-actions";
 import { selectPreviewText } from "./preview-text-selection";
 
@@ -213,15 +213,20 @@ describe("native desktop context menu commands", () => {
     await Promise.resolve();
     expect(reveal).toHaveBeenCalledExactlyOnceWith("a/file.ts");
   });
-  it("offers Show in Files and Reveal in Finder for Markdown file links", async () => {
+  it.each(["a/my file.md", "docs/my folder"])("resolves Markdown project link %s for Finder", async (path) => {
     const reveal = vi.fn(async () => {});
+    const workspace = "/project";
+    const link = { dataset: { projectFile: path } } as unknown as HTMLElement;
+    const fileLinkPath = linkedFilePath(link, workspace);
     const commands = nativeContextMenuItems(context({ kind: "link", hasSelection: false,
-      fileLinkPath: "/project/a/my file.md", fileLinkRevealPath: "a/my file.md" }), false, reportError, () => true, reveal);
+      fileLinkPath, fileLinkRevealPath: projectRevealPath(fileLinkPath, workspace) }), false, reportError, () => true, reveal);
     expect(commands.map((item) => "text" in item && item.text)).toEqual(["Show in Files", "Reveal in Finder"]);
     for (const command of commands) if ("action" in command) command.action?.("ignored");
     await Promise.resolve();
-    expect(reveal).toHaveBeenCalledExactlyOnceWith("a/my file.md");
-    expect(invoke).toHaveBeenCalledExactlyOnceWith("preview_file_action", { path: "/project/a/my file.md", action: "reveal" });
+    expect(reveal).toHaveBeenCalledExactlyOnceWith(path);
+    expect(invoke).toHaveBeenCalledExactlyOnceWith("preview_file_action", { path: `${workspace}/${path}`, action: "reveal" });
+  });
+  it("offers Reveal in Finder for home-relative Markdown file links", () => {
     expect(labels({ kind: "link", hasSelection: false, fileLinkPath: "~/.config/pi/pix.jsonc" })).toEqual(["Reveal in Finder"]);
   });
   it("offers Open on GitHub/GitLab for project file links with a resolved remote", async () => {

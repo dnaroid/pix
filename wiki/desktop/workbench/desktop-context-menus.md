@@ -119,6 +119,12 @@ browser preview retains browser behavior; this policy belongs to the Tauri host.
   `.htm` targets, before **Show in Files** / **Reveal in Finder**. The native
   file-action command revalidates that the resolved target is HTML and opens it
   using the default HTTPS browser rather than the `.html` file association.
+- **Reveal in Finder** is the only local file action that accepts directories:
+  Markdown links to project folders and absolute local directory paths reveal the
+  directory in Finder. Relative chat Markdown links are resolved to absolute paths
+  against the active workspace before the native command runs. Copy File, Open in
+  External App and Open in Browser remain file-only and reject directories. Home-relative
+  (`~/`) link validation is unchanged.
 - On macOS, Copy File places a native file URL on the pasteboard for Finder and
   other applications, not plain path text or Project Explorer's private
   cross-instance clipboard payload. Open uses the OS default application, not
