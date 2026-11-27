@@ -50,7 +50,7 @@ test("SDK suite autoload without Claude leaves no provider or startup error", { 
       cwd,
       env: {
         HOME: root, TMPDIR: root, PATH: emptyPath,
-        PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0",
+        PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1",
         PI_TOOLS_SUITE_DISABLED_MODULES: PI_TOOLS_SUITE_MODULE_CATALOG.filter(m => m.name !== "claude-code-provider").map(m => m.name).join(","),
       },
       timeout: 40_000, maxBuffer: 256 * 1024,
@@ -97,7 +97,7 @@ test("SDK discovery loads exactly one local suite provider after migration (pers
       cwd,
       env: {
         HOME: root, TMPDIR: root, PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
-        PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0",
+        PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1",
         PI_CLAUDE_CODE_PROVIDER_PATH: resolve("external/pi-tools-suite/test/async-subagents/fixtures/provider-offline-cli.mjs"),
         PI_TOOLS_SUITE_DISABLED_MODULES: PI_TOOLS_SUITE_MODULE_CATALOG.filter(m => m.name !== "claude-code-provider").map(m => m.name).join(","),
       },

@@ -70,11 +70,11 @@ async function start(ctx: Context, mode: "hold" | "exit0" | "exit7", watchdogSec
 	const home = join(ctx.work, `home-${id}`), agent = join(ctx.work, `agent-${id}`), cwd = join(ctx.work, `cwd-${id}`);
 	for (const dir of [home, agent, cwd]) mkdirSync(dir, { mode: 0o700 });
 	writeFileSync(join(home, "owned-fake-mode"), mode);
-	writeFileSync(join(agent, "settings.json"), JSON.stringify({ retry: { enabled: false }, enableInstallTelemetry: false,
+	writeFileSync(join(agent, "settings.json"), JSON.stringify({ retry: { enabled: false },
 		enableAnalytics: false, extensions: [], packages: [], skills: [], prompts: [], themes: [], defaultTools: [] }));
 	const env = { HOME: home, PI_CODING_AGENT_DIR: agent, PI_CODING_AGENT_SESSION_DIR: join(ctx.work, `sessions-${id}`),
 		PI_CLAUDE_CODE_PROVIDER_PATH: fixture, PI_OFFLINE: "1",
-		PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0", PATH: `${dirname(ctx.node)}:/usr/bin:/bin`,
+		PI_SKIP_VERSION_CHECK: "1", PATH: `${dirname(ctx.node)}:/usr/bin:/bin`,
 		TMPDIR: ctx.work, LANG: "C", NO_COLOR: "1" }; // No ambient auth, proxy, NODE_OPTIONS, or Pi config.
 	const piArgs = [pi, "--mode", mode === "hold" ? "rpc" : "json", "--no-session", "--offline", "--no-approve", "--no-extensions", "--extension", ctx.extension,
 			"--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-tools", "--provider",

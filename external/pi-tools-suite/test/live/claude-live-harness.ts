@@ -46,7 +46,7 @@ export function liveEnv(options: { suiteConfig?: Record<string, unknown>; stageC
 	symlinkSync(installed, join(agent, "npm", "node_modules", "pi-claude-code-provider"), "dir");
 	writeFileSync(join(agent, "settings.json"), JSON.stringify({
 		packages: ["npm:pi-claude-code-provider@0.5.0"], extensions: [], skills: [], prompts: [], themes: [],
-		retry: { enabled: false }, enableInstallTelemetry: false, enableAnalytics: false, ...options.piSettings,
+		retry: { enabled: false }, enableAnalytics: false, ...options.piSettings,
 	}));
 	writeFileSync(join(home, ".config", "pi", "pi-tools-suite.jsonc"), JSON.stringify(options.suiteConfig ?? {}));
 	const claude = which("claude");
@@ -59,7 +59,7 @@ export function liveEnv(options: { suiteConfig?: Record<string, unknown>; stageC
 	const env: Record<string, string> = {
 		HOME: home, USER: process.env.USER ?? "", LOGNAME: process.env.LOGNAME ?? "", LANG: "en_US.UTF-8", TERM: "dumb", NO_COLOR: "1",
 		PATH: `${dirname(node)}:/usr/bin:/bin:/usr/sbin:/sbin`, TMPDIR: tmpdir(),
-		PI_CODING_AGENT_DIR: agent, PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0",
+		PI_CODING_AGENT_DIR: agent, PI_SKIP_VERSION_CHECK: "1",
 		PI_CLAUDE_CODE_PROVIDER_PATH: wrapper,
 		PI_CLAUDE_CODE_PROVIDER_PAID_TEST_CHILD: "1",
 		PI_CLAUDE_CODE_PROVIDER_PAID_STAGE_BUDGET_DIRECTORY: join(work, "stage-budget"),

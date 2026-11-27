@@ -47,12 +47,12 @@ offline("installed Pi RPC: SIGKILL of owned Pi ends active native provider CLI a
 		const binary = join(work, "relay");
 		execFileSync("clang", ["-std=c11", "-D_DARWIN_C_SOURCE", "-Wall", "-Wextra", "-Werror", "-O2", relay, "-o", binary], { timeout: 10_000 });
 		for (const dir of [home, agent, cwd]) mkdirSync(dir);
-		writeFileSync(join(agent, "settings.json"), JSON.stringify({ retry: { enabled: false }, enableInstallTelemetry: false,
+		writeFileSync(join(agent, "settings.json"), JSON.stringify({ retry: { enabled: false },
 			enableAnalytics: false, extensions: [], packages: [], skills: [], prompts: [], themes: [], defaultTools: [] }));
 		const node = localNode();
 		const env = { HOME: home, PI_CODING_AGENT_DIR: agent, PI_CODING_AGENT_SESSION_DIR: join(work, "sessions"),
 			PI_CLAUDE_CODE_PROVIDER_PATH: fixture, PI_PROVIDER_TEST_NATIVE_RELAY: binary, PI_OFFLINE: "1",
-			PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0", PATH: `${dirname(node)}:/usr/bin:/bin`,
+			PI_SKIP_VERSION_CHECK: "1", PATH: `${dirname(node)}:/usr/bin:/bin`,
 			TMPDIR: work, LANG: "C", NO_COLOR: "1" }; // Never inherit auth, proxy or NODE_OPTIONS.
 		child = spawn(node, [pi, "--mode", "rpc", "--no-session", "--offline", "--no-approve", "--no-extensions",
 			"--extension", extension, "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files",

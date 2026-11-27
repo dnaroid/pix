@@ -116,7 +116,7 @@ test("SDK skips a failed whole extension and keeps a healthy extension", async (
 	writeFileSync(broken, 'export default () => { throw new Error("broken extension"); };');
 	writeFileSync(healthy, 'export default pi => { pi.registerCommand("healthy", { handler: async () => {} }); };');
 	const loader = new DefaultResourceLoader({
-		cwd: root, agentDir: join(root, "agent"), settingsManager: SettingsManager.inMemory({ enableInstallTelemetry: false }),
+		cwd: root, agentDir: join(root, "agent"), settingsManager: SettingsManager.inMemory(),
 		noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true,
 		additionalExtensionPaths: [broken, healthy],
 	});
@@ -154,7 +154,7 @@ test("real SDK retains only successful staged module registrations", async () =>
 		};
 	`);
 	const loader = new DefaultResourceLoader({
-		cwd: root, agentDir: join(root, "agent"), settingsManager: SettingsManager.inMemory({ enableInstallTelemetry: false }),
+		cwd: root, agentDir: join(root, "agent"), settingsManager: SettingsManager.inMemory(),
 		noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true,
 		additionalExtensionPaths: [extensionPath],
 	});

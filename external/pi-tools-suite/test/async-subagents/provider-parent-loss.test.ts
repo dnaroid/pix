@@ -51,7 +51,7 @@ offline("plain launch: SIGKILL of the parent ends child Pi, the active Claude CL
 	let piPid: number | undefined;
 	try {
 		for (const dir of [home, agent, cwd]) mkdirSync(dir);
-		writeFileSync(join(agent, "settings.json"), JSON.stringify({ retry: { enabled: false }, enableInstallTelemetry: false,
+		writeFileSync(join(agent, "settings.json"), JSON.stringify({ retry: { enabled: false },
 			enableAnalytics: false, extensions: [], packages: [], skills: [], prompts: [], themes: [], defaultTools: [] }));
 		const script = join(work, "fake-pix.mjs");
 		writeFileSync(script, HARNESS);
@@ -63,7 +63,7 @@ offline("plain launch: SIGKILL of the parent ends child Pi, the active Claude CL
 			"--no-tools", "--provider", "pi-claude-code-provider", "--model", "sonnet", "--models", "pi-claude-code-provider/sonnet"], {
 			stdio: "ignore",
 			env: { HOME: home, PI_CODING_AGENT_DIR: agent, PI_CODING_AGENT_SESSION_DIR: join(work, "sessions"),
-				PI_CLAUDE_CODE_PROVIDER_PATH: fixture, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0",
+				PI_CLAUDE_CODE_PROVIDER_PATH: fixture, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1",
 				PATH: `${dirname(node)}:/usr/bin:/bin`, TMPDIR: work, LANG: "C", NO_COLOR: "1", T_CWD: cwd },
 		});
 		const ready = Date.now() + 10_000;

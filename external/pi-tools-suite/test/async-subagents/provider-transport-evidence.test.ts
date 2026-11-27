@@ -144,13 +144,13 @@ async function drive(mode: "success" | "error" | "truncated" | "hang", prompt: s
 	for (const dir of [home, agent, cwd]) mkdirSync(dir);
 	writeFileSync(join(home, "fake-exit-code"), "0");
 	writeFileSync(join(home, "fake-mode"), mode);
-	writeFileSync(join(agent, "settings.json"), JSON.stringify({ retry: { enabled: false }, enableInstallTelemetry: false, enableAnalytics: false, extensions: [], packages: [], skills: [], prompts: [], themes: [], defaultTools: [] }));
+	writeFileSync(join(agent, "settings.json"), JSON.stringify({ retry: { enabled: false }, enableAnalytics: false, extensions: [], packages: [], skills: [], prompts: [], themes: [], defaultTools: [] }));
 	const probe = join(work, "probe.mjs");
 	writeFileSync(probe, PROBE);
 	const probeLog = join(work, "probe.jsonl");
 	const node = localNode();
 	const env = { HOME: home, PI_CODING_AGENT_DIR: agent, PI_CODING_AGENT_SESSION_DIR: join(work, "sessions"),
-		PI_CLAUDE_CODE_PROVIDER_PATH: fakeCli, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0",
+		PI_CLAUDE_CODE_PROVIDER_PATH: fakeCli, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1",
 		PATH: `${dirname(node)}:/usr/bin:/bin`, TMPDIR: work, LANG: "C", NO_COLOR: "1", G3_PROBE_LOG: probeLog,
 		...(replace ? { G3_REPLACE: replace } : {}) };
 	const child: ChildProcess = spawn(node, [cli, "--mode", "rpc", "--no-session", "--offline", "--no-approve", "--no-extensions",

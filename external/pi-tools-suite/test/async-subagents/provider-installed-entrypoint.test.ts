@@ -45,13 +45,13 @@ installed("personal Pi loads the vendored local provider entry in an isolated ch
 		const home = join(work, "home"), agent = join(work, "agent"), cwd = join(work, "cwd");
 		for (const dir of [home, agent, cwd]) mkdirSync(dir);
 		writeFileSync(join(home, "fake-exit-code"), "0");
-		writeFileSync(join(agent, "settings.json"), JSON.stringify({ retry: { enabled: false }, enableInstallTelemetry: false,
+		writeFileSync(join(agent, "settings.json"), JSON.stringify({ retry: { enabled: false },
 			enableAnalytics: false, extensions: [], packages: [], skills: [], prompts: [], themes: [] }));
 		const child = spawn(node, [piBin, "--mode", "rpc", "--no-session", "--offline", "--no-approve", "--no-extensions",
 			"--extension", entry, "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files",
 			"--provider", "pi-claude-code-provider", "--model", "sonnet", "--models", "pi-claude-code-provider/sonnet"], {
 			cwd, stdio: ["pipe", "pipe", "pipe"], env: { HOME: home, PI_CODING_AGENT_DIR: agent, PI_CODING_AGENT_SESSION_DIR: join(work, "sessions"),
-				PI_CLAUDE_CODE_PROVIDER_PATH: fakeCli, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0",
+				PI_CLAUDE_CODE_PROVIDER_PATH: fakeCli, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1",
 				PATH: `${dirname(node)}:/usr/bin:/bin`, TMPDIR: work, LANG: "C", NO_COLOR: "1" },
 		});
 		const lines: any[] = [];

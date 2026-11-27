@@ -103,7 +103,7 @@ function start(ctx: Context, options: { id: string; mode: "hold" | "exit0" | "ex
 	const home = join(ctx.work, `home-${id}`), agentConf = join(ctx.work, `agentdir-${id}`), cwd = join(ctx.work, `cwd-${id}`);
 	const bin = join(ctx.work, `bin-${id}`);
 	for (const dir of [home, agentConf, cwd, bin]) mkdirSync(dir, { mode: 0o700 });
-	writeFileSync(join(agentConf, "settings.json"), JSON.stringify({ retry: { enabled: false }, enableInstallTelemetry: false,
+	writeFileSync(join(agentConf, "settings.json"), JSON.stringify({ retry: { enabled: false },
 		enableAnalytics: false, extensions: [], packages: [], skills: [], prompts: [], themes: [], defaultTools: [] }));
 	writeFileSync(join(bin, "pi"), `#!/bin/sh\nprintf 'started\\n' > "$HOME/pi-shim-started"\nexec "${ctx.node}" "${piCli}" "$@"\n`);
 	chmodSync(join(bin, "pi"), 0o755);
@@ -120,7 +120,7 @@ function start(ctx: Context, options: { id: string; mode: "hold" | "exit0" | "ex
 	// fail the bridge closed (bind errno; no supervisor is ever created).
 	const env = { HOME: home, PI_CODING_AGENT_DIR: agentConf, PI_CODING_AGENT_SESSION_DIR: join(ctx.work, `sessions-${id}`),
 		PI_CLAUDE_CODE_PROVIDER_PATH: claude, PI_OFFLINE: "1",
-		PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0", PATH: `${bin}:${dirname(ctx.node)}:/usr/bin:/bin`,
+		PI_SKIP_VERSION_CHECK: "1", PATH: `${bin}:${dirname(ctx.node)}:/usr/bin:/bin`,
 		TMPDIR: tmpdir(), LANG: "C", NO_COLOR: "1" };
 	const events: EventRecord[] = [];
 	const completions: CompletionRecord[] = [];

@@ -400,7 +400,7 @@ describe("project_search registration in Pix Desktop and TUI", () => {
     const lookupPath = fileURLToPath(new URL("../src/project-search/index.ts", import.meta.url));
     const loader = new DefaultResourceLoader({
       cwd: root, agentDir: path.join(root, "agent"),
-      settingsManager: SettingsManager.inMemory({ enableInstallTelemetry: false }),
+      settingsManager: SettingsManager.inMemory(),
       noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true,
       additionalExtensionPaths: [lookupPath],
     });

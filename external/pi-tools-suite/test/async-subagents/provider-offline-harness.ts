@@ -155,11 +155,11 @@ export async function runOffline(source: ProviderSnapshotSource, code: 0 | 7, na
 		const cwd = join(work, "cwd");
 		for (const path of [home, agent, cwd]) mkdirSync(path);
 		writeFileSync(join(home, "fake-exit-code"), String(code));
-		writeFileSync(join(agent, "settings.json"), JSON.stringify({ retry: { enabled: false }, enableInstallTelemetry: false, enableAnalytics: false, extensions: [], packages: [], skills: [], prompts: [], themes: [], defaultTools: [] }));
+		writeFileSync(join(agent, "settings.json"), JSON.stringify({ retry: { enabled: false }, enableAnalytics: false, extensions: [], packages: [], skills: [], prompts: [], themes: [], defaultTools: [] }));
 		// Do not inherit PATH, HOME, auth/config, proxy, project extensions or ambient Pi variables.
 		const node = localNode();
 		const env = { HOME: home, PI_CODING_AGENT_DIR: agent, PI_CODING_AGENT_SESSION_DIR: join(work, "sessions"),
-			PI_CLAUDE_CODE_PROVIDER_PATH: fixture, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0",
+			PI_CLAUDE_CODE_PROVIDER_PATH: fixture, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1",
 			PATH: `${dirname(node)}:/usr/bin:/bin`, TMPDIR: work, LANG: "C", NO_COLOR: "1",
 			...(nativeBinary ? { PI_PROVIDER_TEST_NATIVE_RELAY: nativeBinary } : {}) };
 		child = spawn(node, [cli, "--mode", "rpc", "--no-session", "--offline", "--no-approve", "--no-extensions",

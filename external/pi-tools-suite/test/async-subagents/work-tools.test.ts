@@ -129,7 +129,7 @@ for (const modelId of ["gpt-work-offline", "claude-work-offline"]) test(`actual 
 	const selected = [...selectSubagentToolsForModel(modelId, profileTools), ...SUBAGENT_COMMON_TOOLS];
 	process.env[SUBAGENT_WORK_TOOLS_ENV] = JSON.stringify(config(selected));
 	const agentDir = join(root, "agent");
-	const settingsManager = SettingsManager.inMemory({ enableInstallTelemetry: false });
+	const settingsManager = SettingsManager.inMemory();
 	const loader = new DefaultResourceLoader({ cwd: root, agentDir, settingsManager,
 		noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true,
 		additionalExtensionPaths: ["../../src/model-tools/index.ts", "../../src/todo/subagent.ts", "../../src/dcp/subagent.ts", "../../src/async-subagents/work-tools.ts", "../../src/async-subagents/core/tool-guard.ts"].map((path) => fileURLToPath(new URL(path, import.meta.url))),
