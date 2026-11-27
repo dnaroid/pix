@@ -315,7 +315,8 @@ describe("tool descriptions", () => {
 		expect(promptText).toContain("Delegate independent tracks/hypotheses/review axes");
 		expect(promptText).toContain("repository discovery");
 		expect(promptText).toContain("subagentType: \"ui-qa\"");
-		expect(promptText).toContain("generated `.pi/qa_auth.jsonc` template path");
+		expect(promptText).toContain("identify the generated project-local template and explicitly ask the user to fill it");
+		expect(promptText).toContain("the parent relays that request without reading or editing the credential file");
 		expect(promptText).toContain("clickable screenshot, terminal capture, video, trace");
 		expect(promptText).toContain("mandatory delegation trigger");
 		expect(promptText).toContain("before checking prerequisites");
