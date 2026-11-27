@@ -189,11 +189,13 @@ test("desktop registry diff is workspace-scoped and validates one reusable resou
 		cwd: "/workspace",
 		type: "skill",
 		name: "pdf",
+		mode: "compare",
 	});
-	assert.deepEqual(parseDesktopRegistryDiffRequest({ cwd: "/workspace", type: "agent", name: "reviewer.v2" }), {
+	assert.deepEqual(parseDesktopRegistryDiffRequest({ cwd: "/workspace", type: "agent", name: "reviewer.v2", mode: "merge" }), {
 		cwd: "/workspace",
 		type: "agent",
 		name: "reviewer.v2",
+		mode: "merge",
 	});
 	assert.throws(() => parseDesktopRegistryDiffRequest({ type: "skill", name: "pdf" }));
 	assert.throws(() => parseDesktopRegistryDiffRequest({ cwd: "", type: "skill", name: "pdf" }));

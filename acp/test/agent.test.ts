@@ -4197,7 +4197,7 @@ test("Pix Desktop registry diff calls the direct service and validates file text
 		registryService: {
 			action: async () => { throw new Error("Unexpected action"); },
 			diff: async (request) => {
-				assert.deepEqual(request, { cwd: "/tmp/registry-gui", type: "skill", name: "pdf" });
+				assert.deepEqual(request, { cwd: "/tmp/registry-gui", type: "skill", name: "pdf", mode: "compare" });
 				calls += 1;
 				return { version: 1, type: "skill", name: "pdf", files: calls === 3 ? "not-an-array" as unknown as typeof files : calls === 2 ? [] : files, ...(calls === 2 ? { error: 'Project skill "pdf" does not exist.' } : {}) };
 			},
@@ -4209,7 +4209,10 @@ test("Pix Desktop registry diff calls the direct service and validates file text
 		assert.deepEqual(await cx.request(PIX_REGISTRY_DIFF_METHOD, request), { files });
 		await assert.rejects(cx.request(PIX_REGISTRY_DIFF_METHOD, request), /Project skill "pdf" does not exist\./);
 		await assert.rejects(cx.request(PIX_REGISTRY_DIFF_METHOD, request), /resource registry published an invalid diff payload/);
-		await assert.rejects(cx.request(PIX_REGISTRY_DIFF_METHOD, { ...request, type: "tasks" }), /registry diff request requires cwd, type skill\|agent, and a valid resource name/);
+		await assert.rejects(cx.request(PIX_REGISTRY_DIFF_METHOD, { ...request, type: "tasks" }), {
+			code: -32602,
+			message: /registry diff request requires cwd/,
+		});
 	});
 	assert.equal(harness.adapter.sessionCount, 0);
 	assert.equal(calls, 3);
