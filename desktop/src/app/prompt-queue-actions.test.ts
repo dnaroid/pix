@@ -107,6 +107,39 @@ describe("queued send latest-content intent", () => {
     expect(options.promptRuntime.runPromptRequest).not.toHaveBeenCalled();
     expect(actions.actionRunning).toBe(false);
   });
+
+  it("unlocks other queued messages once the replacement run starts without unlocking a later action", async () => {
+    const { actions, options, client } = setup();
+    const started = pending();
+    const running = pending();
+    const editing = pending();
+    const release = vi.fn();
+    const other = { ...item, id: "queued-2", index: 1 };
+    vi.mocked(options.promptRuntime.holdAutoQueue).mockReturnValue(release);
+    vi.mocked(options.promptRuntime.runPromptRequest).mockImplementation(() => {
+      started.resolve();
+      return running.promise;
+    });
+    const sending = actions.actOnQueuedMessage(item, "send-now");
+    expect(actions.actionRunning).toBe(true);
+    await started.promise;
+    expect(actions.actionRunning).toBe(false);
+    expect(release).not.toHaveBeenCalled();
+    await actions.actOnQueuedMessage({ ...other, id: "queued-3", index: 2 }, "cancel");
+    expect(client.queueAction).toHaveBeenLastCalledWith("session-1", expect.objectContaining({ id: "queued-3" }), "cancel");
+
+    client.queueAction.mockImplementationOnce(async () => { await editing.promise; return { message }; });
+    const edit = actions.actOnQueuedMessage(other, "edit");
+    expect(client.queueAction).toHaveBeenLastCalledWith("session-1", other, "edit");
+    running.resolve();
+    await sending;
+    expect(actions.actionRunning).toBe(true);
+    expect(release).toHaveBeenCalledOnce();
+    editing.resolve();
+    await edit;
+    expect(options.restoreQueuedMessage).toHaveBeenCalledOnce();
+    expect(actions.actionRunning).toBe(false);
+  });
 });
 
 describe("queued send recovery", () => {
@@ -157,6 +190,29 @@ describe("queued send recovery", () => {
     await actions.actOnQueuedMessage(item, "send-now");
     expect(options.restoreQueuedMessage).toHaveBeenCalledWith(message);
     expect(actions.actionRunning).toBe(false);
+  });
+
+  it("does not replace a newer composer draft when a running send and its requeue fail", async () => {
+    const { actions, options, client } = setup();
+    const started = pending();
+    const running = pending();
+    const requeueError = new Error("requeue failed");
+    let generation = 0;
+    options.attachmentGeneration = () => generation;
+    vi.mocked(options.promptRuntime.runPromptRequest).mockImplementation(async () => {
+      started.resolve();
+      await running.promise;
+      throw new Error("send failed");
+    });
+    client.deferMessage.mockRejectedValue(requeueError);
+    const sending = actions.actOnQueuedMessage(item, "send-now");
+    await started.promise;
+    generation++;
+    running.resolve();
+    await sending;
+    expect(client.deferMessage).toHaveBeenCalledOnce();
+    expect(options.restoreQueuedMessage).not.toHaveBeenCalled();
+    expect(options.reportError).toHaveBeenCalledWith(requeueError);
   });
 });
 

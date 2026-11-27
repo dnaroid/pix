@@ -153,13 +153,24 @@ export function createPromptQueueActions(options: PromptQueueActionsOptions) {
     const sessionId = options.activeSessionId();
     if (!requestClient || !sessionId || actionRunning) return;
     actionRunning = true;
-    options.setErrorMessage(null);
-    const releaseAutoQueue = action === "send-now" ? options.promptRuntime.holdAutoQueue(sessionId) : undefined;
+    let ownsActionLock = true;
+    function releaseActionLock(): void {
+      if (!ownsActionLock) return;
+      ownsActionLock = false;
+      actionRunning = false;
+    }
+    const draftKey = options.attachmentDraftKey();
+    const draftGeneration = options.attachmentGeneration();
+    const draftText = options.promptText();
+    const isCurrentSession = () => requestClient === options.client() && sessionId === options.activeSessionId();
+    let releaseAutoQueue: (() => void) | undefined;
     let unsentMessage: QueuedUserMessage | undefined;
     try {
+      options.setErrorMessage(null);
+      if (action === "send-now") releaseAutoQueue = options.promptRuntime.holdAutoQueue(sessionId);
       const result = await requestClient.queueAction(sessionId, item, action);
       if (action === "send-now") unsentMessage = result.message;
-      if (requestClient !== options.client() || sessionId !== options.activeSessionId()) return;
+      if (!isCurrentSession()) return;
       if (action === "edit") {
         if (!result.message) throw new Error("Queued message is no longer available.");
         options.restoreQueuedMessage(result.message);
@@ -170,34 +181,38 @@ export function createPromptQueueActions(options: PromptQueueActionsOptions) {
       if (!result.message) throw new Error("Queued message is no longer available.");
 
       await options.promptRuntime.promptRun(sessionId)?.catch(() => undefined);
-      if (requestClient !== options.client() || sessionId !== options.activeSessionId()) return;
+      if (!isCurrentSession()) return;
       const transcriptMessageId = options.appendQueuedMessage(sessionId, result.message);
       await options.scrollToLatest();
-      if (requestClient !== options.client() || sessionId !== options.activeSessionId()) return;
-      await options.promptRuntime.runPromptRequest(
+      if (!isCurrentSession()) return;
+      const run = options.promptRuntime.runPromptRequest(
         requestClient,
         sessionId,
         queuedMessageBlocks(result.message),
         [],
         transcriptMessageId,
       );
+      // The runtime now owns the prompt. Keep auto-dispatch suppressed, not the queue controls.
+      releaseActionLock();
+      await run;
       unsentMessage = undefined;
       void options.refreshSessions();
     } catch (error) {
-      if (requestClient === options.client() && sessionId === options.activeSessionId()) options.reportError(error);
+      if (isCurrentSession()) options.reportError(error);
     } finally {
       if (unsentMessage) {
         try {
           await requestClient.deferMessage(sessionId, queuedMessageBlocks(unsentMessage), unsentMessage.displayText);
         } catch (error) {
-          if (requestClient === options.client() && sessionId === options.activeSessionId()) {
-            options.restoreQueuedMessage(unsentMessage);
+          if (isCurrentSession()) {
+            if (draftKey === options.attachmentDraftKey() && draftGeneration === options.attachmentGeneration()
+              && draftText === options.promptText()) options.restoreQueuedMessage(unsentMessage);
             options.reportError(error);
           }
         }
       }
       releaseAutoQueue?.();
-      actionRunning = false;
+      releaseActionLock();
     }
   }
 
